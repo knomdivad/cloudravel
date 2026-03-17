@@ -1,0 +1,115 @@
+name: AIM — Build & Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  NODE_VERSION: '20.x'
+  BACKEND_PATH: src/backend
+  FRONTEND_PATH: src/frontend
+
+jobs:
+  # ============================================================================
+  # Backend Build & Test
+  # ============================================================================
+  backend:
+    name: Backend (.NET 8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore AzureInventoryMonitor.sln
+
+      - name: Build
+        run: dotnet build AzureInventoryMonitor.sln --configuration Release --no-restore
+
+      - name: Publish API
+        run: dotnet publish ${{ env.BACKEND_PATH }}/AzureInventoryMonitor.Api/AzureInventoryMonitor.Api.csproj --configuration Release --output ./publish/api --no-build
+
+      - name: Upload API artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-package
+          path: ./publish/api
+          include-hidden-files: true
+          retention-days: 7
+
+  # ============================================================================
+  # Frontend Build
+  # ============================================================================
+  frontend:
+    name: Frontend (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm ci
+
+      - name: Lint
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm run lint || true
+
+      - name: Build
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.API_BASE_URL || 'https://func-aim-dev.azurewebsites.net/api' }}
+          NEXT_PUBLIC_AZURE_AD_CLIENT_ID: ${{ vars.AZURE_AD_CLIENT_ID }}
+          NEXT_PUBLIC_AZURE_AD_TENANT_ID: ${{ vars.AZURE_AD_TENANT_ID }}
+          NEXT_PUBLIC_API_SCOPE: api://aim-api/access_as_user
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-package
+          path: ${{ env.FRONTEND_PATH }}/out
+          retention-days: 7
+
+  # ============================================================================
+  # Terraform Validation
+  # ============================================================================
+  infra-validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '~> 1.9'
+
+      - name: Terraform Format Check
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive -diff
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        working-directory: infra/terraform
+        run: terraform validate

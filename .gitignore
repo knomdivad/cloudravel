@@ -1,0 +1,30 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.vs/
+publish/
+deploy.zip
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.env.local
+
+# Azure Functions
+local.settings.json
+
+# IDE
+.idea/
+*.swp
+*.sln.docstates
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Secrets
+*.pfx
+*.key

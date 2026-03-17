@@ -1,0 +1,22 @@
+# ============================================================================
+# Example variable values — copy to terraform.tfvars and customise
+# ============================================================================
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+environment     = "dev"
+location        = "eastus2"
+base_name       = "aim"
+
+sql_admin_username      = "aimadmin"
+sql_admin_password      = "CHANGE_ME_use_strong_password"
+
+# AI model is auto-provisioned via AI Foundry; override model ID or region if needed:
+# ai_model_id = "azureml://registries/azureml/models/Phi-4"
+# ai_location = "eastus2"  # Must be a region that supports Anthropic models
+
+alert_email = "ops@example.com"
+
+tags = {
+  team  = "platform-engineering"
+  cost_center = "12345"
+}

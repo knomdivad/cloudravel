@@ -1,0 +1,307 @@
+import { InteractionRequiredAuthError } from '@azure/msal-browser';
+import { apiScopes } from './auth';
+import { msalInstance } from './msalInstance';
+import type {
+  TenantSummary,
+  TenantDashboard,
+  InventoryResponse,
+  InventoryResource,
+  ResourceTypeSummary,
+  ChangesResponse,
+  ChangeTimelineBucket,
+  Recommendation,
+  AiQueryRequest,
+  AiQueryResponse,
+  ApiError,
+} from './types';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/api';
+
+/**
+ * Acquires a fresh access token for API calls.
+ * Uses silent token acquisition (cached token) first, falls back to interactive.
+ */
+async function getAccessToken(): Promise<string> {
+  const accounts = msalInstance.getAllAccounts();
+
+  if (accounts.length === 0) {
+    throw new Error('No authenticated user. Please sign in.');
+  }
+
+  try {
+    const response = await msalInstance.acquireTokenSilent({
+      scopes: apiScopes.default,
+      account: accounts[0],
+    });
+    return response.accessToken;
+  } catch (error) {
+    if (error instanceof InteractionRequiredAuthError) {
+      const response = await msalInstance.acquireTokenPopup({
+        scopes: apiScopes.default,
+      });
+      return response.accessToken;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Makes an authenticated API call with tenant context.
+ * Every request includes:
+ *   - Authorization header (JWT from Entra ID)
+ *   - X-Tenant-Id header (current tenant selection)
+ */
+async function apiCall<T>(
+  path: string,
+  tenantId: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const token = await getAccessToken();
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-Tenant-Id': tenantId,
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const error: ApiError = await response.json().catch(() => ({
+      code: 'UNKNOWN',
+      message: `API error: ${response.status} ${response.statusText}`,
+    }));
+    throw new Error(error.message);
+  }
+
+  return response.json();
+}
+
+// ============================================================================
+// Tenant API
+// ============================================================================
+
+export async function getTenants(): Promise<TenantSummary[]> {
+  const token = await getAccessToken();
+  const response = await fetch(`${API_BASE}/tenants`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Tenant-Id': '00000000-0000-0000-0000-000000000000',
+    },
+  });
+  const data = await response.json();
+  return data.tenants ?? data.Tenants;
+}
+
+// ============================================================================
+// Inventory API
+// ============================================================================
+
+export async function getInventoryResources(
+  tenantId: string,
+  params?: {
+    resourceType?: string;
+    subscriptionId?: string;
+    resourceGroup?: string;
+    offset?: number;
+    limit?: number;
+  }
+): Promise<InventoryResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.resourceType) searchParams.set('resourceType', params.resourceType);
+  if (params?.subscriptionId) searchParams.set('subscriptionId', params.subscriptionId);
+  if (params?.resourceGroup) searchParams.set('resourceGroup', params.resourceGroup);
+  if (params?.offset) searchParams.set('offset', params.offset.toString());
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+
+  const query = searchParams.toString();
+  return apiCall<InventoryResponse>(`/inventory/resources${query ? `?${query}` : ''}`, tenantId);
+}
+
+export async function getResourceDetail(
+  tenantId: string,
+  resourceId: string
+): Promise<InventoryResource> {
+  return apiCall<InventoryResource>(`/inventory/resource/${resourceId}`, tenantId);
+}
+
+export async function getInventorySummary(
+  tenantId: string
+): Promise<{ totalResources: number; resourceTypes: ResourceTypeSummary[] }> {
+  return apiCall(`/inventory/summary`, tenantId);
+}
+
+export async function triggerSnapshot(tenantId: string): Promise<{ snapshotId: number }> {
+  return apiCall('/inventory/snapshots/trigger', tenantId, { method: 'POST' });
+}
+
+// ============================================================================
+// Changes API
+// ============================================================================
+
+export async function getChanges(
+  tenantId: string,
+  params?: {
+    from?: string;
+    to?: string;
+    resourceId?: string;
+    classification?: string;
+    offset?: number;
+    limit?: number;
+  }
+): Promise<ChangesResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.from) searchParams.set('from', params.from);
+  if (params?.to) searchParams.set('to', params.to);
+  if (params?.resourceId) searchParams.set('resourceId', params.resourceId);
+  if (params?.classification) searchParams.set('classification', params.classification);
+  if (params?.offset) searchParams.set('offset', params.offset.toString());
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+
+  const query = searchParams.toString();
+  return apiCall<ChangesResponse>(`/changes${query ? `?${query}` : ''}`, tenantId);
+}
+
+export async function getChangeTimeline(
+  tenantId: string,
+  from: string,
+  to: string
+): Promise<{ buckets: ChangeTimelineBucket[] }> {
+  return apiCall(`/changes/timeline?from=${from}&to=${to}`, tenantId);
+}
+
+// ============================================================================
+// Recommendations API
+// ============================================================================
+
+export async function getAdvisorRecommendations(
+  tenantId: string,
+  params?: { category?: string; status?: string; limit?: number }
+): Promise<{ recommendations: Recommendation[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.category) searchParams.set('category', params.category);
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+
+  const query = searchParams.toString();
+  return apiCall(`/recommendations/advisor${query ? `?${query}` : ''}`, tenantId);
+}
+
+export async function getDefenderFindings(
+  tenantId: string,
+  params?: { severity?: string; status?: string; limit?: number }
+): Promise<{ findings: Recommendation[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.severity) searchParams.set('severity', params.severity);
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+
+  const query = searchParams.toString();
+  return apiCall(`/recommendations/defender${query ? `?${query}` : ''}`, tenantId);
+}
+
+export async function getPolicyCompliance(
+  tenantId: string,
+  params?: { state?: string; limit?: number }
+): Promise<{ records: any[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.state) searchParams.set('state', params.state);
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+
+  const query = searchParams.toString();
+  return apiCall(`/recommendations/policy${query ? `?${query}` : ''}`, tenantId);
+}
+
+// ============================================================================
+// AI API
+// ============================================================================
+
+export async function queryAi(tenantId: string, request: AiQueryRequest): Promise<AiQueryResponse> {
+  return apiCall<AiQueryResponse>('/ai/query', tenantId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// ============================================================================
+// Tenant Management API
+// ============================================================================
+
+export async function onboardTenant(request: {
+  displayName: string;
+  azureTenantId: string;
+  onboardingMethod: string;
+  clientId?: string;
+  clientSecret?: string;
+  lighthouseDelegationId?: string;
+  subscriptionIds?: string[];
+}): Promise<{ tenantId: string }> {
+  const token = await getAccessToken();
+  const response = await fetch(`${API_BASE}/tenants`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-Tenant-Id': '00000000-0000-0000-0000-000000000000',
+    },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
+    throw new Error(error.message || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function updateTenantStatus(
+  tenantId: string,
+  status: string
+): Promise<void> {
+  const token = await getAccessToken();
+  const response = await fetch(`${API_BASE}/tenants/${tenantId}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-Tenant-Id': tenantId,
+    },
+    body: JSON.stringify({ status }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Failed to update tenant status' }));
+    throw new Error(error.message);
+  }
+}
+
+// ============================================================================
+// Dashboard API
+// ============================================================================
+
+export async function getDashboard(
+  tenantId: string
+): Promise<TenantDashboard> {
+  return apiCall<TenantDashboard>('/dashboard', tenantId);
+}
+
+// ============================================================================
+// Namespace export for convenient usage: import { api } from '@/lib/api'
+// ============================================================================
+
+export const api = {
+  getTenants,
+  onboardTenant,
+  updateTenantStatus,
+  getInventoryResources,
+  getResourceDetail,
+  getInventorySummary,
+  triggerSnapshot,
+  getChanges,
+  getChangeTimeline,
+  getAdvisorRecommendations,
+  getDefenderFindings,
+  getPolicyCompliance,
+  queryAi,
+  getDashboard,
+};

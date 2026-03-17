@@ -1,0 +1,6 @@
+{
+  "chat.tools.terminal.autoApprove": {
+    "npm run build": true,
+    "npx @azure/static-web-apps-cli": true
+  }
+}

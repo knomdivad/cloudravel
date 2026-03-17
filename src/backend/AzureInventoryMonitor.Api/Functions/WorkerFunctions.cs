@@ -1,0 +1,248 @@
+using AzureInventoryMonitor.Core.Interfaces;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Logging;
+
+namespace AzureInventoryMonitor.Api.Functions;
+
+/// <summary>
+/// Timer and Service Bus-triggered background workers.
+/// These functions execute the scheduled data collection pipelines.
+/// </summary>
+public sealed class WorkerFunctions
+{
+    private readonly IChangePollingService _changePolling;
+    private readonly IRecommendationSyncService _recSync;
+    private readonly IAriIngestionService _ariIngestion;
+    private readonly IInventoryCollectionService _inventoryCollection;
+    private readonly ITenantRepository _tenantRepo;
+    private readonly ILogger<WorkerFunctions> _logger;
+
+    public WorkerFunctions(
+        IChangePollingService changePolling,
+        IRecommendationSyncService recSync,
+        IAriIngestionService ariIngestion,
+        IInventoryCollectionService inventoryCollection,
+        ITenantRepository tenantRepo,
+        ILogger<WorkerFunctions> logger)
+    {
+        _changePolling = changePolling;
+        _recSync = recSync;
+        _ariIngestion = ariIngestion;
+        _inventoryCollection = inventoryCollection;
+        _tenantRepo = tenantRepo;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Polls Azure Resource Graph Change History every 15 minutes.
+    /// Iterates over all active tenants and collects recent changes.
+    /// 
+    /// Why 15 minutes? 
+    ///   - Resource Graph Change History has near-real-time indexing (~5 min lag)
+    ///   - 15-min polls with 20-min lookback windows provide overlap for missed events
+    ///   - More frequent polling hits throttling limits
+    /// </summary>
+    [Function("PollChangesTimer")]
+    public async Task PollChanges([TimerTrigger("0 */15 * * * *")] TimerInfo timer)
+    {
+        _logger.LogInformation("Change polling timer fired at {Time}", DateTime.UtcNow);
+
+        var tenants = await _tenantRepo.GetAllActiveAsync();
+        var tasks = new List<Task>();
+
+        foreach (var tenant in tenants)
+        {
+            tasks.Add(PollTenantChangesAsync(tenant.TenantId));
+        }
+
+        // Process tenants in parallel (bounded by Function host concurrency)
+        await Task.WhenAll(tasks);
+
+        _logger.LogInformation("Change polling completed for {Count} tenants", tenants.Count);
+    }
+
+    private async Task PollTenantChangesAsync(Guid tenantId)
+    {
+        try
+        {
+            await _changePolling.PollChangesAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            // Don't fail the entire batch if one tenant fails
+            _logger.LogError(ex, "Change polling failed for tenant {TenantId}", tenantId);
+        }
+    }
+
+    /// <summary>
+    /// Syncs Azure Advisor recommendations every hour at :00.
+    /// Split into a separate timer so it gets its own 10-minute Consumption plan budget.
+    /// </summary>
+    [Function("SyncAdvisorTimer")]
+    public async Task SyncAdvisor([TimerTrigger("0 0 * * * *")] TimerInfo timer)
+    {
+        _logger.LogInformation("Advisor sync timer fired at {Time}", DateTime.UtcNow);
+        var tenants = await _tenantRepo.GetAllActiveAsync();
+
+        foreach (var tenant in tenants)
+        {
+            try
+            {
+                await _recSync.SyncAdvisorAsync(tenant.TenantId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Advisor sync failed for tenant {TenantId}", tenant.TenantId);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    /// <summary>
+    /// Syncs Azure Policy compliance every hour at :05.
+    /// </summary>
+    [Function("SyncPolicyTimer")]
+    public async Task SyncPolicy([TimerTrigger("0 5 * * * *")] TimerInfo timer)
+    {
+        _logger.LogInformation("Policy sync timer fired at {Time}", DateTime.UtcNow);
+        var tenants = await _tenantRepo.GetAllActiveAsync();
+
+        foreach (var tenant in tenants)
+        {
+            try
+            {
+                await _recSync.SyncPolicyComplianceAsync(tenant.TenantId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Policy sync failed for tenant {TenantId}", tenant.TenantId);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    /// <summary>
+    /// Syncs Microsoft Defender for Cloud findings every hour at :10.
+    /// </summary>
+    [Function("SyncDefenderTimer")]
+    public async Task SyncDefender([TimerTrigger("0 10 * * * *")] TimerInfo timer)
+    {
+        _logger.LogInformation("Defender sync timer fired at {Time}", DateTime.UtcNow);
+        var tenants = await _tenantRepo.GetAllActiveAsync();
+
+        foreach (var tenant in tenants)
+        {
+            try
+            {
+                await _recSync.SyncDefenderFindingsAsync(tenant.TenantId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Defender sync failed for tenant {TenantId}", tenant.TenantId);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    /// <summary>
+    /// Collects a full inventory snapshot from Azure Resource Graph daily at 2 AM UTC.
+    /// Iterates over all active tenants sequentially to avoid API throttling.
+    /// </summary>
+    [Function("CollectInventoryTimer")]
+    public async Task CollectInventory([TimerTrigger("0 0 2 * * *")] TimerInfo timer)
+    {
+        _logger.LogInformation("Daily inventory collection timer fired at {Time}", DateTime.UtcNow);
+
+        var tenants = await _tenantRepo.GetAllActiveAsync();
+
+        foreach (var tenant in tenants)
+        {
+            try
+            {
+                _logger.LogInformation("Collecting inventory for tenant {TenantId} ({Name})",
+                    tenant.TenantId, tenant.DisplayName);
+
+                var (snapshotId, resourceCount) = await _inventoryCollection.CollectInventoryAsync(tenant.TenantId, "schedule");
+
+                _logger.LogInformation("Inventory collection completed for tenant {TenantId}: snapshot {SnapshotId} with {Count} resources",
+                    tenant.TenantId, snapshotId, resourceCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Inventory collection failed for tenant {TenantId}", tenant.TenantId);
+            }
+
+            // Delay between tenants to spread Azure API load
+            await Task.Delay(TimeSpan.FromSeconds(10));
+        }
+
+        _logger.LogInformation("Daily inventory collection completed for {Count} tenants", tenants.Count);
+    }
+
+    /// <summary>
+    /// Processes snapshot-ready messages from Service Bus.
+    /// Triggered when ARI runbook completes and uploads output to Blob Storage.
+    /// </summary>
+    [Function("SnapshotIngestionWorker")]
+    public async Task ProcessSnapshot(
+        [ServiceBusTrigger("snapshot-ingestion", Connection = "ServiceBusConnection")] SnapshotMessage message)
+    {
+        _logger.LogInformation("Received snapshot message: type={Type}, tenant={TenantId}, blob={BlobPath}",
+            message.Type, message.TenantId, message.BlobPath);
+
+        if (message.Type == "snapshot-failed")
+        {
+            _logger.LogError("Snapshot failed for tenant {TenantId}: {Error}", message.TenantId, message.Error);
+            // Update snapshot record as failed
+            return;
+        }
+
+        if (message.Type != "snapshot-ready")
+        {
+            _logger.LogWarning("Unknown message type: {Type}", message.Type);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(message.BlobPath))
+        {
+            _logger.LogError("Snapshot-ready message for tenant {TenantId} missing BlobPath", message.TenantId);
+            return;
+        }
+
+        if (!Guid.TryParse(message.TenantId, out var tenantId))
+        {
+            _logger.LogError("Invalid tenant ID in snapshot message: {TenantId}", message.TenantId);
+            return;
+        }
+
+        try
+        {
+            var snapshotId = await _ariIngestion.IngestSnapshotAsync(tenantId, message.BlobPath, "schedule");
+            _logger.LogInformation("Snapshot ingestion completed: {SnapshotId} for tenant {TenantId}",
+                snapshotId, tenantId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Snapshot ingestion failed for tenant {TenantId} from {BlobPath}",
+                message.TenantId, message.BlobPath);
+            throw; // Let Service Bus handle retry
+        }
+    }
+}
+
+/// <summary>
+/// Service Bus message schema for snapshot events.
+/// </summary>
+public sealed class SnapshotMessage
+{
+    public string Type { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
+    public string? AzureTenantId { get; set; }
+    public string? BlobPath { get; set; }
+    public string? Timestamp { get; set; }
+    public List<string>? ResourceFiles { get; set; }
+    public string? Error { get; set; }
+}
