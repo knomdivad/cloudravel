@@ -295,6 +295,9 @@ resource "azurerm_linux_function_app" "main" {
     "BlobStorageUrl"                                = azurerm_storage_account.main.primary_blob_endpoint
     "AiFoundry__Endpoint"                           = local.ai_inference_uri
     "AiFoundry__ApiKey"                             = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AiFoundryApiKey)"
+    "AzureOpenAI__Endpoint"                         = azurerm_cognitive_account.openai.endpoint
+    "AzureOpenAI__ApiKey"                           = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AzureOpenAiApiKey)"
+    "AzureOpenAI__DeploymentName"                   = azurerm_cognitive_deployment.gpt.name
     "AzureAd__TenantId"                             = data.azurerm_client_config.current.tenant_id
     "AzureAd__ClientId"                             = azuread_application.api.client_id
   }
@@ -450,6 +453,62 @@ removed {
   lifecycle {
     destroy = false
   }
+}
+
+# ============================================================================
+# Azure OpenAI — GPT-5.5 (AIOps assistant + AI query endpoint)
+# The latest OpenAI model generally available on Azure OpenAI. Powers
+# /api/ai/query tool calling and remediation proposals.
+# ============================================================================
+
+resource "azurerm_cognitive_account" "openai" {
+  name                          = "oai-${local.suffix}"
+  location                      = var.ai_location
+  resource_group_name           = azurerm_resource_group.main.name
+  kind                          = "OpenAI"
+  sku_name                      = "S0"
+  custom_subdomain_name         = "oai-${local.unique_suffix}"
+  public_network_access_enabled = local.is_production ? false : true
+  tags                          = local.default_tags
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+resource "azurerm_cognitive_deployment" "gpt" {
+  name                 = var.openai_model_name
+  cognitive_account_id = azurerm_cognitive_account.openai.id
+
+  model {
+    format = "OpenAI"
+    name   = var.openai_model_name
+    # Empty version → service default (current version of the model)
+    version = var.openai_model_version != "" ? var.openai_model_version : null
+  }
+
+  sku {
+    name     = var.openai_deployment_sku
+    capacity = var.openai_capacity
+  }
+}
+
+# Store the Azure OpenAI key in Key Vault (same PUT-semantics pattern as above)
+resource "terraform_data" "azure_openai_api_key" {
+  triggers_replace = [
+    azurerm_cognitive_account.openai.primary_access_key,
+    azurerm_key_vault.main.name,
+  ]
+
+  provisioner "local-exec" {
+    command     = "az keyvault secret set --vault-name \"${azurerm_key_vault.main.name}\" --name AzureOpenAiApiKey --value \"$SECRET_VALUE\" --content-type \"application/x-api-key\" --output none"
+    interpreter = ["bash", "-c"]
+    environment = {
+      SECRET_VALUE = azurerm_cognitive_account.openai.primary_access_key
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.deployer_kv]
 }
 
 # ============================================================================

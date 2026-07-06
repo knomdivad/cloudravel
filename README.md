@@ -1,12 +1,29 @@
-# Azure Inventory Monitor — Multi-Tenant CSP/MSP Platform
+# Azure Inventory Monitor — Multi-Cloud AIOps Operating Platform
 
 ## Executive Summary
 
-Azure Inventory Monitor (AIM) is a production-ready, multi-tenant monitoring and recommendation
-platform designed for Cloud Solution Providers (CSP), Managed Service Providers (MSP), and
-Managed Security Service Providers (MSSP). It provides authoritative inventory baselines,
-change intelligence, security posture tracking, and AI-assisted prioritization across
-multiple Azure customer tenants — all from a single control plane.
+Azure Inventory Monitor (AIM) is a production-ready, multi-tenant **AIOps operating platform**
+for enterprise cloud estates spanning **Azure, AWS, and GCP**. It provides authoritative
+inventory baselines, change intelligence, security posture tracking, **proactive anomaly
+detection, incident management, and gated auto-remediation** — the day-to-day operational
+work an enterprise would otherwise outsource to a Managed Service Provider, run from a
+single control plane and driven by an AI operations engineer (GPT-5.5 on Azure OpenAI).
+
+### What "MSP replacement" means here
+
+| MSP function | Platform capability |
+|---|---|
+| 24/7 monitoring | Baseline-driven anomaly detectors run every 15 minutes across all tenants |
+| Ticketing / incident queue | Auto-created incidents with severity-based SLA clocks and full timelines |
+| Runbook execution | Allow-listed remediation playbooks (Azure/AWS/GCP) behind a human approval gate |
+| Change review | Change classification, drift detection, first-seen-actor alerting |
+| Cost management | Advisor-driven waste detection, right-sizing proposals, cost anomaly alerts |
+| Security operations | Defender/Policy regression detection with auto-proposed reversions |
+| Monthly reporting | Live operations dashboard: MTTR, SLA breaches, remediation history |
+
+Remediation is **gated by default**: the platform (and its AI) can only *propose* actions
+from the playbook catalog; a human approves or rejects each one. Tenants can opt into
+auto-approval for low-risk playbooks — high-risk actions always require a human.
 
 ### Core Design Principles
 
@@ -20,6 +37,13 @@ multiple Azure customer tenants — all from a single control plane.
 
 3. **Multi-Tenant Zero Trust** — One control-plane tenant (MSP), many customer tenants. Data
    is logically and cryptographically isolated. No cross-tenant data leakage.
+
+4. **Propose, Never Surprise** — Every automated action maps to an allow-listed playbook and
+   passes through the approval gate. There is no free-form execution path, the AI cannot act
+   directly, and every transition (proposed → approved → executed) is persisted for audit.
+
+5. **Multi-Cloud, One Model** — AWS accounts and GCP projects normalize into the same
+   inventory, anomaly, and remediation model as Azure. Credentials live only in Key Vault.
 
 ## Architecture Overview
 
@@ -60,12 +84,14 @@ multiple Azure customer tenants — all from a single control plane.
 | Component | Responsibility |
 |---|---|
 | **Next.js Frontend** | SPA with Entra ID auth, tenant switcher, inventory explorer, change timeline, dashboards |
-| **Azure Functions Backend** | REST API for inventory, changes, recommendations, AI queries, tenant management |
+| **Azure Functions Backend** | REST API for inventory, changes, recommendations, AI queries, anomalies, incidents, remediation approvals, cloud accounts |
+| **AIOps Engine** | Timer-driven anomaly detectors (change velocity, security regression, config drift, unusual actors, sprawl, cost, stale telemetry) + gated remediation executor |
+| **Multi-Cloud Adapters** | AWS (SigV4 REST) + GCP (service-account JWT REST) inventory collection and playbook execution; Azure via ARM |
 | **Azure SQL** | Tenant-isolated relational store with Row-Level Security (14 tables) |
 | **Blob Storage** | Raw ARI snapshot files (normalized JSON) per tenant |
 | **Azure Automation** | Scheduled ARI runs against each customer tenant |
 | **Service Bus** | Async job processing (snapshot ingestion, change polling, recommendation sync) |
-| **Azure OpenAI** | AI summarization and prioritization (9 tools, function-calling only) |
+| **Azure OpenAI** | GPT-5.5 (latest OpenAI model on Azure OpenAI) — 16 tools, function-calling only, persona modes (analyst / operations / security / cost) |
 | **Key Vault** | Per-tenant credentials, connection strings |
 | **VNet + Private Endpoints** | Network isolation for SQL, Storage, Service Bus, Key Vault, OpenAI |
 
@@ -109,6 +135,8 @@ npm run dev
 # Apply the schema to a local or Azure SQL instance
 cd database
 sqlcmd -S localhost -d aimdb -i 001-schema.sql
+sqlcmd -S localhost -d aimdb -i 002-fix-rls-bypass.sql
+sqlcmd -S localhost -d aimdb -i 003-aiops-multicloud.sql
 ```
 
 ### Local Configuration
@@ -121,8 +149,9 @@ Copy `src/backend/AzureInventoryMonitor.Api/local.settings.json` and set:
 | `ServiceBusConnection__fullyQualifiedNamespace` | Service Bus FQDN |
 | `Storage__ConnectionString` | Blob Storage connection string |
 | `KeyVaultUrl` | Key Vault URI |
-| `AzureOpenAiEndpoint` | OpenAI endpoint URL |
-| `AzureOpenAiDeployment` | Model deployment name (e.g. `gpt-4o`) |
+| `AzureOpenAI__Endpoint` | Azure OpenAI endpoint URL |
+| `AzureOpenAI__ApiKey` | Azure OpenAI API key (Key Vault reference in production) |
+| `AzureOpenAI__DeploymentName` | Model deployment name (default: `gpt-5.5`) |
 | `AzureAd__TenantId` | Entra ID tenant for auth |
 | `AzureAd__ClientId` | Entra ID app registration client ID |
 
@@ -246,11 +275,29 @@ Copy `src/backend/AzureInventoryMonitor.Api/local.settings.json` and set:
 | `GET` | `/api/recommendations/defender` | Defender for Cloud findings |
 | `PATCH` | `/api/recommendations/{id}/lifecycle` | Dismiss/snooze/reactivate a recommendation |
 
+### AIOps — Anomalies, Incidents, Remediation
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/operations/summary` | Live ops dashboard payload (anomalies, incidents, SLA, approvals, MTTR) |
+| `GET` | `/api/anomalies` | Anomaly queue (filter by status/severity/kind) |
+| `PATCH` | `/api/anomalies/{id}/status` | Acknowledge / resolve / suppress / mark false positive |
+| `GET` | `/api/incidents` | Incident queue with SLA state |
+| `GET` | `/api/incidents/{id}` | Incident detail with full event timeline |
+| `PATCH` | `/api/incidents/{id}` | Status transitions, notes |
+| `GET` | `/api/remediations` | Remediation actions (`?status=PendingApproval` = approval queue) |
+| `POST` | `/api/remediations` | Manually propose a playbook action |
+| `POST` | `/api/remediations/{id}/approve` | Approve a gated action (executes immediately) |
+| `POST` | `/api/remediations/{id}/reject` | Reject a gated action |
+| `GET` | `/api/remediations/playbooks` | Allow-listed playbook catalog (Azure/AWS/GCP) |
+| `GET` | `/api/cloud-accounts` | Linked AWS accounts / GCP projects |
+| `POST` | `/api/cloud-accounts` | Link an AWS account or GCP project (credentials → Key Vault) |
+
 ### AI
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/ai/query` | Natural language query with tool-calling (9 tools) |
+| `POST` | `/api/ai/query` | Natural language query with tool-calling (16 tools). Optional `mode`: `analyst` \| `operations` \| `security` \| `cost`. The `operations` persona can propose gated remediations via `propose_remediation` — it never executes directly. |
 
 ### Health
 
@@ -322,7 +369,7 @@ terraform apply tfplan
 | Service Bus | Standard | Standard |
 | Azure SQL | S3 | S1 |
 | Function App Plan | EP1 (Elastic Premium) | Y1 (Consumption) |
-| Azure OpenAI | S0 | S0 |
+| Azure OpenAI (GPT-5.5, GlobalStandard) | S0 | S0 |
 | Automation Account | Basic | Basic |
 | Static Web App | Standard | Free |
 | VNet + 5 Private Endpoints | ✓ | ✓ |
@@ -332,15 +379,17 @@ terraform apply tfplan
 
 ## Database Schema
 
-14 tables across 5 domains:
+21 tables across 7 domains:
 
 | Domain | Tables |
 |---|---|
 | **Tenants** | `tenants`, `tenant_subscriptions` |
 | **Users** | `users`, `user_tenant_access` |
-| **Inventory** | `inventory_snapshots`, `inventory_resources`, `latest_snapshots` |
+| **Inventory** | `inventory_snapshots`, `inventory_resources` (multi-cloud `provider` column), `latest_snapshots` |
 | **Changes** | `resource_changes`, `activity_log_events` |
 | **Recommendations** | `advisor_recommendations`, `policy_compliance`, `defender_findings` |
+| **AIOps** | `anomalies`, `metric_baselines`, `incidents`, `incident_events`, `remediation_playbooks`, `remediation_actions` |
+| **Multi-Cloud** | `cloud_accounts` |
 | **Platform** | `ai_query_log`, `audit_events` |
 
 Key features:
@@ -379,7 +428,7 @@ Key features:
 | Charts | Recharts |
 | IaC | Terraform (azurerm ~> 4.0) |
 | CI/CD | GitHub Actions |
-| AI | Azure OpenAI (GPT-4o) with function calling |
+| AI | Azure OpenAI — GPT-5.5 (latest OpenAI model on Azure) with function calling |
 
 ---
 

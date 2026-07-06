@@ -107,12 +107,77 @@ public static class AiToolDefinitions
             new()
             {
                 Name = "search_resources",
-                Description = "Search for resources by name, type, tag, or location across the current inventory snapshot. Use this when the user asks about specific resources by name or characteristic.",
+                Description = "Search for resources by name, type, tag, or location across the current inventory snapshot (all clouds: Azure, AWS, GCP). Use this when the user asks about specific resources by name or characteristic.",
                 Parameters = new Dictionary<string, AiToolParameter>
                 {
                     ["query"] = new() { Type = "string", Description = "Search term to match against resource name, type, tags, or resource group", Required = true },
                     ["limit"] = new() { Type = "integer", Description = "Maximum results (default: 20, max: 100)", Required = false }
                 }
+            },
+            new()
+            {
+                Name = "get_operations_summary",
+                Description = "Get the tenant's live operational picture: open anomaly counts, open incidents (with SLA state), pending remediation approvals, recent auto-remediations, MTTR, and linked cloud accounts. Use this as the starting point for any operations/AIOps question.",
+                Parameters = new Dictionary<string, AiToolParameter>()
+            },
+            new()
+            {
+                Name = "get_anomalies",
+                Description = "Retrieve anomalies detected by the proactive monitoring engine (change velocity spikes, security posture regressions, configuration drift, unusual actors, resource sprawl, cost anomalies, stale telemetry). Each anomaly includes the observed value, baseline, and z-score so you can judge significance.",
+                Parameters = new Dictionary<string, AiToolParameter>
+                {
+                    ["status"] = new() { Type = "string", Description = "Optional: filter by status (Open, Acknowledged, Resolved, Suppressed, FalsePositive). Default: Open", Required = false },
+                    ["severity"] = new() { Type = "string", Description = "Optional: filter by severity (Critical, High, Medium, Low, Info)", Required = false },
+                    ["limit"] = new() { Type = "integer", Description = "Maximum anomalies to return (default: 50, max: 200)", Required = false }
+                }
+            },
+            new()
+            {
+                Name = "get_incidents",
+                Description = "Retrieve operational incidents (auto-created from high/critical anomalies or opened by operators), including status, severity, SLA due time, and linked anomaly/remediation counts.",
+                Parameters = new Dictionary<string, AiToolParameter>
+                {
+                    ["status"] = new() { Type = "string", Description = "Optional: filter by status (Open, Acknowledged, Mitigated, Resolved, Closed)", Required = false },
+                    ["limit"] = new() { Type = "integer", Description = "Maximum incidents to return (default: 50, max: 200)", Required = false }
+                }
+            },
+            new()
+            {
+                Name = "get_remediation_actions",
+                Description = "Retrieve remediation actions and their approval/execution state (Proposed, PendingApproval, Approved, Executing, Succeeded, Failed, Rejected, Expired). Use this to check what has been proposed, what awaits approval, and what already ran.",
+                Parameters = new Dictionary<string, AiToolParameter>
+                {
+                    ["status"] = new() { Type = "string", Description = "Optional: filter by status (e.g. PendingApproval, Succeeded, Failed)", Required = false },
+                    ["limit"] = new() { Type = "integer", Description = "Maximum actions to return (default: 50, max: 200)", Required = false }
+                }
+            },
+            new()
+            {
+                Name = "get_remediation_playbooks",
+                Description = "List the allow-listed remediation playbook catalog across Azure, AWS, and GCP with risk levels and required parameters. ONLY these playbooks can be proposed — there is no free-form execution.",
+                Parameters = new Dictionary<string, AiToolParameter>
+                {
+                    ["provider"] = new() { Type = "string", Description = "Optional: filter by cloud provider (Azure, Aws, Gcp)", Required = false }
+                }
+            },
+            new()
+            {
+                Name = "propose_remediation",
+                Description = "Propose a remediation action from the playbook catalog. The action is subject to the tenant's approval gate: it will require human approval unless tenant policy auto-approves low-risk playbooks. This tool NEVER executes changes directly. Use only after diagnosing a concrete problem, with a clear evidence-based reason.",
+                Parameters = new Dictionary<string, AiToolParameter>
+                {
+                    ["playbook_key"] = new() { Type = "string", Description = "Key of the playbook to run (from get_remediation_playbooks)", Required = true },
+                    ["resource_id"] = new() { Type = "string", Description = "Target resource ID (ARM ID, AWS ARN, or GCP asset name) when the playbook targets a resource", Required = false },
+                    ["title"] = new() { Type = "string", Description = "Short human-readable title for the approval queue", Required = true },
+                    ["reason"] = new() { Type = "string", Description = "Evidence-based justification shown to the approver (cite the anomaly/finding/change)", Required = true },
+                    ["parameters_json"] = new() { Type = "string", Description = "JSON object with playbook parameters (see the playbook's parameters schema)", Required = false }
+                }
+            },
+            new()
+            {
+                Name = "get_cloud_accounts",
+                Description = "List the AWS accounts and GCP projects linked to this tenant, including connectivity status and last inventory time. Azure access comes from tenant onboarding (Lighthouse/App Registration).",
+                Parameters = new Dictionary<string, AiToolParameter>()
             }
         };
     }

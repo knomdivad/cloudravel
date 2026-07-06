@@ -1,0 +1,620 @@
+using System.Net;
+using System.Text.Json;
+using AzureInventoryMonitor.Api.Middleware;
+using AzureInventoryMonitor.Core.DTOs;
+using AzureInventoryMonitor.Core.Interfaces;
+using AzureInventoryMonitor.Core.Models;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
+
+namespace AzureInventoryMonitor.Api.Functions;
+
+/// <summary>
+/// HTTP endpoints for the AIOps surface: anomalies, incidents, remediation
+/// actions (with the approval gate), the playbook catalog, linked multi-cloud
+/// accounts, and the operations dashboard summary.
+/// </summary>
+public sealed class AiOpsFunctions
+{
+    private readonly IAnomalyRepository _anomalyRepo;
+    private readonly IIncidentRepository _incidentRepo;
+    private readonly IRemediationRepository _remediationRepo;
+    private readonly IRemediationService _remediationService;
+    private readonly ICloudAccountRepository _cloudAccountRepo;
+    private readonly ICloudProviderAdapterFactory _adapterFactory;
+    private readonly ITenantRepository _tenantRepo;
+    private readonly Azure.Security.KeyVault.Secrets.SecretClient? _secretClient;
+    private readonly ILogger<AiOpsFunctions> _logger;
+
+    public AiOpsFunctions(
+        IAnomalyRepository anomalyRepo,
+        IIncidentRepository incidentRepo,
+        IRemediationRepository remediationRepo,
+        IRemediationService remediationService,
+        ICloudAccountRepository cloudAccountRepo,
+        ICloudProviderAdapterFactory adapterFactory,
+        ITenantRepository tenantRepo,
+        ILogger<AiOpsFunctions> logger,
+        Azure.Security.KeyVault.Secrets.SecretClient? secretClient = null)
+    {
+        _anomalyRepo = anomalyRepo;
+        _incidentRepo = incidentRepo;
+        _remediationRepo = remediationRepo;
+        _remediationService = remediationService;
+        _cloudAccountRepo = cloudAccountRepo;
+        _adapterFactory = adapterFactory;
+        _tenantRepo = tenantRepo;
+        _secretClient = secretClient;
+        _logger = logger;
+    }
+
+    // ========================================================================
+    // Anomalies
+    // ========================================================================
+
+    /// <summary>GET /api/anomalies — filterable anomaly queue.</summary>
+    [Function("GetAnomalies")]
+    public async Task<HttpResponseData> GetAnomalies(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "anomalies")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+
+        var status = Enum.TryParse<AnomalyStatus>(query["status"], true, out var st) ? st : (AnomalyStatus?)null;
+        var severity = Enum.TryParse<AnomalySeverity>(query["severity"], true, out var sev) ? sev : (AnomalySeverity?)null;
+        var kind = Enum.TryParse<AnomalyKind>(query["kind"], true, out var k) ? k : (AnomalyKind?)null;
+        var offset = int.TryParse(query["offset"], out var o) ? o : 0;
+        var limit = int.TryParse(query["limit"], out var l) ? Math.Min(l, 500) : 100;
+
+        var anomalies = await _anomalyRepo.GetAnomaliesAsync(tenantId, status, severity, kind, offset, limit);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new AnomaliesResponse
+        {
+            Anomalies = anomalies.Select(ToDto).ToList(),
+            Pagination = new PaginationDto { Offset = offset, Limit = limit, Total = anomalies.Count }
+        });
+        return response;
+    }
+
+    /// <summary>PATCH /api/anomalies/{id}/status — acknowledge/resolve/suppress.</summary>
+    [Function("UpdateAnomalyStatus")]
+    public async Task<HttpResponseData> UpdateAnomalyStatus(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "anomalies/{id:long}/status")] HttpRequestData req,
+        long id,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var body = await req.ReadFromJsonAsync<UpdateAnomalyStatusRequest>();
+
+        if (body == null || !Enum.TryParse<AnomalyStatus>(body.Status, true, out var status))
+            return await BadRequest(req, "INVALID_STATUS",
+                $"Status must be one of: {string.Join(", ", Enum.GetNames<AnomalyStatus>())}");
+
+        try
+        {
+            await _anomalyRepo.UpdateStatusAsync(tenantId, id, status, GetActor(req));
+        }
+        catch (KeyNotFoundException)
+        {
+            return await NotFound(req, $"Anomaly {id} not found.");
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { id, status = status.ToString() });
+        return response;
+    }
+
+    // ========================================================================
+    // Incidents
+    // ========================================================================
+
+    /// <summary>GET /api/incidents — incident queue with SLA state.</summary>
+    [Function("GetIncidents")]
+    public async Task<HttpResponseData> GetIncidents(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "incidents")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+
+        var status = Enum.TryParse<IncidentStatus>(query["status"], true, out var st) ? st : (IncidentStatus?)null;
+        var severity = Enum.TryParse<AnomalySeverity>(query["severity"], true, out var sev) ? sev : (AnomalySeverity?)null;
+        var offset = int.TryParse(query["offset"], out var o) ? o : 0;
+        var limit = int.TryParse(query["limit"], out var l) ? Math.Min(l, 500) : 100;
+
+        var incidents = await _incidentRepo.GetIncidentsAsync(tenantId, status, severity, offset, limit);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new IncidentsResponse
+        {
+            Incidents = incidents.Select(i => ToDto(i, null)).ToList(),
+            Pagination = new PaginationDto { Offset = offset, Limit = limit, Total = incidents.Count }
+        });
+        return response;
+    }
+
+    /// <summary>GET /api/incidents/{id} — incident detail with full timeline.</summary>
+    [Function("GetIncidentDetail")]
+    public async Task<HttpResponseData> GetIncidentDetail(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "incidents/{id:long}")] HttpRequestData req,
+        long id,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var incident = await _incidentRepo.GetByIdAsync(tenantId, id);
+        if (incident == null)
+            return await NotFound(req, $"Incident {id} not found.");
+
+        var events = await _incidentRepo.GetEventsAsync(tenantId, id);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(ToDto(incident, events));
+        return response;
+    }
+
+    /// <summary>PATCH /api/incidents/{id} — status transitions, assignment, notes.</summary>
+    [Function("UpdateIncident")]
+    public async Task<HttpResponseData> UpdateIncident(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "incidents/{id:long}")] HttpRequestData req,
+        long id,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var body = await req.ReadFromJsonAsync<UpdateIncidentRequest>();
+        if (body == null)
+            return await BadRequest(req, "INVALID_BODY", "Request body is required.");
+
+        var incident = await _incidentRepo.GetByIdAsync(tenantId, id);
+        if (incident == null)
+            return await NotFound(req, $"Incident {id} not found.");
+
+        var actor = GetActor(req);
+
+        if (!string.IsNullOrEmpty(body.Status))
+        {
+            if (!Enum.TryParse<IncidentStatus>(body.Status, true, out var status))
+                return await BadRequest(req, "INVALID_STATUS",
+                    $"Status must be one of: {string.Join(", ", Enum.GetNames<IncidentStatus>())}");
+
+            await _incidentRepo.UpdateStatusAsync(tenantId, id, status, actor);
+            await _incidentRepo.AddEventAsync(new IncidentEvent
+            {
+                IncidentId = id,
+                TenantId = tenantId,
+                EventType = "status_change",
+                Message = $"Status changed to {status}",
+                ActorName = actor
+            });
+        }
+
+        if (body.AssignedTo != null)
+        {
+            await _incidentRepo.UpdateAssignmentAsync(tenantId, id,
+                string.IsNullOrWhiteSpace(body.AssignedTo) ? null : body.AssignedTo);
+            await _incidentRepo.AddEventAsync(new IncidentEvent
+            {
+                IncidentId = id,
+                TenantId = tenantId,
+                EventType = "note",
+                Message = string.IsNullOrWhiteSpace(body.AssignedTo)
+                    ? "Incident unassigned"
+                    : $"Assigned to {body.AssignedTo}",
+                ActorName = actor
+            });
+        }
+
+        if (!string.IsNullOrEmpty(body.Note))
+        {
+            await _incidentRepo.AddEventAsync(new IncidentEvent
+            {
+                IncidentId = id,
+                TenantId = tenantId,
+                EventType = "note",
+                Message = body.Note,
+                ActorName = actor
+            });
+        }
+
+        var updated = await _incidentRepo.GetByIdAsync(tenantId, id);
+        var events = await _incidentRepo.GetEventsAsync(tenantId, id);
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(ToDto(updated!, events));
+        return response;
+    }
+
+    // ========================================================================
+    // Remediation actions + approval gate
+    // ========================================================================
+
+    /// <summary>GET /api/remediations — action history; ?status=PendingApproval is the approval queue.</summary>
+    [Function("GetRemediations")]
+    public async Task<HttpResponseData> GetRemediations(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "remediations")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+
+        var status = Enum.TryParse<RemediationStatus>(query["status"], true, out var st) ? st : (RemediationStatus?)null;
+        var offset = int.TryParse(query["offset"], out var o) ? o : 0;
+        var limit = int.TryParse(query["limit"], out var l) ? Math.Min(l, 500) : 100;
+
+        var actions = await _remediationRepo.GetActionsAsync(tenantId, status, offset, limit);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new RemediationActionsResponse
+        {
+            Actions = actions.Select(ToDto).ToList(),
+            Pagination = new PaginationDto { Offset = offset, Limit = limit, Total = actions.Count }
+        });
+        return response;
+    }
+
+    /// <summary>POST /api/remediations — manually propose a playbook action.</summary>
+    [Function("ProposeRemediation")]
+    public async Task<HttpResponseData> ProposeRemediation(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "remediations")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var body = await req.ReadFromJsonAsync<ProposeRemediationRequest>();
+        if (body == null || string.IsNullOrWhiteSpace(body.PlaybookKey))
+            return await BadRequest(req, "INVALID_REQUEST", "playbookKey is required.");
+
+        try
+        {
+            var action = await _remediationService.ProposeAsync(
+                tenantId, body.PlaybookKey, body.ResourceId,
+                body.Title ?? string.Empty,
+                string.IsNullOrWhiteSpace(body.Reason) ? $"Manually proposed by {GetActor(req)}" : body.Reason,
+                body.ParametersJson,
+                requestedBy: $"user:{GetActor(req)}");
+
+            var response = req.CreateResponse(HttpStatusCode.Created);
+            await response.WriteAsJsonAsync(ToDto(action));
+            return response;
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return await NotFound(req, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await BadRequest(req, "INVALID_OPERATION", ex.Message);
+        }
+    }
+
+    /// <summary>POST /api/remediations/{id}/approve — approve and execute a gated action.</summary>
+    [Function("ApproveRemediation")]
+    public async Task<HttpResponseData> ApproveRemediation(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "remediations/{id:long}/approve")] HttpRequestData req,
+        long id,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        try
+        {
+            await _remediationService.ApproveAsync(tenantId, id, GetActor(req));
+            // Execute immediately so the approver sees the outcome; the timer
+            // worker is the safety net for anything that slips through.
+            var executed = await _remediationService.ExecuteAsync(tenantId, id);
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(ToDto(executed));
+            return response;
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return await NotFound(req, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await BadRequest(req, "INVALID_OPERATION", ex.Message);
+        }
+    }
+
+    /// <summary>POST /api/remediations/{id}/reject — reject a gated action.</summary>
+    [Function("RejectRemediation")]
+    public async Task<HttpResponseData> RejectRemediation(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "remediations/{id:long}/reject")] HttpRequestData req,
+        long id,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var body = await req.ReadFromJsonAsync<RejectRemediationRequest>();
+
+        try
+        {
+            var action = await _remediationService.RejectAsync(tenantId, id, GetActor(req), body?.Reason);
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(ToDto(action));
+            return response;
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return await NotFound(req, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return await BadRequest(req, "INVALID_OPERATION", ex.Message);
+        }
+    }
+
+    /// <summary>GET /api/remediations/playbooks — the allow-listed playbook catalog.</summary>
+    [Function("GetPlaybooks")]
+    public async Task<HttpResponseData> GetPlaybooks(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "remediations/playbooks")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var playbooks = await _remediationRepo.GetPlaybooksAsync();
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new PlaybooksResponse
+        {
+            Playbooks = playbooks.Select(p => new PlaybookDto
+            {
+                PlaybookKey = p.PlaybookKey,
+                DisplayName = p.DisplayName,
+                Description = p.Description,
+                Provider = p.Provider.ToString(),
+                Category = p.Category,
+                ActionType = p.ActionType,
+                RiskLevel = p.RiskLevel.ToString(),
+                AlwaysRequiresApproval = p.AlwaysRequiresApproval,
+                ParametersSchemaJson = p.ParametersSchemaJson
+            }).ToList()
+        });
+        return response;
+    }
+
+    // ========================================================================
+    // Cloud accounts (multi-cloud)
+    // ========================================================================
+
+    /// <summary>GET /api/cloud-accounts — linked AWS/GCP accounts for the tenant.</summary>
+    [Function("GetCloudAccounts")]
+    public async Task<HttpResponseData> GetCloudAccounts(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "cloud-accounts")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var accounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new CloudAccountsResponse
+        {
+            Accounts = accounts.Select(ToDto).ToList()
+        });
+        return response;
+    }
+
+    /// <summary>
+    /// POST /api/cloud-accounts — link an AWS account or GCP project.
+    /// Credentials go straight to Key Vault; SQL only stores the secret name.
+    /// </summary>
+    [Function("LinkCloudAccount")]
+    public async Task<HttpResponseData> LinkCloudAccount(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "cloud-accounts")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var body = await req.ReadFromJsonAsync<LinkCloudAccountRequest>();
+
+        if (body == null || string.IsNullOrWhiteSpace(body.ExternalId) || string.IsNullOrWhiteSpace(body.DisplayName))
+            return await BadRequest(req, "INVALID_REQUEST", "provider, externalId, and displayName are required.");
+
+        if (!Enum.TryParse<CloudProvider>(body.Provider, true, out var provider) || provider == CloudProvider.Azure)
+            return await BadRequest(req, "INVALID_PROVIDER",
+                "Provider must be 'aws' or 'gcp' (Azure subscriptions are onboarded via tenant onboarding).");
+
+        var account = new CloudAccount
+        {
+            AccountId = Guid.NewGuid(),
+            TenantId = tenantId,
+            Provider = provider,
+            ExternalId = body.ExternalId,
+            DisplayName = body.DisplayName,
+            Regions = body.Regions,
+            CreatedBy = GetActor(req)
+        };
+
+        if (!string.IsNullOrEmpty(body.CredentialJson))
+        {
+            if (_secretClient == null)
+                return await BadRequest(req, "KEYVAULT_UNAVAILABLE",
+                    "Key Vault is not configured; cannot store cloud credentials.");
+
+            account.CredentialSecretName = $"cloudaccount-{account.AccountId}";
+            var secret = new Azure.Security.KeyVault.Secrets.KeyVaultSecret(account.CredentialSecretName, body.CredentialJson);
+            secret.Properties.ContentType = "application/json";
+            await _secretClient.SetSecretAsync(secret);
+        }
+
+        await _cloudAccountRepo.CreateAsync(account);
+
+        // Immediate connectivity check so a bad credential is visible at link time
+        try
+        {
+            var adapter = _adapterFactory.GetAdapter(provider);
+            var (healthy, error) = await adapter.TestConnectivityAsync(account);
+            await _cloudAccountRepo.UpdateStatusAsync(account.AccountId,
+                healthy ? CloudAccountStatus.Connected : CloudAccountStatus.Degraded, error);
+            account.Status = healthy ? CloudAccountStatus.Connected : CloudAccountStatus.Degraded;
+            account.LastError = error;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Connectivity test failed for new {Provider} account {ExternalId}", provider, body.ExternalId);
+            await _cloudAccountRepo.UpdateStatusAsync(account.AccountId, CloudAccountStatus.Degraded, ex.Message);
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.Created);
+        await response.WriteAsJsonAsync(ToDto(account));
+        return response;
+    }
+
+    // ========================================================================
+    // Operations summary (AIOps dashboard)
+    // ========================================================================
+
+    /// <summary>GET /api/operations/summary — single-call payload for the ops dashboard.</summary>
+    [Function("GetOpsSummary")]
+    public async Task<HttpResponseData> GetOpsSummary(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "operations/summary")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+
+        var tenant = await _tenantRepo.GetByIdAsync(tenantId);
+        var openAnomalies = await _anomalyRepo.GetAnomaliesAsync(tenantId, AnomalyStatus.Open, limit: 200);
+        var openIncidents = await _incidentRepo.GetIncidentsAsync(tenantId, limit: 200);
+        var pendingApprovals = await _remediationRepo.GetPendingApprovalCountAsync(tenantId);
+        var recentActions = await _remediationRepo.GetActionsAsync(tenantId, limit: 100);
+        var cloudAccounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
+
+        var now = DateTime.UtcNow;
+        var week = now.AddDays(-7);
+        var activeIncidents = openIncidents
+            .Where(i => i.Status is IncidentStatus.Open or IncidentStatus.Acknowledged or IncidentStatus.Mitigated)
+            .ToList();
+        var resolvedWithTimes = openIncidents
+            .Where(i => i.ResolvedAt.HasValue)
+            .Select(i => (i.ResolvedAt!.Value - i.CreatedAt).TotalHours)
+            .ToList();
+        var recentWeekActions = recentActions.Where(a => a.CreatedAt >= week).ToList();
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new OpsSummaryResponse
+        {
+            TenantId = tenantId,
+            OpenAnomalies = openAnomalies.Count,
+            CriticalAnomalies = openAnomalies.Count(a => a.Severity == AnomalySeverity.Critical),
+            OpenIncidents = activeIncidents.Count,
+            SlaBreachedIncidents = activeIncidents.Count(i => i.SlaDueAt.HasValue && i.SlaDueAt < now),
+            PendingApprovals = pendingApprovals,
+            RemediationsLast7d = recentWeekActions.Count(a => a.Status == RemediationStatus.Succeeded),
+            AutoRemediationsLast7d = recentWeekActions.Count(a => a.Status == RemediationStatus.Succeeded && a.ApprovalMode == "auto"),
+            MeanTimeToResolveHours = resolvedWithTimes.Count > 0 ? Math.Round(resolvedWithTimes.Average(), 1) : null,
+            AutoRemediationMode = tenant?.AutoRemediationMode.ToString() ?? "Gated",
+            MonitoringEnabled = tenant?.AiOpsMonitoringEnabled ?? true,
+            RecentAnomalies = openAnomalies.Take(10).Select(ToDto).ToList(),
+            RecentIncidents = activeIncidents.Take(10).Select(i => ToDto(i, null)).ToList(),
+            RecentRemediations = recentActions.Take(10).Select(ToDto).ToList(),
+            CloudAccounts = cloudAccounts.Select(ToDto).ToList()
+        });
+        return response;
+    }
+
+    // ========================================================================
+    // Mapping + helpers
+    // ========================================================================
+
+    private static AnomalyDto ToDto(Anomaly a) => new()
+    {
+        Id = a.Id,
+        Kind = a.Kind.ToString(),
+        Severity = a.Severity.ToString(),
+        Status = a.Status.ToString(),
+        Provider = a.Provider.ToString(),
+        Title = a.Title,
+        Description = a.Description,
+        ResourceId = a.ResourceId,
+        MetricName = a.MetricName,
+        ObservedValue = a.ObservedValue,
+        BaselineMean = a.BaselineMean,
+        Score = a.Score,
+        DetectedAt = a.DetectedAt,
+        LastSeenAt = a.LastSeenAt,
+        IncidentId = a.IncidentId
+    };
+
+    private static IncidentDto ToDto(Incident i, IReadOnlyList<IncidentEvent>? events) => new()
+    {
+        Id = i.Id,
+        Title = i.Title,
+        Severity = i.Severity.ToString(),
+        Status = i.Status.ToString(),
+        Source = i.Source,
+        SummaryMarkdown = i.SummaryMarkdown,
+        AssignedTo = i.AssignedTo,
+        CreatedAt = i.CreatedAt,
+        AcknowledgedAt = i.AcknowledgedAt,
+        ResolvedAt = i.ResolvedAt,
+        SlaDueAt = i.SlaDueAt,
+        SlaBreached = i.SlaDueAt.HasValue && i.SlaDueAt < DateTime.UtcNow &&
+                      i.Status is IncidentStatus.Open or IncidentStatus.Acknowledged or IncidentStatus.Mitigated,
+        AnomalyCount = i.AnomalyCount,
+        RemediationCount = i.RemediationCount,
+        Events = events?.Select(e => new IncidentEventDto
+        {
+            OccurredAt = e.OccurredAt,
+            EventType = e.EventType,
+            Message = e.Message,
+            ActorName = e.ActorName
+        }).ToList()
+    };
+
+    private static RemediationActionDto ToDto(RemediationAction a) => new()
+    {
+        Id = a.Id,
+        PlaybookKey = a.PlaybookKey,
+        Provider = a.Provider.ToString(),
+        ResourceId = a.ResourceId,
+        Title = a.Title,
+        Reason = a.Reason,
+        ParametersJson = a.ParametersJson,
+        Status = a.Status.ToString(),
+        RiskLevel = a.RiskLevel.ToString(),
+        RequestedBy = a.RequestedBy,
+        AnomalyId = a.AnomalyId,
+        IncidentId = a.IncidentId,
+        ApprovalMode = a.ApprovalMode,
+        ApprovedBy = a.ApprovedBy,
+        ApprovedAt = a.ApprovedAt,
+        RejectedReason = a.RejectedReason,
+        ExecutedAt = a.ExecutedAt,
+        CompletedAt = a.CompletedAt,
+        ResultJson = a.ResultJson,
+        ErrorMessage = a.ErrorMessage,
+        CreatedAt = a.CreatedAt,
+        ExpiresAt = a.ExpiresAt
+    };
+
+    private static CloudAccountDto ToDto(CloudAccount a) => new()
+    {
+        AccountId = a.AccountId,
+        Provider = a.Provider.ToString(),
+        ExternalId = a.ExternalId,
+        DisplayName = a.DisplayName,
+        Status = a.Status.ToString(),
+        Regions = a.Regions,
+        LastInventoryAt = a.LastInventoryAt,
+        LastError = a.LastError,
+        CreatedAt = a.CreatedAt
+    };
+
+    /// <summary>
+    /// Actor identity for audit fields. JWT claim extraction is not yet wired
+    /// (see TenantFunctions TODO), so accept the display-name header the SPA
+    /// sends and fall back to a generic operator label.
+    /// </summary>
+    private static string GetActor(HttpRequestData req) =>
+        req.Headers.TryGetValues("X-User-Name", out var values) ? values.First() : "operator";
+
+    private static async Task<HttpResponseData> BadRequest(HttpRequestData req, string code, string message)
+    {
+        var response = req.CreateResponse(HttpStatusCode.BadRequest);
+        await response.WriteAsJsonAsync(new ErrorResponse { Code = code, Message = message });
+        return response;
+    }
+
+    private static async Task<HttpResponseData> NotFound(HttpRequestData req, string message)
+    {
+        var response = req.CreateResponse(HttpStatusCode.NotFound);
+        await response.WriteAsJsonAsync(new ErrorResponse { Code = "NOT_FOUND", Message = message });
+        return response;
+    }
+}

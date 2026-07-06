@@ -58,7 +58,53 @@ User → Frontend → API (POST /api/ai/query)
   → Returns to user
 ```
 
-### Flow 5: User Authentication & Tenant Selection
+### Flow 5: Proactive Anomaly Detection (Scheduled — every 15 minutes)
+
+```
+Timer-triggered Function (offset :05/:20/:35/:50, after change polling)
+  → For each active tenant with AIOps monitoring enabled:
+    → Run detectors against authoritative stores (never live cloud APIs):
+      1. ChangeVelocitySpike      — 24h change count vs 30-day daily baseline (z ≥ 3)
+      2. SecurityPostureRegression— new Critical/High Defender findings in 24h
+      3. ConfigurationDrift       — critical/high security changes per resource
+      4. UnusualActorActivity     — actors absent from the 30-day baseline
+      5. ResourceSprawl           — resource count vs EWMA baseline (≥20% growth)
+      6. CostAnomaly              — Advisor savings total jump (≥$1k and ≥50%)
+      7. StaleTelemetry           — snapshot older than 2× configured cadence
+    → Dedup by fingerprint (open anomalies refresh; new ones insert)
+    → High/Critical anomalies open (or join) an incident with an SLA clock
+    → Unambiguous security drifts auto-PROPOSE playbook remediations (gated)
+```
+
+### Flow 6: Gated Remediation
+
+```
+Proposal (anomaly engine | AI propose_remediation tool | operator via API)
+  → Playbook lookup (allow-list; unknown actions are rejected)
+  → Approval gate resolution:
+      tenant mode = disabled → Proposed  (visible, inert until human approves)
+      tenant mode = gated    → PendingApproval (approvals queue)
+      tenant mode = auto     → low-risk playbooks auto-approve;
+                               medium/high and always-gated playbooks stay pending
+  → Human approves (POST /remediations/{id}/approve) → executes immediately
+      or timer worker drains Approved queue every 5 minutes
+  → Provider adapter executes the typed action (ARM REST / AWS SigV4 / GCP REST)
+  → Result + errors persisted; incident timeline updated; pending items expire after 7 days
+```
+
+### Flow 7: Multi-Cloud Inventory Sync (Scheduled — daily 3 AM, after Azure snapshot)
+
+```
+Timer-triggered Function
+  → For each connected AWS/GCP account (credentials from Key Vault):
+    → AWS: Resource Groups Tagging API GetResources per region (SigV4-signed)
+    → GCP: Cloud Asset API asset listing (service-account JWT → OAuth token)
+    → Normalize into shared inventory model (provider column: aws | gcp)
+    → Replace that provider's rows in the tenant's LATEST snapshot
+  → Inventory explorer, dashboards, and AI tools see one merged multi-cloud view
+```
+
+### Flow 8: User Authentication & Tenant Selection
 
 ```
 User → Next.js Frontend
@@ -97,8 +143,9 @@ User → Next.js Frontend
               └──────────────┼──────────────┘
                              │
                     ┌────────┴────────┐
-                    │   AI Agent      │ ← Reads only, never writes
-                    │   (Tool Use)    │    to source-of-truth stores
+                    │   AI Agent      │ ← Reads freely; its ONLY write path
+                    │   (GPT-5.5,     │    is propose_remediation, which lands
+                    │    Tool Use)    │    in the gated approval queue
                     └─────────────────┘
 ```
 

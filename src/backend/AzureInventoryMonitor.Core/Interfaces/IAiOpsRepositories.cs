@@ -1,0 +1,92 @@
+using AzureInventoryMonitor.Core.Models;
+
+namespace AzureInventoryMonitor.Core.Interfaces;
+
+/// <summary>
+/// Repository for anomaly records and metric baselines.
+/// </summary>
+public interface IAnomalyRepository
+{
+    /// <summary>
+    /// Insert a new anomaly, or refresh last_seen/observed values when the fingerprint
+    /// is already open. Returns the row id and whether a new anomaly was opened.
+    /// </summary>
+    Task<(long Id, bool Created)> UpsertAnomalyAsync(Anomaly anomaly);
+    Task<Anomaly?> GetByIdAsync(Guid tenantId, long anomalyId);
+    Task<IReadOnlyList<Anomaly>> GetAnomaliesAsync(
+        Guid tenantId,
+        AnomalyStatus? status = null,
+        AnomalySeverity? severity = null,
+        AnomalyKind? kind = null,
+        int offset = 0,
+        int limit = 100);
+    Task<int> GetOpenCountAsync(Guid tenantId);
+    Task UpdateStatusAsync(Guid tenantId, long anomalyId, AnomalyStatus status, string? actor);
+    Task LinkToIncidentAsync(Guid tenantId, long anomalyId, long incidentId);
+    /// <summary>Auto-resolve open anomalies of a kind whose condition no longer holds.</summary>
+    Task ResolveByFingerprintAsync(Guid tenantId, string fingerprint);
+
+    Task<MetricBaseline?> GetBaselineAsync(Guid tenantId, string metricKey);
+    Task UpsertBaselineAsync(MetricBaseline baseline);
+}
+
+/// <summary>
+/// Repository for incidents and their timeline events.
+/// </summary>
+public interface IIncidentRepository
+{
+    Task<long> CreateAsync(Incident incident);
+    Task<Incident?> GetByIdAsync(Guid tenantId, long incidentId);
+    Task<IReadOnlyList<Incident>> GetIncidentsAsync(
+        Guid tenantId,
+        IncidentStatus? status = null,
+        AnomalySeverity? severity = null,
+        int offset = 0,
+        int limit = 100);
+    Task<int> GetOpenCountAsync(Guid tenantId);
+    Task UpdateStatusAsync(Guid tenantId, long incidentId, IncidentStatus status, string? actor);
+    Task UpdateAssignmentAsync(Guid tenantId, long incidentId, string? assignedTo);
+    Task<Incident?> FindOpenIncidentForFingerprintAsync(Guid tenantId, string fingerprint);
+    Task AddEventAsync(IncidentEvent evt);
+    Task<IReadOnlyList<IncidentEvent>> GetEventsAsync(Guid tenantId, long incidentId, int limit = 200);
+}
+
+/// <summary>
+/// Repository for the remediation playbook catalog and remediation actions.
+/// </summary>
+public interface IRemediationRepository
+{
+    Task<IReadOnlyList<RemediationPlaybook>> GetPlaybooksAsync(CloudProvider? provider = null, bool enabledOnly = true);
+    Task<RemediationPlaybook?> GetPlaybookAsync(string playbookKey);
+
+    Task<long> CreateActionAsync(RemediationAction action);
+    Task<RemediationAction?> GetActionByIdAsync(Guid tenantId, long actionId);
+    Task<IReadOnlyList<RemediationAction>> GetActionsAsync(
+        Guid tenantId,
+        RemediationStatus? status = null,
+        int offset = 0,
+        int limit = 100);
+    Task<int> GetPendingApprovalCountAsync(Guid tenantId);
+    /// <summary>Actions approved (manually or automatically) but not yet executed.</summary>
+    Task<IReadOnlyList<RemediationAction>> GetApprovedPendingExecutionAsync(int limit = 50);
+    /// <summary>True if an equivalent non-terminal action already exists (dedup guard).</summary>
+    Task<bool> HasOpenActionAsync(Guid tenantId, string playbookKey, string? resourceId);
+    Task UpdateStatusAsync(Guid tenantId, long actionId, RemediationStatus status,
+        string? actor = null, string? rejectedReason = null);
+    Task MarkExecutionStartedAsync(long actionId);
+    Task MarkExecutionCompletedAsync(long actionId, bool succeeded, string? resultJson, string? errorMessage);
+    Task ExpireStaleActionsAsync(DateTime cutoffUtc);
+}
+
+/// <summary>
+/// Repository for linked multi-cloud accounts (AWS accounts, GCP projects).
+/// </summary>
+public interface ICloudAccountRepository
+{
+    Task<CloudAccount> CreateAsync(CloudAccount account);
+    Task<CloudAccount?> GetByIdAsync(Guid tenantId, Guid accountId);
+    Task<IReadOnlyList<CloudAccount>> GetByTenantAsync(Guid tenantId);
+    Task<IReadOnlyList<CloudAccount>> GetAllActiveAsync();
+    Task UpdateStatusAsync(Guid accountId, CloudAccountStatus status, string? lastError);
+    Task TouchInventoryAsync(Guid accountId, DateTime inventoryAt);
+}

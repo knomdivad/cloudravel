@@ -13,6 +13,12 @@ import type {
   AiQueryRequest,
   AiQueryResponse,
   ApiError,
+  Anomaly,
+  Incident,
+  RemediationAction,
+  Playbook,
+  CloudAccount,
+  OpsSummary,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/api';
@@ -286,6 +292,139 @@ export async function getDashboard(
 }
 
 // ============================================================================
+// AIOps API: operations summary, anomalies, incidents, remediation, cloud accounts
+// ============================================================================
+
+export async function getOpsSummary(tenantId: string): Promise<OpsSummary> {
+  return apiCall<OpsSummary>('/operations/summary', tenantId);
+}
+
+export async function getAnomalies(
+  tenantId: string,
+  params?: { status?: string; severity?: string; kind?: string; limit?: number }
+): Promise<{ anomalies: Anomaly[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.severity) searchParams.set('severity', params.severity);
+  if (params?.kind) searchParams.set('kind', params.kind);
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+
+  const query = searchParams.toString();
+  return apiCall(`/anomalies${query ? `?${query}` : ''}`, tenantId);
+}
+
+export async function updateAnomalyStatus(
+  tenantId: string,
+  anomalyId: number,
+  status: string
+): Promise<void> {
+  await apiCall(`/anomalies/${anomalyId}/status`, tenantId, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function getIncidents(
+  tenantId: string,
+  params?: { status?: string; severity?: string; limit?: number }
+): Promise<{ incidents: Incident[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.severity) searchParams.set('severity', params.severity);
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+
+  const query = searchParams.toString();
+  return apiCall(`/incidents${query ? `?${query}` : ''}`, tenantId);
+}
+
+export async function getIncidentDetail(tenantId: string, incidentId: number): Promise<Incident> {
+  return apiCall<Incident>(`/incidents/${incidentId}`, tenantId);
+}
+
+export async function updateIncident(
+  tenantId: string,
+  incidentId: number,
+  update: { status?: string; note?: string }
+): Promise<Incident> {
+  return apiCall<Incident>(`/incidents/${incidentId}`, tenantId, {
+    method: 'PATCH',
+    body: JSON.stringify(update),
+  });
+}
+
+export async function getRemediations(
+  tenantId: string,
+  params?: { status?: string; limit?: number }
+): Promise<{ actions: RemediationAction[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.limit) searchParams.set('limit', params.limit.toString());
+
+  const query = searchParams.toString();
+  return apiCall(`/remediations${query ? `?${query}` : ''}`, tenantId);
+}
+
+export async function proposeRemediation(
+  tenantId: string,
+  request: {
+    playbookKey: string;
+    resourceId?: string;
+    title?: string;
+    reason: string;
+    parametersJson?: string;
+  }
+): Promise<RemediationAction> {
+  return apiCall<RemediationAction>('/remediations', tenantId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function approveRemediation(
+  tenantId: string,
+  actionId: number
+): Promise<RemediationAction> {
+  return apiCall<RemediationAction>(`/remediations/${actionId}/approve`, tenantId, {
+    method: 'POST',
+  });
+}
+
+export async function rejectRemediation(
+  tenantId: string,
+  actionId: number,
+  reason?: string
+): Promise<RemediationAction> {
+  return apiCall<RemediationAction>(`/remediations/${actionId}/reject`, tenantId, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function getPlaybooks(tenantId: string): Promise<{ playbooks: Playbook[] }> {
+  return apiCall(`/remediations/playbooks`, tenantId);
+}
+
+export async function getCloudAccounts(tenantId: string): Promise<{ accounts: CloudAccount[] }> {
+  return apiCall(`/cloud-accounts`, tenantId);
+}
+
+export async function linkCloudAccount(
+  tenantId: string,
+  request: {
+    provider: string;
+    externalId: string;
+    displayName: string;
+    credentialJson?: string;
+    regions?: string[];
+  }
+): Promise<CloudAccount> {
+  return apiCall<CloudAccount>('/cloud-accounts', tenantId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// ============================================================================
 // Namespace export for convenient usage: import { api } from '@/lib/api'
 // ============================================================================
 
@@ -304,4 +443,17 @@ export const api = {
   getPolicyCompliance,
   queryAi,
   getDashboard,
+  getOpsSummary,
+  getAnomalies,
+  updateAnomalyStatus,
+  getIncidents,
+  getIncidentDetail,
+  updateIncident,
+  getRemediations,
+  proposeRemediation,
+  approveRemediation,
+  rejectRemediation,
+  getPlaybooks,
+  getCloudAccounts,
+  linkCloudAccount,
 };

@@ -14,6 +14,13 @@ public sealed class Tenant
     public int ChangePollFrequencyMinutes { get; set; } = 15;
     public string? KeyVaultSecretName { get; set; }
     public string? LighthouseDelegationId { get; set; }
+
+    /// <summary>Governs whether proposed remediations require human approval. Default: gated.</summary>
+    public AutoRemediationMode AutoRemediationMode { get; set; } = AutoRemediationMode.Gated;
+
+    /// <summary>Master switch for proactive anomaly scanning on this tenant.</summary>
+    public bool AiOpsMonitoringEnabled { get; set; } = true;
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public string CreatedBy { get; set; } = string.Empty;

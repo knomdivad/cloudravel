@@ -147,6 +147,12 @@ public sealed class AiQueryRequest
 {
     public string Query { get; set; } = string.Empty;
     public string? ConversationId { get; set; }
+
+    /// <summary>
+    /// Persona: analyst (default) | operations | security | cost.
+    /// 'operations' unlocks the AIOps triage workflow including remediation proposals.
+    /// </summary>
+    public string? Mode { get; set; }
 }
 
 public sealed class AiQueryResponse

@@ -105,6 +105,8 @@ export interface Recommendation {
 export interface AiQueryRequest {
   query: string;
   conversationId?: string;
+  /** Persona: analyst (default) | operations | security | cost */
+  mode?: string;
 }
 
 export interface AiQueryResponse {
@@ -145,6 +147,136 @@ export interface TenantDashboard {
 export interface SeverityCount {
   severity: string;
   count: number;
+}
+
+// --- AIOps: anomalies, incidents, remediation ---
+
+export type AnomalySeverity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Info';
+
+export interface Anomaly {
+  id: number;
+  kind:
+    | 'ChangeVelocitySpike'
+    | 'SecurityPostureRegression'
+    | 'CostAnomaly'
+    | 'ConfigurationDrift'
+    | 'UnusualActorActivity'
+    | 'StaleTelemetry'
+    | 'ResourceSprawl';
+  severity: AnomalySeverity;
+  status: 'Open' | 'Acknowledged' | 'Resolved' | 'Suppressed' | 'FalsePositive';
+  provider: 'Azure' | 'Aws' | 'Gcp';
+  title: string;
+  description?: string;
+  resourceId?: string;
+  metricName?: string;
+  observedValue?: number;
+  baselineMean?: number;
+  score?: number;
+  detectedAt: string;
+  lastSeenAt: string;
+  incidentId?: number;
+}
+
+export interface Incident {
+  id: number;
+  title: string;
+  severity: AnomalySeverity;
+  status: 'Open' | 'Acknowledged' | 'Mitigated' | 'Resolved' | 'Closed';
+  source: string;
+  summaryMarkdown?: string;
+  assignedTo?: string;
+  createdAt: string;
+  acknowledgedAt?: string;
+  resolvedAt?: string;
+  slaDueAt?: string;
+  slaBreached: boolean;
+  anomalyCount: number;
+  remediationCount: number;
+  events?: IncidentEvent[];
+}
+
+export interface IncidentEvent {
+  occurredAt: string;
+  eventType: string;
+  message: string;
+  actorName?: string;
+}
+
+export interface RemediationAction {
+  id: number;
+  playbookKey: string;
+  provider: 'Azure' | 'Aws' | 'Gcp';
+  resourceId?: string;
+  title: string;
+  reason: string;
+  parametersJson?: string;
+  status:
+    | 'Proposed'
+    | 'PendingApproval'
+    | 'Approved'
+    | 'Rejected'
+    | 'Executing'
+    | 'Succeeded'
+    | 'Failed'
+    | 'Cancelled'
+    | 'Expired';
+  riskLevel: 'Low' | 'Medium' | 'High';
+  requestedBy: string;
+  anomalyId?: number;
+  incidentId?: number;
+  approvalMode: 'auto' | 'gated';
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectedReason?: string;
+  executedAt?: string;
+  completedAt?: string;
+  resultJson?: string;
+  errorMessage?: string;
+  createdAt: string;
+  expiresAt?: string;
+}
+
+export interface Playbook {
+  playbookKey: string;
+  displayName: string;
+  description: string;
+  provider: 'Azure' | 'Aws' | 'Gcp';
+  category: string;
+  actionType: string;
+  riskLevel: 'Low' | 'Medium' | 'High';
+  alwaysRequiresApproval: boolean;
+  parametersSchemaJson?: string;
+}
+
+export interface CloudAccount {
+  accountId: string;
+  provider: 'Azure' | 'Aws' | 'Gcp';
+  externalId: string;
+  displayName: string;
+  status: 'Connected' | 'Degraded' | 'Disconnected';
+  regions?: string[];
+  lastInventoryAt?: string;
+  lastError?: string;
+  createdAt: string;
+}
+
+export interface OpsSummary {
+  tenantId: string;
+  openAnomalies: number;
+  criticalAnomalies: number;
+  openIncidents: number;
+  slaBreachedIncidents: number;
+  pendingApprovals: number;
+  remediationsLast7d: number;
+  autoRemediationsLast7d: number;
+  meanTimeToResolveHours?: number;
+  autoRemediationMode: string;
+  monitoringEnabled: boolean;
+  recentAnomalies: Anomaly[];
+  recentIncidents: Incident[];
+  recentRemediations: RemediationAction[];
+  cloudAccounts: CloudAccount[];
 }
 
 // --- Common ---

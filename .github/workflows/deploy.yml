@@ -339,3 +339,9 @@ jobs:
         with:
           connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=aimdb;User ID=aimadmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
           path: database/001-schema.sql
+
+      - name: Run AIOps + multi-cloud migration
+        uses: azure/sql-action@v2
+        with:
+          connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=aimdb;User ID=aimadmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
+          path: database/003-aiops-multicloud.sql

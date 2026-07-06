@@ -48,6 +48,30 @@ variable "ai_model_id" {
   default     = "azureml://registries/azureml/models/Phi-4"
 }
 
+variable "openai_model_name" {
+  description = "Azure OpenAI model for the AIOps assistant (latest OpenAI model GA on Azure OpenAI)"
+  type        = string
+  default     = "gpt-5.5"
+}
+
+variable "openai_model_version" {
+  description = "Azure OpenAI model version. Empty string selects the model's current default version."
+  type        = string
+  default     = ""
+}
+
+variable "openai_deployment_sku" {
+  description = "Deployment SKU for the Azure OpenAI model (GlobalStandard recommended for GPT-5.x)"
+  type        = string
+  default     = "GlobalStandard"
+}
+
+variable "openai_capacity" {
+  description = "Deployment capacity (throughput units, in thousands of TPM)"
+  type        = number
+  default     = 50
+}
+
 variable "ai_location" {
   description = "Azure region for AI Foundry resources"
   type        = string

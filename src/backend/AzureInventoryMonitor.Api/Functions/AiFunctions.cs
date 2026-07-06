@@ -15,12 +15,15 @@ using Microsoft.Extensions.Logging;
 namespace AzureInventoryMonitor.Api.Functions;
 
 /// <summary>
-/// AI-assisted analysis endpoint using Claude via Azure AI Foundry with strict tool calling.
-/// 
+/// AI-assisted analysis endpoint using the latest OpenAI model on Azure OpenAI
+/// (GPT-5.5 by default) with strict tool calling.
+///
 /// The AI agent operates under these constraints:
 ///   - Can only retrieve data via defined tools
 ///   - All tool calls execute against the tenant-scoped database (RLS enforced)
 ///   - AI cannot fabricate resource states or findings
+///   - The ONLY write path is propose_remediation, which respects the tenant's
+///     approval gate — the model never executes changes directly
 ///   - All responses must cite which tool provided each data point
 /// </summary>
 public sealed class AiFunctions
@@ -28,6 +31,12 @@ public sealed class AiFunctions
     private readonly IInventoryRepository _inventoryRepo;
     private readonly IChangeRepository _changeRepo;
     private readonly IRecommendationRepository _recRepo;
+    private readonly IAnomalyRepository _anomalyRepo;
+    private readonly IIncidentRepository _incidentRepo;
+    private readonly IRemediationRepository _remediationRepo;
+    private readonly IRemediationService _remediationService;
+    private readonly ICloudAccountRepository _cloudAccountRepo;
+    private readonly ITenantRepository _tenantRepo;
     private readonly IConfiguration _config;
     private readonly ILogger<AiFunctions> _logger;
 
@@ -35,20 +44,33 @@ public sealed class AiFunctions
         IInventoryRepository inventoryRepo,
         IChangeRepository changeRepo,
         IRecommendationRepository recRepo,
+        IAnomalyRepository anomalyRepo,
+        IIncidentRepository incidentRepo,
+        IRemediationRepository remediationRepo,
+        IRemediationService remediationService,
+        ICloudAccountRepository cloudAccountRepo,
+        ITenantRepository tenantRepo,
         IConfiguration config,
         ILogger<AiFunctions> logger)
     {
         _inventoryRepo = inventoryRepo;
         _changeRepo = changeRepo;
         _recRepo = recRepo;
+        _anomalyRepo = anomalyRepo;
+        _incidentRepo = incidentRepo;
+        _remediationRepo = remediationRepo;
+        _remediationService = remediationService;
+        _cloudAccountRepo = cloudAccountRepo;
+        _tenantRepo = tenantRepo;
         _config = config;
         _logger = logger;
     }
 
     /// <summary>
     /// POST /api/ai/query
-    /// Accepts a natural language query and uses Claude via Azure AI Foundry with tool calling
-    /// to answer it using only authoritative data from the platform's data stores.
+    /// Accepts a natural language query and answers it with GPT-5.5 tool calling
+    /// against the platform's authoritative data stores. The optional 'mode' field
+    /// selects the persona: analyst (default) | operations | security | cost.
     /// </summary>
     [Function("AiQuery")]
     public async Task<HttpResponseData> Query(
@@ -68,7 +90,9 @@ public sealed class AiFunctions
 
         var endpoint = _config["AzureOpenAI:Endpoint"]!;
         var apiKey = _config["AzureOpenAI:ApiKey"]!;
-        var deploymentName = _config["AzureOpenAI:DeploymentName"] ?? "gpt-41-nano";
+        // Default to GPT-5.5 — the latest OpenAI model generally available on
+        // Azure OpenAI (Microsoft Foundry). Override via AzureOpenAI:DeploymentName.
+        var deploymentName = _config["AzureOpenAI:DeploymentName"] ?? "gpt-5.5";
 
         var azureClient = new AzureOpenAIClient(
             new Uri(endpoint),
@@ -82,7 +106,7 @@ public sealed class AiFunctions
 
         var messages = new List<ChatMessage>
         {
-            new SystemChatMessage(AiSystemPrompts.InventoryAnalyst),
+            new SystemChatMessage(AiSystemPrompts.ForMode(request.Mode)),
             new UserChatMessage(request.Query)
         };
 
@@ -207,6 +231,13 @@ public sealed class AiFunctions
                 "get_defender_findings" => await ExecuteGetDefenderFindings(tenantId, args),
                 "get_tenant_summary" => await ExecuteGetTenantSummary(tenantId),
                 "search_resources" => await ExecuteSearchResources(tenantId, args),
+                "get_operations_summary" => await ExecuteGetOperationsSummary(tenantId),
+                "get_anomalies" => await ExecuteGetAnomalies(tenantId, args),
+                "get_incidents" => await ExecuteGetIncidents(tenantId, args),
+                "get_remediation_actions" => await ExecuteGetRemediationActions(tenantId, args),
+                "get_remediation_playbooks" => await ExecuteGetRemediationPlaybooks(args),
+                "propose_remediation" => await ExecuteProposeRemediation(tenantId, args),
+                "get_cloud_accounts" => await ExecuteGetCloudAccounts(tenantId),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown tool: {toolName}" })
             };
         }
@@ -451,6 +482,213 @@ public sealed class AiFunctions
             critical_defender_findings = defenderFindings.Count(f => f.Severity == "Critical"),
             high_defender_findings = defenderFindings.Count(f => f.Severity == "High"),
             non_compliant_policies = policyNonCompliant.Count
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // AIOps tools
+    // ------------------------------------------------------------------
+
+    private async Task<string> ExecuteGetOperationsSummary(Guid tenantId)
+    {
+        var tenant = await _tenantRepo.GetByIdAsync(tenantId);
+        var openAnomalies = await _anomalyRepo.GetAnomaliesAsync(tenantId, Core.Models.AnomalyStatus.Open, limit: 200);
+        var incidents = await _incidentRepo.GetIncidentsAsync(tenantId, limit: 100);
+        var pendingApprovals = await _remediationRepo.GetPendingApprovalCountAsync(tenantId);
+        var recentActions = await _remediationRepo.GetActionsAsync(tenantId, limit: 50);
+        var accounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
+
+        var now = DateTime.UtcNow;
+        var active = incidents.Where(i => i.Status is Core.Models.IncidentStatus.Open
+            or Core.Models.IncidentStatus.Acknowledged or Core.Models.IncidentStatus.Mitigated).ToList();
+
+        return JsonSerializer.Serialize(new
+        {
+            auto_remediation_mode = tenant?.AutoRemediationMode.ToString(),
+            monitoring_enabled = tenant?.AiOpsMonitoringEnabled,
+            open_anomalies = openAnomalies.Count,
+            open_anomalies_by_severity = openAnomalies.GroupBy(a => a.Severity.ToString())
+                .ToDictionary(g => g.Key, g => g.Count()),
+            open_incidents = active.Count,
+            sla_breached_incidents = active.Count(i => i.SlaDueAt.HasValue && i.SlaDueAt < now),
+            pending_approvals = pendingApprovals,
+            remediations_last_7d = recentActions.Count(a => a.CreatedAt >= now.AddDays(-7) && a.Status == Core.Models.RemediationStatus.Succeeded),
+            cloud_accounts = accounts.Select(a => new { provider = a.Provider.ToString(), a.ExternalId, status = a.Status.ToString() })
+        });
+    }
+
+    private async Task<string> ExecuteGetAnomalies(Guid tenantId, Dictionary<string, JsonElement> args)
+    {
+        var status = args.TryGetValue("status", out var st) && Enum.TryParse<Core.Models.AnomalyStatus>(st.GetString(), true, out var s)
+            ? s : Core.Models.AnomalyStatus.Open;
+        Core.Models.AnomalySeverity? severity = args.TryGetValue("severity", out var sev)
+            && Enum.TryParse<Core.Models.AnomalySeverity>(sev.GetString(), true, out var sv) ? sv : null;
+        var limit = args.TryGetValue("limit", out var lim) ? Math.Min(lim.GetInt32(), 200) : 50;
+
+        var anomalies = await _anomalyRepo.GetAnomaliesAsync(tenantId, status, severity, limit: limit);
+
+        return JsonSerializer.Serialize(new
+        {
+            total = anomalies.Count,
+            anomalies = anomalies.Select(a => new
+            {
+                a.Id,
+                kind = a.Kind.ToString(),
+                severity = a.Severity.ToString(),
+                status = a.Status.ToString(),
+                provider = a.Provider.ToString(),
+                a.Title,
+                a.Description,
+                a.ResourceId,
+                a.MetricName,
+                observed = a.ObservedValue,
+                baseline_mean = a.BaselineMean,
+                z_score = a.Score,
+                a.DetectedAt,
+                a.IncidentId,
+                details = a.DetailsJson
+            })
+        });
+    }
+
+    private async Task<string> ExecuteGetIncidents(Guid tenantId, Dictionary<string, JsonElement> args)
+    {
+        Core.Models.IncidentStatus? status = args.TryGetValue("status", out var st)
+            && Enum.TryParse<Core.Models.IncidentStatus>(st.GetString(), true, out var s) ? s : null;
+        var limit = args.TryGetValue("limit", out var lim) ? Math.Min(lim.GetInt32(), 200) : 50;
+
+        var incidents = await _incidentRepo.GetIncidentsAsync(tenantId, status, limit: limit);
+        var now = DateTime.UtcNow;
+
+        return JsonSerializer.Serialize(new
+        {
+            total = incidents.Count,
+            incidents = incidents.Select(i => new
+            {
+                i.Id,
+                i.Title,
+                severity = i.Severity.ToString(),
+                status = i.Status.ToString(),
+                i.Source,
+                i.CreatedAt,
+                i.SlaDueAt,
+                sla_breached = i.SlaDueAt.HasValue && i.SlaDueAt < now &&
+                               i.Status is Core.Models.IncidentStatus.Open
+                                   or Core.Models.IncidentStatus.Acknowledged
+                                   or Core.Models.IncidentStatus.Mitigated,
+                anomaly_count = i.AnomalyCount,
+                remediation_count = i.RemediationCount,
+                summary = i.SummaryMarkdown
+            })
+        });
+    }
+
+    private async Task<string> ExecuteGetRemediationActions(Guid tenantId, Dictionary<string, JsonElement> args)
+    {
+        Core.Models.RemediationStatus? status = args.TryGetValue("status", out var st)
+            && Enum.TryParse<Core.Models.RemediationStatus>(st.GetString(), true, out var s) ? s : null;
+        var limit = args.TryGetValue("limit", out var lim) ? Math.Min(lim.GetInt32(), 200) : 50;
+
+        var actions = await _remediationRepo.GetActionsAsync(tenantId, status, limit: limit);
+
+        return JsonSerializer.Serialize(new
+        {
+            total = actions.Count,
+            actions = actions.Select(a => new
+            {
+                a.Id,
+                a.PlaybookKey,
+                provider = a.Provider.ToString(),
+                a.ResourceId,
+                a.Title,
+                a.Reason,
+                status = a.Status.ToString(),
+                risk = a.RiskLevel.ToString(),
+                a.RequestedBy,
+                approval_mode = a.ApprovalMode,
+                a.ApprovedBy,
+                a.CreatedAt,
+                a.CompletedAt,
+                error = a.ErrorMessage
+            })
+        });
+    }
+
+    private async Task<string> ExecuteGetRemediationPlaybooks(Dictionary<string, JsonElement> args)
+    {
+        Core.Models.CloudProvider? provider = args.TryGetValue("provider", out var p)
+            && Enum.TryParse<Core.Models.CloudProvider>(p.GetString(), true, out var pv) ? pv : null;
+
+        var playbooks = await _remediationRepo.GetPlaybooksAsync(provider);
+
+        return JsonSerializer.Serialize(new
+        {
+            total = playbooks.Count,
+            playbooks = playbooks.Select(pb => new
+            {
+                pb.PlaybookKey,
+                pb.DisplayName,
+                pb.Description,
+                provider = pb.Provider.ToString(),
+                pb.Category,
+                risk = pb.RiskLevel.ToString(),
+                always_requires_approval = pb.AlwaysRequiresApproval,
+                parameters_schema = pb.ParametersSchemaJson
+            })
+        });
+    }
+
+    private async Task<string> ExecuteProposeRemediation(Guid tenantId, Dictionary<string, JsonElement> args)
+    {
+        var playbookKey = args.TryGetValue("playbook_key", out var pk) ? pk.GetString() : null;
+        var title = args.TryGetValue("title", out var t) ? t.GetString() : null;
+        var reason = args.TryGetValue("reason", out var r) ? r.GetString() : null;
+        if (string.IsNullOrWhiteSpace(playbookKey) || string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(reason))
+            return JsonSerializer.Serialize(new { error = "playbook_key, title, and reason are required." });
+
+        var resourceId = args.TryGetValue("resource_id", out var rid) ? rid.GetString() : null;
+        var parametersJson = args.TryGetValue("parameters_json", out var pj) ? pj.GetString() : null;
+
+        try
+        {
+            var action = await _remediationService.ProposeAsync(
+                tenantId, playbookKey, resourceId, title, reason, parametersJson, requestedBy: "ai:query");
+
+            return JsonSerializer.Serialize(new
+            {
+                proposed = true,
+                action_id = action.Id,
+                status = action.Status.ToString(),
+                approval_mode = action.ApprovalMode,
+                risk = action.RiskLevel.ToString(),
+                note = action.Status == Core.Models.RemediationStatus.Approved
+                    ? "Auto-approved by tenant policy (low risk); the execution worker will run it within ~5 minutes."
+                    : "Awaiting human approval in the approvals queue. Nothing has been changed yet."
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { proposed = false, error = ex.Message });
+        }
+    }
+
+    private async Task<string> ExecuteGetCloudAccounts(Guid tenantId)
+    {
+        var accounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
+        return JsonSerializer.Serialize(new
+        {
+            total = accounts.Count,
+            accounts = accounts.Select(a => new
+            {
+                a.AccountId,
+                provider = a.Provider.ToString(),
+                a.ExternalId,
+                a.DisplayName,
+                status = a.Status.ToString(),
+                regions = a.Regions,
+                last_inventory_at = a.LastInventoryAt,
+                last_error = a.LastError
+            })
         });
     }
 

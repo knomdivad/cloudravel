@@ -32,6 +32,10 @@ public sealed class InventoryResource
     public long Id { get; set; }
     public Guid TenantId { get; set; }
     public long SnapshotId { get; set; }
+
+    /// <summary>azure | aws | gcp — which cloud this resource was collected from.</summary>
+    public string Provider { get; set; } = "azure";
+
     public string ResourceId { get; set; } = string.Empty;
     public string SubscriptionId { get; set; } = string.Empty;
     public string ResourceGroup { get; set; } = string.Empty;

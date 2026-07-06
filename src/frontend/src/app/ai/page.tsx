@@ -16,14 +16,39 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-const SUGGESTED_QUERIES = [
-  'What are the most critical security findings across all subscriptions?',
-  'Show me resources without tags that should have them.',
-  'List all changes to NSGs in the last 7 days.',
-  'What are the top cost optimization opportunities?',
-  'Are there any VMs running without managed identity?',
-  'Summarize the security posture for this tenant.',
-];
+const MODES = [
+  { key: 'analyst', label: 'Analyst', hint: 'General environment Q&A' },
+  { key: 'operations', label: 'Operations', hint: 'Triage anomalies & incidents, propose remediations' },
+  { key: 'security', label: 'Security', hint: 'Posture assessment & root cause' },
+  { key: 'cost', label: 'Cost', hint: 'Waste & savings analysis' },
+] as const;
+
+const SUGGESTED_QUERIES: Record<string, string[]> = {
+  analyst: [
+    'What are the most critical security findings across all subscriptions?',
+    'Show me resources without tags that should have them.',
+    'List all changes to NSGs in the last 7 days.',
+    'Are there any VMs running without managed identity?',
+  ],
+  operations: [
+    'Triage the environment: what needs my attention right now?',
+    'Investigate the open anomalies and propose remediations where a playbook fits.',
+    'Which incidents are at risk of breaching SLA, and what has been tried so far?',
+    'Summarize remediation activity from the last 7 days.',
+  ],
+  security: [
+    'Assess the security posture and prioritize the top 5 remediation actions.',
+    'Did any recent change explain the new critical findings?',
+    'Which resources have security configuration drift in the last 24 hours?',
+    'Show unusual actor activity and whether it touched security-sensitive resources.',
+  ],
+  cost: [
+    'What are the top cost optimization opportunities?',
+    'Which resources are over-provisioned based on SKU tier?',
+    'Did identified waste increase recently, and which resources drive it?',
+    'Find idle compute across Azure, AWS, and GCP.',
+  ],
+};
 
 export default function AiPage() {
   const { tenantId, currentTenant } = useTenantContext();
@@ -31,6 +56,7 @@ export default function AiPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId] = useState(() => crypto.randomUUID());
+  const [mode, setMode] = useState<string>('analyst');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -58,6 +84,7 @@ export default function AiPage() {
         const response: AiQueryResponse = await queryAi(tenantId, {
           query: text,
           conversationId,
+          mode,
         });
 
         const assistantMsg: ChatMessage = {
@@ -83,7 +110,7 @@ export default function AiPage() {
         inputRef.current?.focus();
       }
     },
-    [input, tenantId, isLoading, conversationId]
+    [input, tenantId, isLoading, conversationId, mode]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -102,12 +129,28 @@ export default function AiPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
       {/* Header */}
-      <div className="mb-4">
-        <h1 className="text-xl font-bold">AI Insights</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Ask questions about {currentTenant?.displayName}'s Azure environment.
-          Answers are grounded in real inventory data — never fabricated.
-        </p>
+      <div className="mb-4 flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold">AI Insights</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Ask questions about {currentTenant?.displayName}'s multi-cloud environment.
+            Answers are grounded in real inventory data — never fabricated.
+          </p>
+        </div>
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
+          {MODES.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setMode(m.key)}
+              title={m.hint}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                mode === m.key ? 'bg-white text-azure-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Chat area */}
@@ -128,7 +171,7 @@ export default function AiPage() {
                 I use real-time data queries — never guessing.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl w-full">
-                {SUGGESTED_QUERIES.map((q, i) => (
+                {(SUGGESTED_QUERIES[mode] ?? SUGGESTED_QUERIES.analyst).map((q, i) => (
                   <button
                     key={i}
                     onClick={() => sendMessage(q)}

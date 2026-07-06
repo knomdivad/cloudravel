@@ -10,8 +10,14 @@ import {
   getPolicyCompliance,
   getTenants,
   getDashboard,
+  getOpsSummary,
+  getAnomalies,
+  getIncidents,
+  getRemediations,
+  getPlaybooks,
+  getCloudAccounts,
 } from './api';
-import type { TenantSummary, InventoryResource, TenantDashboard } from './types';
+import type { TenantSummary, InventoryResource, TenantDashboard, OpsSummary } from './types';
 
 /**
  * SWR hooks for data fetching with caching, revalidation, and error handling.
@@ -142,4 +148,61 @@ export function usePolicyCompliance(
     : null;
 
   return useSWR(key, () => getPolicyCompliance(tenantId!, params));
+}
+
+// ---- AIOps hooks ----
+
+export function useOpsSummary(tenantId: string | null) {
+  return useSWR<OpsSummary>(
+    tenantId ? ['ops-summary', tenantId] : null,
+    () => getOpsSummary(tenantId!),
+    { refreshInterval: 30_000 }
+  );
+}
+
+export function useAnomalies(
+  tenantId: string | null,
+  params?: { status?: string; severity?: string; kind?: string; limit?: number }
+) {
+  const key = tenantId
+    ? ['anomalies', tenantId, JSON.stringify(params || {})]
+    : null;
+
+  return useSWR(key, () => getAnomalies(tenantId!, params), { refreshInterval: 60_000 });
+}
+
+export function useIncidents(
+  tenantId: string | null,
+  params?: { status?: string; severity?: string; limit?: number }
+) {
+  const key = tenantId
+    ? ['incidents', tenantId, JSON.stringify(params || {})]
+    : null;
+
+  return useSWR(key, () => getIncidents(tenantId!, params), { refreshInterval: 60_000 });
+}
+
+export function useRemediations(
+  tenantId: string | null,
+  params?: { status?: string; limit?: number }
+) {
+  const key = tenantId
+    ? ['remediations', tenantId, JSON.stringify(params || {})]
+    : null;
+
+  return useSWR(key, () => getRemediations(tenantId!, params), { refreshInterval: 30_000 });
+}
+
+export function usePlaybooks(tenantId: string | null) {
+  return useSWR(
+    tenantId ? ['playbooks', tenantId] : null,
+    () => getPlaybooks(tenantId!)
+  );
+}
+
+export function useCloudAccounts(tenantId: string | null) {
+  return useSWR(
+    tenantId ? ['cloud-accounts', tenantId] : null,
+    () => getCloudAccounts(tenantId!)
+  );
 }

@@ -1,7 +1,9 @@
 using AzureInventoryMonitor.Api.Middleware;
 using AzureInventoryMonitor.Core.Interfaces;
+using AzureInventoryMonitor.Infrastructure.AiOps;
 using AzureInventoryMonitor.Infrastructure.Azure;
 using AzureInventoryMonitor.Infrastructure.Data;
+using AzureInventoryMonitor.Infrastructure.MultiCloud;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.Azure.Functions.Worker;
@@ -46,6 +48,10 @@ var host = new HostBuilder()
         services.AddScoped<IRecommendationRepository, RecommendationRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IAuditRepository, AuditRepository>();
+        services.AddScoped<IAnomalyRepository, AnomalyRepository>();
+        services.AddScoped<IIncidentRepository, IncidentRepository>();
+        services.AddScoped<IRemediationRepository, RemediationRepository>();
+        services.AddScoped<ICloudAccountRepository, CloudAccountRepository>();
 
         // Azure services — Scoped to avoid singleton-depends-on-scoped issue
         services.AddScoped<IAzureCredentialFactory, AzureCredentialFactory>();
@@ -53,6 +59,17 @@ var host = new HostBuilder()
         services.AddScoped<IAriIngestionService, AriIngestionService>();
         services.AddScoped<IChangePollingService, ChangePollingService>();
         services.AddScoped<IRecommendationSyncService, RecommendationSyncService>();
+
+        // Multi-cloud provider adapters (Azure + AWS + GCP)
+        services.AddScoped<ICloudProviderAdapter, AzureProviderAdapter>();
+        services.AddScoped<ICloudProviderAdapter, AwsProviderAdapter>();
+        services.AddScoped<ICloudProviderAdapter, GcpProviderAdapter>();
+        services.AddScoped<ICloudProviderAdapterFactory, CloudProviderAdapterFactory>();
+        services.AddScoped<IMultiCloudInventoryService, MultiCloudInventoryService>();
+
+        // AIOps engine: proactive anomaly detection + gated remediation
+        services.AddScoped<IAnomalyDetectionService, AnomalyDetectionService>();
+        services.AddScoped<IRemediationService, RemediationService>();
 
         // Key Vault client for storing tenant credentials
         var vaultUri = context.Configuration["KeyVault:VaultUri"]

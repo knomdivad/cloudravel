@@ -24,6 +24,8 @@ public interface IInventoryRepository
     Task CompleteSnapshotAsync(long snapshotId, int resourceCount, string blobPath);
     Task FailSnapshotAsync(long snapshotId, string errorMessage);
     Task BulkInsertResourcesAsync(long snapshotId, IEnumerable<InventoryResource> resources);
+    /// <summary>Removes a provider's rows from a snapshot so a multi-cloud re-sync can replace them.</summary>
+    Task DeleteResourcesByProviderAsync(long snapshotId, string provider);
     Task SetLatestSnapshotAsync(Guid tenantId, long snapshotId);
     Task<InventorySnapshot?> GetLatestSnapshotAsync(Guid tenantId);
     Task<InventorySnapshot?> GetSnapshotByIdAsync(long snapshotId);

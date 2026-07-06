@@ -51,6 +51,8 @@ public sealed class TenantRepository : ITenantRepository
                    change_poll_frequency_minutes AS ChangePollFrequencyMinutes,
                    key_vault_secret_name AS KeyVaultSecretName,
                    lighthouse_delegation_id AS LighthouseDelegationId,
+                   auto_remediation_mode AS AutoRemediationMode,
+                   aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
                    created_at AS CreatedAt, updated_at AS UpdatedAt, created_by AS CreatedBy
             FROM tenants WHERE tenant_id = @TenantId";
 
@@ -67,6 +69,8 @@ public sealed class TenantRepository : ITenantRepository
                    change_poll_frequency_minutes AS ChangePollFrequencyMinutes,
                    key_vault_secret_name AS KeyVaultSecretName,
                    lighthouse_delegation_id AS LighthouseDelegationId,
+                   auto_remediation_mode AS AutoRemediationMode,
+                   aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
                    created_at AS CreatedAt, updated_at AS UpdatedAt, created_by AS CreatedBy
             FROM tenants WHERE status IN ('active', 'degraded')
             ORDER BY display_name";
@@ -85,6 +89,8 @@ public sealed class TenantRepository : ITenantRepository
                    t.change_poll_frequency_minutes AS ChangePollFrequencyMinutes,
                    t.key_vault_secret_name AS KeyVaultSecretName,
                    t.lighthouse_delegation_id AS LighthouseDelegationId,
+                   t.auto_remediation_mode AS AutoRemediationMode,
+                   t.aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
                    t.created_at AS CreatedAt, t.updated_at AS UpdatedAt, t.created_by AS CreatedBy
             FROM tenants t
             INNER JOIN user_tenant_access uta ON t.tenant_id = uta.tenant_id
@@ -104,10 +110,12 @@ public sealed class TenantRepository : ITenantRepository
         const string sql = @"
             INSERT INTO tenants (tenant_id, display_name, azure_tenant_id, onboarding_method, status,
                                  snapshot_frequency_minutes, change_poll_frequency_minutes,
-                                 key_vault_secret_name, lighthouse_delegation_id, created_by)
+                                 key_vault_secret_name, lighthouse_delegation_id,
+                                 auto_remediation_mode, aiops_monitoring_enabled, created_by)
             VALUES (@TenantId, @DisplayName, @AzureTenantId, @OnboardingMethod, @Status,
                     @SnapshotFrequencyMinutes, @ChangePollFrequencyMinutes,
-                    @KeyVaultSecretName, @LighthouseDelegationId, @CreatedBy)";
+                    @KeyVaultSecretName, @LighthouseDelegationId,
+                    @AutoRemediationMode, @AiOpsMonitoringEnabled, @CreatedBy)";
 
         await conn.ExecuteAsync(sql, new
         {
@@ -120,6 +128,8 @@ public sealed class TenantRepository : ITenantRepository
             tenant.ChangePollFrequencyMinutes,
             tenant.KeyVaultSecretName,
             tenant.LighthouseDelegationId,
+            AutoRemediationMode = tenant.AutoRemediationMode.ToString().ToLowerInvariant(),
+            tenant.AiOpsMonitoringEnabled,
             CreatedBy = createdBy.ToString()
         });
 
@@ -159,6 +169,8 @@ public sealed class TenantRepository : ITenantRepository
                 change_poll_frequency_minutes = @ChangePollFrequencyMinutes,
                 key_vault_secret_name = @KeyVaultSecretName,
                 lighthouse_delegation_id = @LighthouseDelegationId,
+                auto_remediation_mode = @AutoRemediationMode,
+                aiops_monitoring_enabled = @AiOpsMonitoringEnabled,
                 updated_at = SYSUTCDATETIME()
             WHERE tenant_id = @TenantId";
 
@@ -170,7 +182,9 @@ public sealed class TenantRepository : ITenantRepository
             tenant.SnapshotFrequencyMinutes,
             tenant.ChangePollFrequencyMinutes,
             tenant.KeyVaultSecretName,
-            tenant.LighthouseDelegationId
+            tenant.LighthouseDelegationId,
+            AutoRemediationMode = tenant.AutoRemediationMode.ToString().ToLowerInvariant(),
+            tenant.AiOpsMonitoringEnabled
         });
 
         if (affected == 0)

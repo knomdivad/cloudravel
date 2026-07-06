@@ -58,6 +58,16 @@ output "ai_foundry_endpoint" {
   value       = local.ai_inference_uri
 }
 
+output "azure_openai_endpoint" {
+  description = "Endpoint of the Azure OpenAI account (GPT-5.5)"
+  value       = azurerm_cognitive_account.openai.endpoint
+}
+
+output "azure_openai_deployment" {
+  description = "Name of the Azure OpenAI model deployment"
+  value       = azurerm_cognitive_deployment.gpt.name
+}
+
 output "entra_app_client_id" {
   description = "Application (client) ID of the API app registration"
   value       = azuread_application.api.client_id

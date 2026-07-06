@@ -61,12 +61,12 @@ public sealed class InventoryRepository : IInventoryRepository
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
         const string sql = @"
-            INSERT INTO inventory_resources 
-            (tenant_id, snapshot_id, resource_id, subscription_id, resource_group, resource_type, resource_name,
+            INSERT INTO inventory_resources
+            (tenant_id, snapshot_id, provider, resource_id, subscription_id, resource_group, resource_type, resource_name,
              location, sku_name, sku_tier, sku_capacity, tags, identity_type, identity_principal_ids,
              properties_json, networking_json, security_config_json)
-            VALUES 
-            (@TenantId, @SnapshotId, @ResourceId, @SubscriptionId, @ResourceGroup, @ResourceType, @ResourceName,
+            VALUES
+            (@TenantId, @SnapshotId, @Provider, @ResourceId, @SubscriptionId, @ResourceGroup, @ResourceType, @ResourceName,
              @Location, @SkuName, @SkuTier, @SkuCapacity, @TagsJson, @IdentityType, @IdentityPrincipalIdsJson,
              @PropertiesJson, @NetworkingJson, @SecurityConfigJson)";
 
@@ -74,6 +74,7 @@ public sealed class InventoryRepository : IInventoryRepository
         {
             r.TenantId,
             r.SnapshotId,
+            r.Provider,
             r.ResourceId,
             r.SubscriptionId,
             r.ResourceGroup,
@@ -94,6 +95,15 @@ public sealed class InventoryRepository : IInventoryRepository
         // Dapper handles batch operations efficiently
         var count = await conn.ExecuteAsync(sql, batch);
         _logger.LogInformation("Inserted {Count} resources for snapshot {SnapshotId}", count, snapshotId);
+    }
+
+    public async Task DeleteResourcesByProviderAsync(long snapshotId, string provider)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var count = await conn.ExecuteAsync(
+            "DELETE FROM inventory_resources WHERE snapshot_id = @SnapshotId AND provider = @Provider",
+            new { SnapshotId = snapshotId, Provider = provider });
+        _logger.LogDebug("Removed {Count} {Provider} resources from snapshot {SnapshotId}", count, provider, snapshotId);
     }
 
     public async Task SetLatestSnapshotAsync(Guid tenantId, long snapshotId)
