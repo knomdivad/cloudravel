@@ -1,0 +1,118 @@
+# ============================================================================
+# Azure Inventory Monitor — local / OrbStack stack
+#
+#   cp .env.example .env      # then fill in Entra + (optional) OpenAI values
+#   docker compose up --build
+#
+#   Web UI      → http://localhost:3000
+#   API (direct)→ http://localhost:7071/api/health   (browser uses /api via nginx)
+#
+# Services:
+#   mssql     SQL Server 2022 (runs under amd64 emulation on Apple Silicon)
+#   azurite   Azure Storage emulator — satisfies AzureWebJobsStorage
+#   migrator  applies database/00{1,2,3}-*.sql once, then exits
+#   api       Azure Functions (.NET 8 isolated) backend
+#   web       Next.js static export via nginx, reverse-proxies /api → api
+# ============================================================================
+
+name: aim
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' -b"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    volumes:
+      - azurite-data:/data
+
+  migrator:
+    image: mcr.microsoft.com/mssql-tools:latest
+    platform: linux/amd64
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+    volumes:
+      - ./database:/database:ro
+    command: ["bash", "/database/apply-migrations.sh"]
+    restart: "no"
+
+  api:
+    build:
+      context: ./src/backend
+      dockerfile: AzureInventoryMonitor.Api/Dockerfile
+    depends_on:
+      mssql:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      # --- Functions runtime ---
+      AzureWebJobsStorage: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1"
+      FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
+      # --- Database ---
+      SqlConnectionString: "Server=mssql,1433;Database=aimdb;User ID=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;"
+      # --- Azure OpenAI (optional — AI page needs it; other pages work without) ---
+      AzureOpenAI__Endpoint: ${AZURE_OPENAI_ENDPOINT:-}
+      AzureOpenAI__ApiKey: ${AZURE_OPENAI_API_KEY:-}
+      AzureOpenAI__DeploymentName: ${AZURE_OPENAI_DEPLOYMENT:-gpt-5.5}
+      # --- Entra ID (JWT config; not enforced locally, safe to leave blank) ---
+      AzureAd__TenantId: ${AZURE_AD_TENANT_ID:-}
+      AzureAd__ClientId: ${AZURE_AD_CLIENT_ID:-}
+      # --- Disable cloud-credential-dependent triggers for local dev. ---
+      # The AIOps timers (AnomalyScanTimer, RemediationQueueTimer) stay ENABLED —
+      # they run against the local DB and drive the Operations/Approvals demo.
+      AzureWebJobs.PollChangesTimer.Disabled: "true"
+      AzureWebJobs.SyncAdvisorTimer.Disabled: "true"
+      AzureWebJobs.SyncPolicyTimer.Disabled: "true"
+      AzureWebJobs.SyncDefenderTimer.Disabled: "true"
+      AzureWebJobs.CollectInventoryTimer.Disabled: "true"
+      AzureWebJobs.MultiCloudInventoryTimer.Disabled: "true"
+      AzureWebJobs.SnapshotIngestionWorker.Disabled: "true"
+      # Dummy namespace so the (disabled) Service Bus trigger doesn't fail indexing.
+      ServiceBusConnection__fullyQualifiedNamespace: "localhost.servicebus.windows.net"
+    ports:
+      - "7071:80"
+
+  web:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api
+        NEXT_PUBLIC_AZURE_AD_CLIENT_ID: ${NEXT_PUBLIC_AZURE_AD_CLIENT_ID:-}
+        NEXT_PUBLIC_AZURE_AD_TENANT_ID: ${NEXT_PUBLIC_AZURE_AD_TENANT_ID:-}
+        NEXT_PUBLIC_API_SCOPE: ${NEXT_PUBLIC_API_SCOPE:-}
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "3000:80"
+
+volumes:
+  mssql-data:
+  azurite-data:

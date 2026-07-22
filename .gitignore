@@ -28,3 +28,7 @@ Thumbs.db
 # Secrets
 *.pfx
 *.key
+
+# Docker / local stack
+.env
+

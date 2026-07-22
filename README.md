@@ -139,6 +139,39 @@ sqlcmd -S localhost -d aimdb -i 002-fix-rls-bypass.sql
 sqlcmd -S localhost -d aimdb -i 003-aiops-multicloud.sql
 ```
 
+### Run the full stack with Docker (local / OrbStack)
+
+The repo ships a self-contained stack — SQL Server, the Azure Storage emulator,
+the Functions API, and the Next.js UI — so you can bring everything up with one
+command. Migrations are applied automatically and idempotently.
+
+```bash
+cp .env.example .env
+# Edit .env: set MSSQL_SA_PASSWORD and your Entra ID values
+# (NEXT_PUBLIC_AZURE_AD_* are required for the login screen).
+
+docker compose up --build
+```
+
+| Service | URL / Port | Notes |
+|---|---|---|
+| Web UI | http://localhost:3000 | nginx serves the static export and proxies `/api` → the Functions host (single origin, no CORS) |
+| API (direct) | http://localhost:7071/api/health | Optional — the browser reaches the API via `/api` through the UI |
+| SQL Server | localhost:1433 | `sa` / `MSSQL_SA_PASSWORD` |
+
+Notes:
+- On Apple Silicon, `mssql` and the migration tools run under `linux/amd64`
+  emulation (handled transparently by OrbStack).
+- The `migrator` service applies `database/001`, `002`, and `003` once each,
+  tracked in a `dbo.__migrations` ledger, so `docker compose up` is safe to re-run.
+- Cloud-credential-dependent triggers (change polling, Advisor/Policy/Defender
+  sync, ARI ingestion) are **disabled** in the container; the DB-driven AIOps
+  timers (anomaly scan, remediation queue) stay enabled so the Operations and
+  Approvals pages are live. Azure OpenAI is optional — set `AZURE_OPENAI_*` in
+  `.env` to enable the AI Insights page.
+- To ship an update: `git pull && docker compose up --build` (add `--force-recreate`
+  if a container is caching an old image).
+
 ### Local Configuration
 
 Copy `src/backend/AzureInventoryMonitor.Api/local.settings.json` and set:

@@ -23,7 +23,7 @@ namespace AzureInventoryMonitor.Infrastructure.Azure;
 public sealed class AzureCredentialFactory : IAzureCredentialFactory
 {
     private readonly ITenantRepository _tenantRepo;
-    private readonly SecretClient _secretClient;
+    private readonly SecretClient? _secretClient;
     private readonly DefaultAzureCredential _defaultCredential;
     private readonly ILogger<AzureCredentialFactory> _logger;
 
@@ -36,10 +36,12 @@ public sealed class AzureCredentialFactory : IAzureCredentialFactory
         _logger = logger;
         _defaultCredential = new DefaultAzureCredential();
 
-        var vaultUri = configuration["KeyVault:VaultUri"]
-            ?? configuration["KeyVaultUrl"]
-            ?? throw new InvalidOperationException("KeyVault:VaultUri is required.");
-        _secretClient = new SecretClient(new Uri(vaultUri), _defaultCredential);
+        // Key Vault is only required for App Registration tenants. Lighthouse
+        // tenants — and DB-only local/containerized deployments — work without
+        // it, so construct the client lazily instead of throwing at startup.
+        var vaultUri = configuration["KeyVault:VaultUri"] ?? configuration["KeyVaultUrl"];
+        if (!string.IsNullOrEmpty(vaultUri))
+            _secretClient = new SecretClient(new Uri(vaultUri), _defaultCredential);
     }
 
     public async Task<TokenCredential> GetCredentialForTenantAsync(Guid tenantId)
@@ -71,6 +73,13 @@ public sealed class AzureCredentialFactory : IAzureCredentialFactory
 
     private async Task<TokenCredential> GetAppRegistrationCredentialAsync(Tenant tenant)
     {
+        if (_secretClient is null)
+        {
+            throw new InvalidOperationException(
+                "Key Vault is not configured (set KeyVault:VaultUri). App Registration tenants require it " +
+                "to resolve client credentials; Lighthouse tenants do not.");
+        }
+
         if (string.IsNullOrEmpty(tenant.KeyVaultSecretName))
         {
             throw new InvalidOperationException(
