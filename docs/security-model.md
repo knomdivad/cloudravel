@@ -85,9 +85,9 @@ Option B (App Registration):
 
 | Role | Scope | Permissions |
 |---|---|---|
-| `aim.admin` | Global | All tenants, user management, onboarding, settings |
-| `aim.operator` | Per-tenant | View inventory, changes, recommendations; run AI queries; acknowledge findings |
-| `aim.auditor` | Per-tenant | Read-only view of all data; export reports; no mutations |
+| `aim.admin` | Global | All tenants, user management, onboarding, settings, remediation approval, auto-remediation policy |
+| `aim.operator` | Per-tenant | View inventory, changes, recommendations; run AI queries; acknowledge findings; triage anomalies/incidents; approve/reject remediations |
+| `aim.auditor` | Per-tenant | Read-only view of all data (including remediation history); export reports; no mutations |
 | `customer.admin` | Own tenant | View own tenant data; manage own tenant preferences |
 | `customer.viewer` | Own tenant | Read-only view of own tenant data |
 
@@ -102,9 +102,14 @@ Option B (App Registration):
 - Every API function sets SQL session context: `tenant_id`
 - Every blob operation uses tenant-specific container
 - Every Resource Graph query is scoped to tenant's subscriptions
+- Every AWS/GCP call resolves credentials from the tenant's own linked cloud accounts
+- Remediation execution resolves the playbook + tenant policy on every run
 
 ### Layer 3: Database (RLS)
-- Row-Level Security policy on every table
+- Row-Level Security policy on every tenant-scoped table, including the AIOps tables
+  (`cloud_accounts`, `anomalies`, `metric_baselines`, `incidents`, `incident_events`,
+  `remediation_actions`) — `remediation_playbooks` is a global allow-list catalog and
+  deliberately carries no tenant data
 - Even direct SQL access (for debugging) requires setting session context
 - DBA access requires explicit policy exemption
 
@@ -121,9 +126,15 @@ Option B (App Registration):
 | App Registration client secrets | Key Vault | Auto-rotate every 90 days |
 | App Registration certificates | Key Vault | Auto-rotate every 12 months |
 | Azure SQL connection string | Key Vault + Managed Identity (passwordless preferred) | N/A |
-| OpenAI API key | Key Vault | Manual (single MSP key) |
+| Azure OpenAI API key (`AzureOpenAiApiKey`) | Key Vault (set by Terraform) | On demand (key regen + re-apply) |
+| AWS access keys (`cloudaccount-{id}`) | Key Vault — JSON `{accessKeyId, secretAccessKey, defaultRegion}` | Customer-driven; re-link account to rotate |
+| GCP service account keys (`cloudaccount-{id}`) | Key Vault — standard SA key JSON | Customer-driven; re-link account to rotate |
 | Service Bus connection | Managed Identity (no key) | N/A |
 | Blob Storage connection | Managed Identity (no key) | N/A |
+
+Cloud account credentials are written to Key Vault at link time and only the secret
+*name* is persisted in SQL. Credentials never appear in API responses, logs, or the
+AI context.
 
 ## Audit Trail
 
@@ -138,3 +149,46 @@ All API calls are logged to Application Insights with:
 Audit logs are retained for 2 years (configurable).
 Security-impacting operations (onboarding, RBAC changes, data export) generate
 additional structured audit events in Azure SQL.
+
+## Remediation Safety Model
+
+The AIOps engine can change customer environments, so its authority is deliberately
+narrow and layered (most restrictive layer wins):
+
+```
+1. Allow-list      — every action maps to a row in remediation_playbooks with a
+                     typed executor per provider. Unknown action types are rejected
+                     by the adapters. There is NO free-form execution path.
+2. Tenant policy   — auto_remediation_mode: disabled | gated (default) | auto.
+                     'auto' only auto-approves Low-risk playbooks.
+3. Playbook flags  — always_requires_approval playbooks (e.g. NSG rule removal)
+                     can never auto-approve regardless of tenant policy.
+4. Approval gate   — gated actions sit in PendingApproval until a human approves
+                     or rejects; pending actions expire after 7 days so stale
+                     proposals never fire against a drifted environment.
+5. State machine   — execution only ever starts from Approved, with an atomic
+                     Approved → Executing transition (safe under concurrency).
+6. Audit           — every transition, executor result, and error is persisted on
+                     the action row and mirrored into the incident timeline.
+```
+
+### AI write-path containment
+
+The AI assistant (GPT-5.5 via Azure OpenAI) has exactly one tool with side effects:
+`propose_remediation`. It creates a remediation action that enters the same approval
+gate as engine- and human-proposed actions — the model cannot approve, execute, or
+bypass anything. All other tools are read-only queries against tenant-scoped stores.
+
+### Cloud write permissions
+
+Remediation needs narrowly-scoped write roles beyond the read-only inventory model:
+
+| Provider | Read (inventory) | Write (remediation executors only) |
+|---|---|---|
+| Azure | Reader via Lighthouse/App Reg | Scoped roles for allow-listed operations, e.g. Storage Account Contributor, VM Contributor, Network Contributor, Tag Contributor on managed scopes |
+| AWS | `tag:GetResources`, `sts:GetCallerIdentity` | `ec2:StopInstances`, `s3:PutBucketPublicAccessBlock` |
+| GCP | `cloudasset.assets.list` | `compute.instances.stop`, `storage.buckets.update` |
+
+Grant write permissions only for the playbooks a tenant actually enables; the
+platform degrades gracefully (execution fails with a recorded error) when a
+permission is absent.
