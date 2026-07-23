@@ -65,33 +65,60 @@ public sealed class AzureCredentialFactory : IAzureCredentialFactory
 
     private async Task<TokenCredential> GetAppRegistrationCredentialAsync(Tenant tenant)
     {
-        if (string.IsNullOrEmpty(tenant.SecretName))
-        {
-            throw new InvalidOperationException(
-                $"Tenant {tenant.TenantId} uses App Registration but has no secret configured.");
-        }
-
-        if (_secretStore == null)
-        {
-            throw new InvalidOperationException(
-                $"Tenant {tenant.TenantId} uses App Registration, which requires a secret store (OpenBao:Address), but it is not configured.");
-        }
-
         _logger.LogDebug("Retrieving App Registration credentials from the secret store for tenant {TenantId}",
             tenant.TenantId);
+        return await ResolveAppRegistrationCredentialAsync(
+            tenant.AzureTenantId, tenant.SecretName, $"tenant {tenant.TenantId}");
+    }
+
+    /// <summary>
+    /// Resolves credentials for one Azure tenant CONNECTION (a cloud_orgs row,
+    /// provider=Azure) — the basis for a workspace holding multiple Azure tenants
+    /// as peers, rather than the single legacy connection on the tenants table.
+    /// </summary>
+    public async Task<TokenCredential> GetCredentialForAzureOrgAsync(CloudOrg azureOrg)
+    {
+        if (azureOrg.Provider != CloudProvider.Azure)
+            throw new InvalidOperationException($"Cloud org {azureOrg.OrgId} is not an Azure connection.");
+        if (azureOrg.Status == CloudOrgStatus.Disconnected)
+            throw new InvalidOperationException($"Azure connection {azureOrg.OrgId} is disconnected.");
+
+        return azureOrg.OnboardingMethod?.ToLowerInvariant() switch
+        {
+            "lighthouse" => GetLighthouseCredential(azureOrg),
+            "app_registration" => await ResolveAppRegistrationCredentialAsync(
+                azureOrg.ExternalId ?? "", azureOrg.CredentialSecretName, $"Azure org {azureOrg.OrgId}"),
+            _ => throw new InvalidOperationException(
+                $"Azure org {azureOrg.OrgId} has no onboarding method configured.")
+        };
+    }
+
+    private TokenCredential GetLighthouseCredential(CloudOrg azureOrg)
+    {
+        _logger.LogDebug("Using Lighthouse delegation for Azure org {OrgId} ({ExternalId})",
+            azureOrg.OrgId, azureOrg.ExternalId);
+        return _defaultCredential;
+    }
+
+    private async Task<TokenCredential> ResolveAppRegistrationCredentialAsync(
+        string azureTenantId, string? secretName, string context)
+    {
+        if (string.IsNullOrEmpty(secretName))
+            throw new InvalidOperationException($"{context} uses App Registration but has no secret configured.");
+
+        if (_secretStore == null)
+            throw new InvalidOperationException(
+                $"{context} uses App Registration, which requires a secret store (OpenBao:Address), but it is not configured.");
 
         // Secret is stored as JSON: { "clientId": "...", "clientSecret": "..." }
-        var secretValue = await _secretStore.GetSecretAsync(tenant.SecretName)
-            ?? throw new InvalidOperationException($"No secret found for tenant {tenant.TenantId} ({tenant.SecretName}).");
+        var secretValue = await _secretStore.GetSecretAsync(secretName)
+            ?? throw new InvalidOperationException($"No secret found for {context} ({secretName}).");
         var credentials = System.Text.Json.JsonSerializer.Deserialize<AppRegistrationCredentials>(
             secretValue,
             new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-            ?? throw new InvalidOperationException($"Failed to deserialize credentials for tenant {tenant.TenantId}.");
+            ?? throw new InvalidOperationException($"Failed to deserialize credentials for {context}.");
 
-        return new ClientSecretCredential(
-            tenant.AzureTenantId,
-            credentials.ClientId,
-            credentials.ClientSecret);
+        return new ClientSecretCredential(azureTenantId, credentials.ClientId, credentials.ClientSecret);
     }
 
     private sealed class AppRegistrationCredentials

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.ResourceGraph;
 using Azure.ResourceManager.ResourceGraph.Models;
@@ -9,19 +10,30 @@ using TenantResource = Azure.ResourceManager.Resources.TenantResource;
 
 namespace AzureInventoryMonitor.Infrastructure.Azure;
 
+/// <summary>
+/// Collects Azure inventory for a workspace by looping every Azure tenant
+/// CONNECTION (cloud_orgs rows, provider=Azure) attached to it, so an
+/// Organization can hold multiple Azure tenants as peers — the same pattern
+/// already used for AWS Organizations and GCP Organizations. Falls back to the
+/// legacy single-credential (tenants-table) path for a workspace with zero
+/// Azure connections, which should only occur pre-migration-009.
+/// </summary>
 public sealed class InventoryCollectionService : IInventoryCollectionService
 {
     private readonly IAzureCredentialFactory _credentialFactory;
     private readonly IInventoryRepository _inventoryRepo;
+    private readonly ICloudOrgRepository _cloudOrgRepo;
     private readonly ILogger<InventoryCollectionService> _logger;
 
     public InventoryCollectionService(
         IAzureCredentialFactory credentialFactory,
         IInventoryRepository inventoryRepo,
+        ICloudOrgRepository cloudOrgRepo,
         ILogger<InventoryCollectionService> logger)
     {
         _credentialFactory = credentialFactory;
         _inventoryRepo = inventoryRepo;
+        _cloudOrgRepo = cloudOrgRepo;
         _logger = logger;
     }
 
@@ -32,97 +44,69 @@ public sealed class InventoryCollectionService : IInventoryCollectionService
 
         try
         {
-            var credential = await _credentialFactory.GetCredentialForTenantAsync(tenantId);
-            var armClient = new ArmClient(credential);
-            var tenantResource = armClient.GetTenants().GetAll().First();
+            var azureOrgs = (await _cloudOrgRepo.GetByTenantAsync(tenantId))
+                .Where(o => o.Provider == CloudProvider.Azure && o.Status != CloudOrgStatus.Disconnected)
+                .ToList();
 
             var allResources = new List<InventoryResource>();
 
-            // 1. Collect resources
-            await QueryResourceGraphAsync(tenantResource, @"
-                Resources
-                | project id, name, type, location, resourceGroup, subscriptionId,
-                          sku, tags, identity, properties
-                | order by type asc, name asc",
-                el =>
-                {
-                    var resource = ParseResourceGraphResult(tenantId, snapshotId, el);
-                    if (resource != null) allResources.Add(resource);
-                });
-
-            _logger.LogInformation("Collected {Count} resources from Resource Graph for tenant {TenantId}",
-                allResources.Count, tenantId);
-
-            // 2. Collect subscriptions from resourcecontainers
-            var subscriptions = new List<InventoryResource>();
-            await QueryResourceGraphAsync(tenantResource, @"
-                resourcecontainers
-                | where type == 'microsoft.resources/subscriptions'
-                | project id, name, type, subscriptionId, tags, properties",
-                el =>
-                {
-                    var sub = ParseSubscriptionResult(tenantId, snapshotId, el);
-                    if (sub != null) subscriptions.Add(sub);
-                });
-
-            _logger.LogInformation("Collected {Count} subscriptions for tenant {TenantId}",
-                subscriptions.Count, tenantId);
-
-            // 3. Enrich subscriptions with secure scores
-            var secureScores = new Dictionary<string, JsonElement>();
-            try
+            if (azureOrgs.Count == 0)
             {
-                await QueryResourceGraphAsync(tenantResource, @"
-                    securityresources
-                    | where type == 'microsoft.security/securescores'
-                    | where properties.displayName == 'ASC score'
-                    | project subscriptionId, properties",
-                    el =>
+                // Legacy fallback: no cloud_orgs Azure connection exists yet for this
+                // workspace (shouldn't occur post-migration-009, but keeps an
+                // unmigrated workspace working) — collect via the single tenants-row
+                // credential exactly as before. A failure here fails the whole
+                // snapshot, matching the pre-multi-tenant behavior.
+                var credential = await _credentialFactory.GetCredentialForTenantAsync(tenantId);
+                var resources = await CollectFromCredentialAsync(credential, azureTenantId: null,
+                    subscriptionIds: null, tenantId, snapshotId);
+                allResources.AddRange(resources);
+            }
+            else
+            {
+                foreach (var azureOrg in azureOrgs)
+                {
+                    try
                     {
-                        if (el.TryGetProperty("subscriptionId", out var subIdProp))
+                        var credential = await _credentialFactory.GetCredentialForAzureOrgAsync(azureOrg);
+                        IReadOnlyList<string>? subscriptionIds = null;
+                        if (azureOrg.SubscriptionScope == "specific")
                         {
-                            var subId = subIdProp.GetString();
-                            if (!string.IsNullOrEmpty(subId) && el.TryGetProperty("properties", out var props))
-                                secureScores[subId] = props.Clone();
+                            var pinned = await _cloudOrgRepo.GetAzureSubscriptionsAsync(tenantId, azureOrg.OrgId);
+                            subscriptionIds = pinned.Select(p => p.SubscriptionId).ToList();
                         }
-                    });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Secure score query failed for tenant {TenantId} — Defender may not be enabled", tenantId);
-            }
 
-            // Merge secure scores into subscription properties
-            foreach (var sub in subscriptions)
-            {
-                if (secureScores.TryGetValue(sub.SubscriptionId, out var scoreProps))
-                {
-                    var propsDict = string.IsNullOrEmpty(sub.PropertiesJson)
-                        ? new Dictionary<string, object>()
-                        : JsonSerializer.Deserialize<Dictionary<string, object>>(sub.PropertiesJson) ?? new();
+                        var resources = await CollectFromCredentialAsync(
+                            credential, azureOrg.ExternalId, subscriptionIds, tenantId, snapshotId);
+                        allResources.AddRange(resources);
 
-                    if (scoreProps.TryGetProperty("score", out var scoreProp))
-                    {
-                        if (scoreProp.TryGetProperty("current", out var cur))
-                            propsDict["secureScoreCurrent"] = cur.GetDouble();
-                        if (scoreProp.TryGetProperty("max", out var max))
-                            propsDict["secureScoreMax"] = max.GetDouble();
-                        if (scoreProp.TryGetProperty("percentage", out var pct))
-                            propsDict["secureScorePercentage"] = pct.GetDouble();
+                        if (azureOrg.Status != CloudOrgStatus.Active)
+                            await _cloudOrgRepo.UpdateStatusAsync(tenantId, azureOrg.OrgId, CloudOrgStatus.Active);
                     }
-
-                    sub.PropertiesJson = JsonSerializer.Serialize(propsDict);
+                    catch (Exception ex)
+                    {
+                        // One bad Azure connection must not sink every other
+                        // connection's data — matches the AWS/GCP multi-cloud pattern.
+                        _logger.LogError(ex, "Azure connection {OrgId} ({ExternalId}) failed during collection for workspace {TenantId}",
+                            azureOrg.OrgId, azureOrg.ExternalId, tenantId);
+                        try
+                        {
+                            await _cloudOrgRepo.UpdateStatusAsync(tenantId, azureOrg.OrgId, CloudOrgStatus.Degraded);
+                        }
+                        catch (Exception statusEx)
+                        {
+                            _logger.LogWarning(statusEx, "Failed to mark Azure connection {OrgId} Degraded", azureOrg.OrgId);
+                        }
+                    }
                 }
             }
-
-            allResources.AddRange(subscriptions);
 
             await _inventoryRepo.BulkInsertResourcesAsync(snapshotId, allResources);
             await _inventoryRepo.CompleteSnapshotAsync(snapshotId, allResources.Count, "inline-resource-graph");
             await _inventoryRepo.SetLatestSnapshotAsync(tenantId, snapshotId);
 
-            _logger.LogInformation("Snapshot {SnapshotId} completed with {Count} resources for tenant {TenantId} (triggered by {TriggeredBy})",
-                snapshotId, allResources.Count, tenantId, triggeredBy);
+            _logger.LogInformation("Snapshot {SnapshotId} completed with {Count} resources across {Connections} Azure connection(s) for tenant {TenantId} (triggered by {TriggeredBy})",
+                snapshotId, allResources.Count, Math.Max(azureOrgs.Count, 1), tenantId, triggeredBy);
 
             return (snapshotId, allResources.Count);
         }
@@ -132,6 +116,120 @@ public sealed class InventoryCollectionService : IInventoryCollectionService
             await _inventoryRepo.FailSnapshotAsync(snapshotId, ex.Message);
             throw;
         }
+    }
+
+    /// <summary>Runs the full Resource Graph collection (resources + subscriptions + secure scores) for one credential/connection.</summary>
+    private async Task<List<InventoryResource>> CollectFromCredentialAsync(
+        TokenCredential credential, string? azureTenantId, IReadOnlyList<string>? subscriptionIds,
+        Guid tenantId, long snapshotId)
+    {
+        var armClient = new ArmClient(credential);
+        var tenantResource = ResolveTenantResource(armClient, azureTenantId);
+        var resources = new List<InventoryResource>();
+
+        // 1. Collect resources
+        await QueryResourceGraphAsync(tenantResource, subscriptionIds, @"
+            Resources
+            | project id, name, type, location, resourceGroup, subscriptionId,
+                      sku, tags, identity, properties
+            | order by type asc, name asc",
+            el =>
+            {
+                var resource = ParseResourceGraphResult(tenantId, snapshotId, el);
+                if (resource != null) resources.Add(resource);
+            });
+
+        // 2. Collect subscriptions from resourcecontainers
+        var subscriptions = new List<InventoryResource>();
+        await QueryResourceGraphAsync(tenantResource, subscriptionIds, @"
+            resourcecontainers
+            | where type == 'microsoft.resources/subscriptions'
+            | project id, name, type, subscriptionId, tags, properties",
+            el =>
+            {
+                var sub = ParseSubscriptionResult(tenantId, snapshotId, el);
+                if (sub != null) subscriptions.Add(sub);
+            });
+
+        // 3. Enrich subscriptions with secure scores
+        var secureScores = new Dictionary<string, JsonElement>();
+        try
+        {
+            await QueryResourceGraphAsync(tenantResource, subscriptionIds, @"
+                securityresources
+                | where type == 'microsoft.security/securescores'
+                | where properties.displayName == 'ASC score'
+                | project subscriptionId, properties",
+                el =>
+                {
+                    if (el.TryGetProperty("subscriptionId", out var subIdProp))
+                    {
+                        var subId = subIdProp.GetString();
+                        if (!string.IsNullOrEmpty(subId) && el.TryGetProperty("properties", out var props))
+                            secureScores[subId] = props.Clone();
+                    }
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Secure score query failed for Azure connection {AzureTenantId} (workspace {TenantId}) — Defender may not be enabled",
+                azureTenantId ?? "(primary)", tenantId);
+        }
+
+        // Merge secure scores into subscription properties
+        foreach (var sub in subscriptions)
+        {
+            if (secureScores.TryGetValue(sub.SubscriptionId, out var scoreProps))
+            {
+                var propsDict = string.IsNullOrEmpty(sub.PropertiesJson)
+                    ? new Dictionary<string, object>()
+                    : JsonSerializer.Deserialize<Dictionary<string, object>>(sub.PropertiesJson) ?? new();
+
+                if (scoreProps.TryGetProperty("score", out var scoreProp))
+                {
+                    if (scoreProp.TryGetProperty("current", out var cur))
+                        propsDict["secureScoreCurrent"] = cur.GetDouble();
+                    if (scoreProp.TryGetProperty("max", out var max))
+                        propsDict["secureScoreMax"] = max.GetDouble();
+                    if (scoreProp.TryGetProperty("percentage", out var pct))
+                        propsDict["secureScorePercentage"] = pct.GetDouble();
+                }
+
+                sub.PropertiesJson = JsonSerializer.Serialize(propsDict);
+            }
+        }
+
+        resources.AddRange(subscriptions);
+
+        _logger.LogInformation("Collected {Count} resources ({SubCount} subscriptions) from Azure connection {AzureTenantId} for workspace {TenantId}",
+            resources.Count, subscriptions.Count, azureTenantId ?? "(primary)", tenantId);
+
+        return resources;
+    }
+
+    /// <summary>
+    /// Resolves the ARM TenantResource matching a specific Azure AD tenant GUID.
+    /// Matters once a credential (e.g. a Lighthouse-delegated managed identity) can
+    /// see MULTIPLE Azure AD tenants: without this, ArmClient.GetTenants().GetAll()
+    /// could resolve to the wrong tenant for a given connection.
+    /// </summary>
+    private static TenantResource ResolveTenantResource(ArmClient armClient, string? azureTenantId)
+    {
+        var all = armClient.GetTenants().GetAll().ToList();
+
+        if (string.IsNullOrEmpty(azureTenantId))
+            return all.First(); // legacy fallback: no specific tenant to match against
+
+        var match = all.FirstOrDefault(t =>
+            string.Equals(t.Id.Name, azureTenantId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t.Data.TenantId?.ToString(), azureTenantId, StringComparison.OrdinalIgnoreCase));
+
+        if (match == null)
+            throw new InvalidOperationException(
+                $"Azure AD tenant {azureTenantId} is not visible to the configured credential " +
+                "(check the Lighthouse delegation or app registration tenant).");
+
+        return match;
     }
 
     private static InventoryResource? ParseResourceGraphResult(Guid tenantId, long snapshotId, JsonElement el)
@@ -246,6 +344,7 @@ public sealed class InventoryCollectionService : IInventoryCollectionService
 
     private static async Task QueryResourceGraphAsync(
         TenantResource tenantResource,
+        IReadOnlyList<string>? subscriptionIds,
         string query,
         Action<JsonElement> processElement)
     {
@@ -260,6 +359,11 @@ public sealed class InventoryCollectionService : IInventoryCollectionService
                     Top = 1000
                 }
             };
+            // Scopes the query to specific subscriptions when the connection is
+            // pinned to a subset; an empty list means "everything this credential
+            // can see" (Resource Graph's default when Subscriptions is omitted).
+            if (subscriptionIds is { Count: > 0 })
+                foreach (var s in subscriptionIds) request.Subscriptions.Add(s);
             if (skipToken != null)
                 request.Options.SkipToken = skipToken;
 

@@ -98,7 +98,11 @@ public interface ICloudOrgRepository
     Task<CloudOrg> CreateAsync(CloudOrg org);
     Task<CloudOrg?> GetByIdAsync(Guid tenantId, Guid orgId);
     Task<IReadOnlyList<CloudOrg>> GetByTenantAsync(Guid tenantId);
-    Task UpdateStatusAsync(Guid tenantId, Guid orgId, CloudAccountStatus status);
+    Task UpdateStatusAsync(Guid tenantId, Guid orgId, CloudOrgStatus status);
+
+    /// <summary>Pin subscriptions to an Azure connection (subscription_scope='specific'). No-op if empty.</summary>
+    Task AddAzureSubscriptionsAsync(Guid tenantId, Guid orgId, IReadOnlyList<string> subscriptionIds);
+    Task<IReadOnlyList<AzureOrgSubscription>> GetAzureSubscriptionsAsync(Guid tenantId, Guid orgId);
 }
 
 /// <summary>

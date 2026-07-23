@@ -10,8 +10,17 @@ public interface IAzureCredentialFactory
     /// Returns a TokenCredential scoped to the given customer tenant.
     /// For Lighthouse: Uses the MSP managed identity (Lighthouse handles cross-tenant).
     /// For App Reg: Retrieves client secret/cert from Key Vault and builds a ClientSecretCredential.
+    /// This resolves the workspace's PRIMARY (first-connected) Azure tenant only — change
+    /// polling, Advisor/Policy/Defender sync, and Azure remediation execution still use it.
     /// </summary>
     Task<Azure.Core.TokenCredential> GetCredentialForTenantAsync(Guid tenantId);
+
+    /// <summary>
+    /// Returns a TokenCredential for one Azure tenant CONNECTION (a cloud_orgs row,
+    /// provider=Azure) — the basis for multi-Azure-tenant-per-organization inventory
+    /// collection, where a workspace can have N connections instead of just one.
+    /// </summary>
+    Task<Azure.Core.TokenCredential> GetCredentialForAzureOrgAsync(AzureInventoryMonitor.Core.Models.CloudOrg azureOrg);
 }
 
 /// <summary>

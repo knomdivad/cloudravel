@@ -202,8 +202,10 @@ export default function CloudsPage() {
 
   const awsOrgs = orgs.filter(o => o.provider.toLowerCase() === 'aws');
   const gcpOrgs = orgs.filter(o => o.provider.toLowerCase() === 'gcp');
-  const azureConnected = !!azureTenant;
-  const totalClouds = (azureConnected ? 1 : 0) + orgs.length;
+  const azureOrgs = orgs.filter(o => o.provider.toLowerCase() === 'azure');
+  const azureConnected = azureOrgs.length > 0;
+  // orgs already includes every provider (Azure joined cloud_orgs as a peer, same as AWS/GCP).
+  const totalClouds = orgs.length;
 
   return (
     <div className="space-y-8">
@@ -297,62 +299,89 @@ export default function CloudsPage() {
         </div>
       )}
 
-      {/* Azure */}
+      {/* Azure — an organization can hold multiple Azure tenants as peers, exactly
+          like multiple AWS/GCP organizations. `azureTenant` (the legacy workspace
+          policy row) still drives workspace-wide suspend/offboard + the single
+          Collect Inventory action, since every Azure connection in a workspace
+          collects together in one merged snapshot. Each connection below shows
+          its own status and can be individually suspended. */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Azure</h2>
-        {azureTenant ? (
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Azure</h2>
+          {azureTenant && azureOrgs.length > 0 && (
+            <button onClick={() => handleCollectInventory(azureTenant)} disabled={isDev || collectingTenant === azureTenant.tenantId}
+              title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory for every connected Azure tenant'}
+              className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+              {collectingTenant === azureTenant.tenantId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+              {collectingTenant === azureTenant.tenantId ? 'Collecting...' : 'Collect Inventory'}
+            </button>
+          )}
+        </div>
+
+        {azureTenant && azureOrgs.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Azure monitoring</p>
+              <p className="text-xs text-gray-400">
+                {azureOrgs.length} Azure tenant{azureOrgs.length === 1 ? '' : 's'} connected to this organization
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(azureTenant.status)}`}>{azureTenant.status}</span>
+              {getStatusActions(azureTenant.status).map(action => (
+                <button key={action.value} onClick={() => setStatusAction({ tenant: azureTenant, newStatus: action.value })}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${action.destructive ? 'text-red-600 border border-red-200 hover:bg-red-50' : 'text-green-600 border border-green-200 hover:bg-green-50'}`}>
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {azureOrgs.length === 0 ? (
+          <div className="bg-white rounded-lg border border-dashed border-gray-300 p-5 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-700">No Azure tenants connected</p>
+              <p className="text-xs text-gray-400 mt-0.5">Connect one or more Azure tenants to this organization (all or specific subscriptions each).</p>
+            </div>
+            <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50">
+              Connect Azure
+            </button>
+          </div>
+        ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {(() => {
-              const tenant = azureTenant;
-              const actions = getStatusActions(tenant.status);
+            {azureOrgs.map(org => {
+              const actions = getOrgStatusActions(org.status);
+              const scope = org.subscriptionScope ?? 'all';
               return (
-                <div key={tenant.tenantId} className="bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow">
-                  <div className="flex items-start justify-between mb-3">
+                <div key={org.orgId} className="bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between mb-1">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES.azure}`}>Azure</span>
-                      <h3 className="font-semibold text-gray-900 truncate">{tenant.displayName}</h3>
+                      <h3 className="font-semibold text-gray-900 truncate">{org.name}</h3>
                     </div>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(tenant.status)}`}>{tenant.status}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(org.status)}`}>{org.status}</span>
                   </div>
-                  <p className="text-xs text-gray-500 font-mono mb-4 truncate">{tenant.azureTenantId}</p>
+                  <p className="text-xs text-gray-500 font-mono mb-1 truncate">{org.externalId}</p>
+                  <p className="text-xs text-gray-400 mb-3">{scope === 'specific' ? 'Specific subscriptions' : 'All subscriptions'}</p>
                   <div className="grid grid-cols-3 gap-2 text-center mb-4">
-                    <div><p className="text-lg font-bold text-gray-900">{tenant.resourceCount ?? '—'}</p><p className="text-xs text-gray-500">Resources</p></div>
-                    <div><p className="text-lg font-bold text-gray-900">{tenant.changes24H ?? '—'}</p><p className="text-xs text-gray-500">Changes 24h</p></div>
-                    <div><p className="text-xs text-gray-500 mt-1">{tenant.lastSnapshotAt ? new Date(tenant.lastSnapshotAt).toLocaleDateString() : 'No snapshot'}</p><p className="text-xs text-gray-500">Last Snapshot</p></div>
+                    <div><p className="text-lg font-bold text-gray-900">{org.accountCount ?? 0}</p><p className="text-xs text-gray-500">Subscriptions</p></div>
+                    <div><p className="text-lg font-bold text-gray-900">{org.resourceCount ?? '—'}</p><p className="text-xs text-gray-500">Resources</p></div>
+                    <div><p className="text-xs text-gray-500 mt-1">{org.lastInventoryAt ? new Date(org.lastInventoryAt).toLocaleDateString() : 'No snapshot'}</p><p className="text-xs text-gray-500">Last Snapshot</p></div>
                   </div>
                   {actions.length > 0 && (
                     <div className="flex gap-2 pt-3 border-t border-gray-100">
                       {actions.map(action => (
-                        <button key={action.value} onClick={() => setStatusAction({ tenant, newStatus: action.value })}
+                        <button key={action.value} onClick={() => setOrgStatusAction({ org, newStatus: action.value })}
                           className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${action.destructive ? 'text-red-600 border border-red-200 hover:bg-red-50' : 'text-green-600 border border-green-200 hover:bg-green-50'}`}>
                           {action.label}
                         </button>
                       ))}
                     </div>
                   )}
-                  {tenant.status === 'active' && (
-                    <div className="pt-2">
-                      <button onClick={() => handleCollectInventory(tenant)} disabled={isDev || collectingTenant === tenant.tenantId}
-                        title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
-                        className="w-full px-3 py-1.5 rounded text-xs font-medium transition-colors text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                        {collectingTenant === tenant.tenantId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
-                        {collectingTenant === tenant.tenantId ? 'Collecting...' : 'Collect Inventory'}
-                      </button>
-                    </div>
-                  )}
                 </div>
               );
-            })()}
-          </div>
-        ) : (
-          <div className="bg-white rounded-lg border border-dashed border-gray-300 p-5 flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-700">No Azure tenant connected</p>
-              <p className="text-xs text-gray-400 mt-0.5">Connect an Azure tenant to this organization (all or specific subscriptions).</p>
-            </div>
-            <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50">
-              Connect Azure
-            </button>
+            })}
           </div>
         )}
       </section>
@@ -556,20 +585,18 @@ function AddCloudModal({ tenantId, azureConnected, onClose, onAdded }: {
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
           <div className="grid grid-cols-3 gap-2">
-            {(['azure', 'aws', 'gcp'] as const).map(p => {
-              const disabled = p === 'azure' && azureConnected;
-              return (
-                <button key={p} type="button" disabled={disabled} onClick={() => setProvider(p)}
-                  title={disabled ? 'Azure tenant already connected to this organization' : undefined}
-                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${provider === p ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                  {p === 'azure' ? 'Azure' : p === 'aws' ? 'AWS' : 'Google Cloud'}
-                </button>
-              );
-            })}
+            {(['azure', 'aws', 'gcp'] as const).map(p => (
+              <button key={p} type="button" onClick={() => setProvider(p)}
+                className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${provider === p ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                {p === 'azure' ? 'Azure' : p === 'aws' ? 'AWS' : 'Google Cloud'}
+              </button>
+            ))}
           </div>
           <p className="text-xs text-gray-400 mt-1">
             {provider === 'azure'
-              ? 'Connect the Azure tenant for this organization — all or specific subscriptions.'
+              ? azureConnected
+                ? 'Connect another Azure tenant to this organization as a peer — all or specific subscriptions.'
+                : 'Connect the Azure tenant for this organization — all or specific subscriptions.'
               : `Add a ${provider.toUpperCase()} organization to this workspace — a top-level grouping for its ${provider === 'aws' ? 'accounts' : 'projects'}, a peer to Azure.`}
           </p>
         </div>

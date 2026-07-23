@@ -398,7 +398,7 @@ public sealed class AiOpsFunctions
         var byOrg = accounts.GroupBy(a => a.OrgId).ToDictionary(g => g.Key, g => g.ToList());
 
         // Latest-snapshot resource counts per member (subscription_id = account/project
-        // external id), so each org card can show the same stats as the Azure tenant.
+        // external id, or an Azure subscription id), so every org card shows stats.
         var countsByProvider = new Dictionary<CloudProvider, IReadOnlyDictionary<string, int>>();
         foreach (var provider in orgs.Select(o => o.Provider).Distinct())
         {
@@ -406,38 +406,98 @@ public sealed class AiOpsFunctions
                 tenantId, provider.ToString().ToLowerInvariant());
         }
 
-        var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new CloudOrgsResponse
-        {
-            Orgs = orgs.Select(o =>
-            {
-                var members = byOrg.TryGetValue(o.OrgId, out var list) ? list : new List<CloudAccount>();
-                var counts = countsByProvider.TryGetValue(o.Provider, out var c)
-                    ? c : new Dictionary<string, int>();
-                var accountDtos = members
-                    .Select(a => ToDto(a, counts.TryGetValue(a.ExternalId, out var n) ? n : 0))
-                    .ToList();
+        // Azure orgs don't use cloud_accounts — a subscription isn't independently
+        // credentialed like an AWS account/GCP project, so it's just a scope filter
+        // under its connection's one credential (see azure_org_subscriptions). All
+        // Azure connections in a workspace share one merged snapshot, so its
+        // completion time doubles as "last collected" for every Azure org card.
+        DateTime? latestAzureSnapshotAt = null;
+        if (orgs.Any(o => o.Provider == CloudProvider.Azure))
+            latestAzureSnapshotAt = (await _inventoryRepo.GetLatestSnapshotAsync(tenantId))?.CompletedAt;
 
-                return new CloudOrgDto
+        var orgDtos = new List<CloudOrgDto>();
+        foreach (var o in orgs)
+        {
+            var counts = countsByProvider.TryGetValue(o.Provider, out var c) ? c : new Dictionary<string, int>();
+
+            if (o.Provider == CloudProvider.Azure)
+            {
+                IReadOnlyList<string> subIds;
+                if (o.SubscriptionScope == "specific")
+                {
+                    var pinned = await _cloudOrgRepo.GetAzureSubscriptionsAsync(tenantId, o.OrgId);
+                    subIds = pinned.Select(p => p.SubscriptionId).ToList();
+                }
+                else
+                {
+                    // "all": show every subscription Resource Graph has actually found.
+                    subIds = counts.Keys.ToList();
+                }
+
+                var azureAccountDtos = subIds.Select(subId => new CloudAccountDto
+                {
+                    AccountId = DeterministicGuid($"azure:{o.OrgId}:{subId}"),
+                    OrgId = o.OrgId,
+                    Provider = "Azure",
+                    ExternalId = subId,
+                    DisplayName = subId,
+                    Status = "Connected",
+                    ResourceCount = counts.TryGetValue(subId, out var n) ? n : 0,
+                    LastInventoryAt = latestAzureSnapshotAt,
+                    CreatedAt = o.CreatedAt
+                }).ToList();
+
+                orgDtos.Add(new CloudOrgDto
                 {
                     OrgId = o.OrgId,
-                    Provider = o.Provider.ToString(),
+                    Provider = "Azure",
                     Name = o.Name,
                     ExternalId = o.ExternalId,
                     Status = o.Status.ToString(),
                     CreatedAt = o.CreatedAt,
-                    AccountCount = accountDtos.Count,
-                    ResourceCount = accountDtos.Sum(a => a.ResourceCount),
-                    LastInventoryAt = accountDtos
-                        .Where(a => a.LastInventoryAt.HasValue)
-                        .Select(a => a.LastInventoryAt!.Value)
-                        .DefaultIfEmpty()
-                        .Max() is var max && max != default ? max : (DateTime?)null,
-                    Accounts = accountDtos
-                };
-            }).ToList()
-        });
+                    AccountCount = azureAccountDtos.Count,
+                    ResourceCount = azureAccountDtos.Sum(a => a.ResourceCount),
+                    LastInventoryAt = latestAzureSnapshotAt,
+                    Accounts = azureAccountDtos,
+                    SubscriptionScope = o.SubscriptionScope
+                });
+                continue;
+            }
+
+            var members = byOrg.TryGetValue(o.OrgId, out var list) ? list : new List<CloudAccount>();
+            var memberDtos = members
+                .Select(a => ToDto(a, counts.TryGetValue(a.ExternalId, out var n) ? n : 0))
+                .ToList();
+
+            orgDtos.Add(new CloudOrgDto
+            {
+                OrgId = o.OrgId,
+                Provider = o.Provider.ToString(),
+                Name = o.Name,
+                ExternalId = o.ExternalId,
+                Status = o.Status.ToString(),
+                CreatedAt = o.CreatedAt,
+                AccountCount = memberDtos.Count,
+                ResourceCount = memberDtos.Sum(a => a.ResourceCount),
+                LastInventoryAt = memberDtos
+                    .Where(a => a.LastInventoryAt.HasValue)
+                    .Select(a => a.LastInventoryAt!.Value)
+                    .DefaultIfEmpty()
+                    .Max() is var max && max != default ? max : (DateTime?)null,
+                Accounts = memberDtos
+            });
+        }
+
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new CloudOrgsResponse { Orgs = orgDtos });
         return response;
+    }
+
+    /// <summary>Stable pseudo-id for a display-only Azure subscription row (no real cloud_accounts row backs it).</summary>
+    private static Guid DeterministicGuid(string input)
+    {
+        var hash = System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(input));
+        return new Guid(hash);
     }
 
     /// <summary>POST /api/cloud-orgs — create a cloud organization (Azure/AWS/GCP peer grouping).</summary>
@@ -489,7 +549,7 @@ public sealed class AiOpsFunctions
     {
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<UpdateCloudOrgStatusRequest>();
-        if (body == null || !Enum.TryParse<CloudAccountStatus>(body.Status, true, out var status))
+        if (body == null || !Enum.TryParse<CloudOrgStatus>(body.Status, true, out var status))
             return await BadRequest(req, "INVALID_STATUS", "status must be Active, Degraded, or Disconnected.");
 
         var org = await _cloudOrgRepo.GetByIdAsync(tenantId, orgId);
@@ -541,7 +601,7 @@ public sealed class AiOpsFunctions
             return await NotFound(req, $"Cloud org {body.OrgId} not found.");
         if (org.Provider == CloudProvider.Azure)
             return await BadRequest(req, "INVALID_PROVIDER",
-                "Azure subscriptions are managed via tenant onboarding, not as cloud accounts.");
+                "Azure subscriptions are pinned when connecting the Azure tenant (POST /organizations/{orgId}/azure), not as cloud accounts.");
 
         var provider = org.Provider;
         var account = new CloudAccount

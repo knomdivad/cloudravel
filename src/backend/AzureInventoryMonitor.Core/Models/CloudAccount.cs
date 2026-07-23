@@ -26,9 +26,22 @@ public sealed class CloudOrg
     public string Name { get; set; } = string.Empty;
     /// <summary>Azure tenant GUID / AWS Organization ID / GCP Organization ID (optional).</summary>
     public string? ExternalId { get; set; }
-    public CloudAccountStatus Status { get; set; } = CloudAccountStatus.Connected;
+    public CloudOrgStatus Status { get; set; } = CloudOrgStatus.Active;
     public DateTime CreatedAt { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
+
+    // --- Azure-only connection fields (null/unused for Aws/Gcp) ---
+    // A workspace can hold N Azure tenant connections as peers, each with its
+    // own onboarding method, credentials, and subscription scope — the same
+    // pattern AWS/GCP already use for their member accounts/projects.
+
+    /// <summary>"lighthouse" | "app_registration". Azure connections only.</summary>
+    public string? OnboardingMethod { get; set; }
+    /// <summary>OpenBao secret name holding {clientId, clientSecret} for app_registration.</summary>
+    public string? CredentialSecretName { get; set; }
+    public string? LighthouseDelegationId { get; set; }
+    /// <summary>"all" | "specific". Azure connections only; AWS/GCP always require explicit accounts.</summary>
+    public string SubscriptionScope { get; set; } = "all";
 }
 
 /// <summary>
@@ -73,4 +86,30 @@ public enum CloudAccountStatus
     Connected,
     Degraded,
     Disconnected
+}
+
+/// <summary>
+/// Status vocabulary for a cloud_orgs row (Azure connection / AWS org / GCP org) —
+/// distinct from <see cref="CloudAccountStatus"/> because the cloud_orgs.status
+/// CHECK constraint uses Active/Degraded/Disconnected, not Connected/Degraded/Disconnected.
+/// </summary>
+public enum CloudOrgStatus
+{
+    Active,
+    Degraded,
+    Disconnected
+}
+
+/// <summary>
+/// A subscription pinned to an Azure cloud_orgs connection whose
+/// SubscriptionScope is "specific" — scopes the Resource Graph query to just
+/// these subscriptions instead of everything the connection's credential sees.
+/// </summary>
+public sealed class AzureOrgSubscription
+{
+    public Guid OrgId { get; set; }
+    public Guid TenantId { get; set; }
+    public string SubscriptionId { get; set; } = string.Empty;
+    public string SubscriptionName { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
 }

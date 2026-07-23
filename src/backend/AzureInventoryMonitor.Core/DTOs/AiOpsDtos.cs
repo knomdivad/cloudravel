@@ -165,6 +165,8 @@ public sealed class CloudOrgDto
     public DateTime? LastInventoryAt { get; set; }
     /// <summary>Accounts/projects belonging to this org.</summary>
     public IReadOnlyList<CloudAccountDto> Accounts { get; set; } = [];
+    /// <summary>Azure connections only: "all" | "specific".</summary>
+    public string? SubscriptionScope { get; set; }
 }
 
 public sealed class UpdateCloudOrgStatusRequest

@@ -25,6 +25,7 @@ MIGRATIONS=(
   006-rename-secret-column
   007-cloud-orgs
   008-organizations
+  009-azure-multi-tenant
   seed-demo-data
 )
 

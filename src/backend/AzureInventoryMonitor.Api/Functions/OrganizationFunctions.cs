@@ -15,7 +15,9 @@ namespace AzureInventoryMonitor.Api.Functions;
 ///
 /// An Organization (org_id = the RLS workspace boundary) is the thing an operator
 /// selects in the sidebar; clouds are added UNDER an org and never create one:
-///   * Azure tenant  → POST /api/organizations/{orgId}/azure  (tenants row @ org_id)
+///   * Azure tenant  → POST /api/organizations/{orgId}/azure  (a cloud_orgs peer,
+///                     callable repeatedly — an org can hold multiple Azure
+///                     tenants, exactly like multiple AWS/GCP orgs)
 ///   * AWS/GCP orgs  → POST /api/cloud-orgs                    (scoped to org_id)
 ///   * accounts      → POST /api/cloud-accounts               (scoped to org_id)
 /// </summary>
@@ -93,8 +95,10 @@ public sealed class OrganizationFunctions
     }
 
     /// <summary>
-    /// POST /api/organizations/{orgId}/azure — connect the Azure tenant for an org.
-    /// Materialises the tenants row at tenant_id = org_id. Never creates a new org.
+    /// POST /api/organizations/{orgId}/azure — connect an Azure tenant to an org.
+    /// Callable repeatedly: an Organization can hold multiple Azure tenants as
+    /// peers (each becomes its own cloud_orgs connection), the same way it can
+    /// hold multiple AWS/GCP organizations. Never creates a new Organization.
     /// </summary>
     [Function("ConnectAzureTenant")]
     public async Task<HttpResponseData> ConnectAzureTenant(
@@ -113,63 +117,95 @@ public sealed class OrganizationFunctions
         if (!Enum.TryParse<OnboardingMethod>(body.OnboardingMethod.Replace("_", ""), true, out var method))
             return await BadRequest(req, "INVALID_METHOD", "onboardingMethod must be 'lighthouse' or 'app_registration'.");
 
-        // The Azure tenant for an org lives at tenant_id = org_id. If one already
-        // exists, this is a no-op replace we don't support inline — keep it explicit.
-        var existing = await _tenantRepo.GetByIdAsync(orgId);
-        if (existing != null && !string.IsNullOrWhiteSpace(existing.AzureTenantId))
-            return await Conflict(req, "AZURE_ALREADY_CONNECTED",
-                "This organization already has an Azure tenant connected.");
+        var azureTenantId = body.AzureTenantId.Trim();
 
-        var tenant = new Tenant
+        // Connecting the SAME Azure AD tenant twice would double-collect its
+        // subscriptions — block that. A DIFFERENT Azure tenant is always welcome.
+        var existingConnections = await _cloudOrgRepo.GetByTenantAsync(orgId);
+        if (existingConnections.Any(c => c.Provider == CloudProvider.Azure
+            && string.Equals(c.ExternalId, azureTenantId, StringComparison.OrdinalIgnoreCase)))
         {
-            TenantId = orgId,                    // bind the Azure tenant to this workspace
-            DisplayName = body.DisplayName.Trim(),
-            AzureTenantId = body.AzureTenantId.Trim(),
-            OnboardingMethod = method,
-            Status = TenantStatus.Active,
-            LighthouseDelegationId = body.LighthouseDelegationId
-        };
+            return await Conflict(req, "AZURE_ALREADY_CONNECTED",
+                "This Azure tenant is already connected to this organization.");
+        }
 
-        if (method == OnboardingMethod.AppRegistration && !string.IsNullOrEmpty(body.ClientId))
-            tenant.SecretName = $"tenant-{tenant.AzureTenantId}-creds";
+        var subscriptionScope = body.SubscriptionIds is { Count: > 0 } ? "specific" : "all";
+        var newOrgId = Guid.NewGuid();
+        string? credentialSecretName = method == OnboardingMethod.AppRegistration && !string.IsNullOrEmpty(body.ClientId)
+            ? $"cloudorg-{newOrgId}-creds"
+            : null;
 
-        var createdBy = context.GetUserId() ?? Guid.Empty;
-        await _tenantRepo.CreateAsync(tenant, createdBy);
+        // Always create the peer cloud_orgs connection — the inventory collector
+        // loops these, so this is the single source of truth for N Azure tenants.
+        var azureOrg = await _cloudOrgRepo.CreateAsync(new CloudOrg
+        {
+            OrgId = newOrgId,
+            TenantId = orgId,
+            Provider = CloudProvider.Azure,
+            Name = body.DisplayName.Trim(),
+            ExternalId = azureTenantId,
+            Status = CloudOrgStatus.Active,
+            OnboardingMethod = method == OnboardingMethod.AppRegistration ? "app_registration" : "lighthouse",
+            CredentialSecretName = credentialSecretName,
+            LighthouseDelegationId = body.LighthouseDelegationId,
+            SubscriptionScope = subscriptionScope,
+            CreatedBy = GetActor(req)
+        });
 
-        // Specific subscriptions (empty = all subscriptions)
         if (body.SubscriptionIds is { Count: > 0 })
-            await _tenantRepo.AddSubscriptionsAsync(orgId, body.SubscriptionIds);
+            await _cloudOrgRepo.AddAzureSubscriptionsAsync(orgId, newOrgId, body.SubscriptionIds);
 
-        // App-registration credentials go to the secret store, never to SQL
-        if (method == OnboardingMethod.AppRegistration
-            && !string.IsNullOrEmpty(body.ClientId)
-            && !string.IsNullOrEmpty(body.ClientSecret))
+        if (credentialSecretName != null && !string.IsNullOrEmpty(body.ClientSecret))
         {
             if (_secretStore == null)
-                _logger.LogWarning("Secret store not configured — cannot store credentials for org {OrgId}", orgId);
+                _logger.LogWarning("Secret store not configured — cannot store credentials for Azure org {OrgId}", newOrgId);
             else
-                await _secretStore.SetSecretAsync(tenant.SecretName!, JsonSerializer.Serialize(new
+                await _secretStore.SetSecretAsync(credentialSecretName, JsonSerializer.Serialize(new
                 {
                     clientId = body.ClientId,
                     clientSecret = body.ClientSecret
                 }));
         }
 
-        _logger.LogInformation("Connected Azure tenant {AzureTenantId} to organization {OrgId}",
-            tenant.AzureTenantId, orgId);
+        // The FIRST Azure connection for this workspace also materializes the
+        // legacy `tenants` row: workspace-level policy (AutoRemediationMode,
+        // AiOpsMonitoringEnabled, snapshot/change-poll cadence) lives there, and
+        // the scheduler timers (CollectInventoryTimer, PollChangesTimer, ...)
+        // enumerate `tenants` to know which workspaces to run at all. A 2nd+
+        // connection skips this — tenant_id is the workspace's PK, already taken.
+        var existingWorkspaceTenant = await _tenantRepo.GetByIdAsync(orgId);
+        if (existingWorkspaceTenant == null)
+        {
+            var tenant = new Tenant
+            {
+                TenantId = orgId,
+                DisplayName = body.DisplayName.Trim(),
+                AzureTenantId = azureTenantId,
+                OnboardingMethod = method,
+                Status = TenantStatus.Active,
+                LighthouseDelegationId = body.LighthouseDelegationId,
+                SecretName = credentialSecretName
+            };
+            var createdBy = context.GetUserId() ?? Guid.Empty;
+            await _tenantRepo.CreateAsync(tenant, createdBy);
+
+            if (body.SubscriptionIds is { Count: > 0 })
+                await _tenantRepo.AddSubscriptionsAsync(orgId, body.SubscriptionIds);
+        }
+
+        _logger.LogInformation("Connected Azure tenant {AzureTenantId} ({OnboardingMethod}) to organization {OrgId}",
+            azureTenantId, method, orgId);
 
         var response = req.CreateCorsResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(await BuildDto(org));
         return response;
     }
 
-    /// <summary>Rollup: does the org have an Azure tenant + how many AWS/GCP orgs.</summary>
+    /// <summary>Rollup: how many Azure/AWS/GCP connections the org owns.</summary>
     private async Task<OrganizationDto> BuildDto(Organization o)
     {
-        var azure = await _tenantRepo.GetByIdAsync(o.OrgId);
-        var azureConnected = azure != null && !string.IsNullOrWhiteSpace(azure.AzureTenantId);
-
         var cloudOrgs = await _cloudOrgRepo.GetByTenantAsync(o.OrgId);
+        var azureOrgs = cloudOrgs.Where(c => c.Provider == CloudProvider.Azure).ToList();
         var aws = cloudOrgs.Count(c => c.Provider == CloudProvider.Aws);
         var gcp = cloudOrgs.Count(c => c.Provider == CloudProvider.Gcp);
 
@@ -180,11 +216,12 @@ public sealed class OrganizationFunctions
             Environment = o.Environment,
             Status = o.Status,
             CreatedAt = o.CreatedAt,
-            AzureConnected = azureConnected,
-            AzureTenantName = azureConnected ? azure!.DisplayName : null,
+            AzureConnected = azureOrgs.Count > 0,
+            AzureTenantName = azureOrgs.Count == 1 ? azureOrgs[0].Name : azureOrgs.Count > 1 ? $"{azureOrgs.Count} Azure tenants" : null,
+            AzureOrgCount = azureOrgs.Count,
             AwsOrgCount = aws,
             GcpOrgCount = gcp,
-            CloudCount = (azureConnected ? 1 : 0) + aws + gcp
+            CloudCount = azureOrgs.Count + aws + gcp
         };
     }
 

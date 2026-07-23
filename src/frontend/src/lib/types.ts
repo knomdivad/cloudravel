@@ -13,6 +13,8 @@ export interface Organization {
   createdAt: string;
   azureConnected: boolean;
   azureTenantName?: string;
+  /** Number of Azure tenant connections (an org can hold more than one). */
+  azureOrgCount: number;
   awsOrgCount: number;
   gcpOrgCount: number;
   cloudCount: number;
@@ -289,6 +291,8 @@ export interface CloudOrg {
   resourceCount?: number;
   lastInventoryAt?: string;
   accounts: CloudAccount[];
+  /** Azure connections only: "all" | "specific". */
+  subscriptionScope?: 'all' | 'specific';
 }
 
 export interface OpsSummary {

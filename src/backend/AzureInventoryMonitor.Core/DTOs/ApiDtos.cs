@@ -55,6 +55,8 @@ public sealed class OrganizationDto
     // Cloud rollup for the selector / org card
     public bool AzureConnected { get; set; }
     public string? AzureTenantName { get; set; }
+    /// <summary>Number of Azure tenant connections (an org can hold more than one).</summary>
+    public int AzureOrgCount { get; set; }
     public int AwsOrgCount { get; set; }
     public int GcpOrgCount { get; set; }
     public int CloudCount { get; set; }
