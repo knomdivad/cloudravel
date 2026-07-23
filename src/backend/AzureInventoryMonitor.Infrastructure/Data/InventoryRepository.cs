@@ -97,13 +97,23 @@ public sealed class InventoryRepository : IInventoryRepository
         _logger.LogInformation("Inserted {Count} resources for snapshot {SnapshotId}", count, snapshotId);
     }
 
-    public async Task DeleteResourcesByProviderAsync(long snapshotId, string provider)
+    public async Task DeleteResourcesByProviderAsync(long snapshotId, string provider, string subscriptionId)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
         var count = await conn.ExecuteAsync(
-            "DELETE FROM inventory_resources WHERE snapshot_id = @SnapshotId AND provider = @Provider",
-            new { SnapshotId = snapshotId, Provider = provider });
-        _logger.LogDebug("Removed {Count} {Provider} resources from snapshot {SnapshotId}", count, provider, snapshotId);
+            "DELETE FROM inventory_resources WHERE snapshot_id = @SnapshotId AND provider = @Provider AND subscription_id = @SubscriptionId",
+            new { SnapshotId = snapshotId, Provider = provider, SubscriptionId = subscriptionId });
+        _logger.LogDebug("Removed {Count} {Provider} resources for account {SubscriptionId} from snapshot {SnapshotId}",
+            count, provider, subscriptionId, snapshotId);
+    }
+
+    public async Task<IReadOnlyList<InventoryResource>> GetResourcesBySubscriptionAsync(Guid tenantId, long snapshotId, string subscriptionId)
+    {
+        await using var conn = await _connectionFactory.CreateConnectionAsync(tenantId);
+        var results = await conn.QueryAsync<InventoryResource>(
+            "SELECT * FROM inventory_resources WHERE tenant_id = @TenantId AND snapshot_id = @SnapshotId AND subscription_id = @SubscriptionId",
+            new { TenantId = tenantId, SnapshotId = snapshotId, SubscriptionId = subscriptionId });
+        return results.ToList();
     }
 
     public async Task SetLatestSnapshotAsync(Guid tenantId, long snapshotId)

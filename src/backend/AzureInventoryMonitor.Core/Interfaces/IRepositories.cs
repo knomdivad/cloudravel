@@ -30,8 +30,21 @@ public interface IInventoryRepository
     Task CompleteSnapshotAsync(long snapshotId, int resourceCount, string blobPath);
     Task FailSnapshotAsync(long snapshotId, string errorMessage);
     Task BulkInsertResourcesAsync(long snapshotId, IEnumerable<InventoryResource> resources);
-    /// <summary>Removes a provider's rows from a snapshot so a multi-cloud re-sync can replace them.</summary>
-    Task DeleteResourcesByProviderAsync(long snapshotId, string provider);
+    /// <summary>
+    /// Removes ONE account/subscription's rows for a provider from a snapshot so a
+    /// multi-cloud re-sync can replace them. Scoped by subscriptionId (not just
+    /// provider), so re-syncing one AWS account doesn't wipe another AWS account's
+    /// rows in the same snapshot.
+    /// </summary>
+    Task DeleteResourcesByProviderAsync(long snapshotId, string provider, string subscriptionId);
+
+    /// <summary>
+    /// Every resource for one account/subscription in a snapshot, unpaginated —
+    /// used to capture "before" state ahead of a multi-cloud re-sync, so the new
+    /// resource set can be diffed against it (AWS/GCP have no native change-history
+    /// API like Azure Resource Graph, so this diff is how their changes are detected).
+    /// </summary>
+    Task<IReadOnlyList<InventoryResource>> GetResourcesBySubscriptionAsync(Guid tenantId, long snapshotId, string subscriptionId);
     Task SetLatestSnapshotAsync(Guid tenantId, long snapshotId);
     Task<InventorySnapshot?> GetLatestSnapshotAsync(Guid tenantId);
     Task<InventorySnapshot?> GetSnapshotByIdAsync(long snapshotId);
