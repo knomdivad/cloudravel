@@ -164,7 +164,7 @@ export default function AiPage() {
                 </svg>
               </div>
               <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                Azure Environment Intelligence
+                Multi-Cloud Environment Intelligence
               </h3>
               <p className="text-sm text-gray-500 mb-6 max-w-md">
                 Ask me about your inventory, changes, security findings, or recommendations.
@@ -198,7 +198,7 @@ export default function AiPage() {
               <div className="bg-gray-100 rounded-xl px-4 py-3 text-sm text-gray-600">
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-azure-600" />
-                  Querying your Azure environment...
+                  Querying your cloud environment...
                 </div>
               </div>
             </div>
@@ -215,7 +215,7 @@ export default function AiPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask about your Azure inventory, changes, or security..."
+              placeholder="Ask about your cloud inventory, changes, or security..."
               rows={1}
               disabled={isLoading}
               className="flex-1 border border-gray-300 rounded-xl px-4 py-3 text-sm resize-none focus:border-azure-500 focus:outline-none focus:ring-1 focus:ring-azure-500 disabled:opacity-50"

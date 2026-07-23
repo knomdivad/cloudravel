@@ -189,7 +189,7 @@ const navItems = [
   { label: 'Security', href: '/security', icon: SecurityIcon },
   { label: 'Governance', href: '/governance', icon: GovernanceIcon },
   { label: 'AI Insights', href: '/ai', icon: AiIcon },
-  { label: 'Tenants', href: '/tenants', icon: TenantsIcon },
+  { label: 'Clouds', href: '/tenants', icon: TenantsIcon },
 ];
 
 function AppShell({ children }: { children: React.ReactNode }) {
@@ -218,7 +218,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
         {/* Tenant Switcher */}
         {!sidebarCollapsed && tenants.length > 0 && (
           <div className="px-3 py-3 border-b border-gray-700">
-            <label className="text-xs text-gray-400 block mb-1">Tenant</label>
+            <label className="text-xs text-gray-400 block mb-1">Cloud</label>
             <select
               value={currentTenant?.tenantId || ''}
               onChange={(e) => selectTenant(e.target.value)}
