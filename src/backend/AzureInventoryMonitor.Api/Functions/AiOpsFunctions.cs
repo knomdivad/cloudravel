@@ -26,6 +26,7 @@ public sealed class AiOpsFunctions
     private readonly ICloudProviderAdapterFactory _adapterFactory;
     private readonly IMultiCloudInventoryService _multiCloudInventory;
     private readonly ITenantRepository _tenantRepo;
+    private readonly IInventoryRepository _inventoryRepo;
     private readonly IPlatformInfo _platform;
     private readonly ISecretStore? _secretStore;
     private readonly ILogger<AiOpsFunctions> _logger;
@@ -40,6 +41,7 @@ public sealed class AiOpsFunctions
         ICloudProviderAdapterFactory adapterFactory,
         IMultiCloudInventoryService multiCloudInventory,
         ITenantRepository tenantRepo,
+        IInventoryRepository inventoryRepo,
         IPlatformInfo platform,
         ILogger<AiOpsFunctions> logger,
         ISecretStore? secretStore = null)
@@ -53,6 +55,7 @@ public sealed class AiOpsFunctions
         _adapterFactory = adapterFactory;
         _multiCloudInventory = multiCloudInventory;
         _tenantRepo = tenantRepo;
+        _inventoryRepo = inventoryRepo;
         _platform = platform;
         _secretStore = secretStore;
         _logger = logger;
@@ -394,19 +397,44 @@ public sealed class AiOpsFunctions
         var accounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
         var byOrg = accounts.GroupBy(a => a.OrgId).ToDictionary(g => g.Key, g => g.ToList());
 
+        // Latest-snapshot resource counts per member (subscription_id = account/project
+        // external id), so each org card can show the same stats as the Azure tenant.
+        var countsByProvider = new Dictionary<CloudProvider, IReadOnlyDictionary<string, int>>();
+        foreach (var provider in orgs.Select(o => o.Provider).Distinct())
+        {
+            countsByProvider[provider] = await _inventoryRepo.GetResourceCountsBySubscriptionAsync(
+                tenantId, provider.ToString().ToLowerInvariant());
+        }
+
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new CloudOrgsResponse
         {
-            Orgs = orgs.Select(o => new CloudOrgDto
+            Orgs = orgs.Select(o =>
             {
-                OrgId = o.OrgId,
-                Provider = o.Provider.ToString(),
-                Name = o.Name,
-                ExternalId = o.ExternalId,
-                Status = o.Status.ToString(),
-                CreatedAt = o.CreatedAt,
-                Accounts = (byOrg.TryGetValue(o.OrgId, out var list) ? list : new List<CloudAccount>())
-                    .Select(ToDto).ToList()
+                var members = byOrg.TryGetValue(o.OrgId, out var list) ? list : new List<CloudAccount>();
+                var counts = countsByProvider.TryGetValue(o.Provider, out var c)
+                    ? c : new Dictionary<string, int>();
+                var accountDtos = members
+                    .Select(a => ToDto(a, counts.TryGetValue(a.ExternalId, out var n) ? n : 0))
+                    .ToList();
+
+                return new CloudOrgDto
+                {
+                    OrgId = o.OrgId,
+                    Provider = o.Provider.ToString(),
+                    Name = o.Name,
+                    ExternalId = o.ExternalId,
+                    Status = o.Status.ToString(),
+                    CreatedAt = o.CreatedAt,
+                    AccountCount = accountDtos.Count,
+                    ResourceCount = accountDtos.Sum(a => a.ResourceCount),
+                    LastInventoryAt = accountDtos
+                        .Where(a => a.LastInventoryAt.HasValue)
+                        .Select(a => a.LastInventoryAt!.Value)
+                        .DefaultIfEmpty()
+                        .Max() is var max && max != default ? max : (DateTime?)null,
+                    Accounts = accountDtos
+                };
             }).ToList()
         });
         return response;
@@ -449,6 +477,32 @@ public sealed class AiOpsFunctions
         return response;
     }
 
+    /// <summary>
+    /// PATCH /api/cloud-orgs/{orgId}/status — suspend / reactivate an AWS or GCP
+    /// organization, parity with the Azure tenant status lifecycle.
+    /// </summary>
+    [Function("UpdateCloudOrgStatus")]
+    public async Task<HttpResponseData> UpdateCloudOrgStatus(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "cloud-orgs/{orgId:guid}/status")] HttpRequestData req,
+        Guid orgId,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var body = await req.ReadFromJsonAsync<UpdateCloudOrgStatusRequest>();
+        if (body == null || !Enum.TryParse<CloudAccountStatus>(body.Status, true, out var status))
+            return await BadRequest(req, "INVALID_STATUS", "status must be Active, Degraded, or Disconnected.");
+
+        var org = await _cloudOrgRepo.GetByIdAsync(tenantId, orgId);
+        if (org == null)
+            return await NotFound(req, $"Cloud org {orgId} not found.");
+
+        await _cloudOrgRepo.UpdateStatusAsync(tenantId, orgId, status);
+
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { orgId, status = status.ToString() });
+        return response;
+    }
+
     /// <summary>GET /api/cloud-accounts — flat list of all linked accounts/projects.</summary>
     [Function("GetCloudAccounts")]
     public async Task<HttpResponseData> GetCloudAccounts(
@@ -461,7 +515,7 @@ public sealed class AiOpsFunctions
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new CloudAccountsResponse
         {
-            Accounts = accounts.Select(ToDto).ToList()
+            Accounts = accounts.Select(a => ToDto(a)).ToList()
         });
         return response;
     }
@@ -618,7 +672,7 @@ public sealed class AiOpsFunctions
             RecentAnomalies = openAnomalies.Take(10).Select(ToDto).ToList(),
             RecentIncidents = activeIncidents.Take(10).Select(i => ToDto(i, null)).ToList(),
             RecentRemediations = recentActions.Take(10).Select(ToDto).ToList(),
-            CloudAccounts = cloudAccounts.Select(ToDto).ToList()
+            CloudAccounts = cloudAccounts.Select(a => ToDto(a)).ToList()
         });
         return response;
     }
@@ -698,7 +752,9 @@ public sealed class AiOpsFunctions
         ExpiresAt = a.ExpiresAt
     };
 
-    private static CloudAccountDto ToDto(CloudAccount a) => new()
+    private static CloudAccountDto ToDto(CloudAccount a) => ToDto(a, 0);
+
+    private static CloudAccountDto ToDto(CloudAccount a, int resourceCount) => new()
     {
         AccountId = a.AccountId,
         OrgId = a.OrgId,
@@ -709,6 +765,7 @@ public sealed class AiOpsFunctions
         Regions = a.Regions,
         LastInventoryAt = a.LastInventoryAt,
         LastError = a.LastError,
+        ResourceCount = resourceCount,
         CreatedAt = a.CreatedAt
     };
 

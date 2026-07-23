@@ -88,7 +88,20 @@ public sealed class CloudAccountRepository : ICloudAccountRepository
     public async Task<IReadOnlyList<CloudAccount>> GetAllActiveAsync()
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
-        var sql = SelectColumns + " WHERE status IN ('Connected', 'Degraded') ORDER BY tenant_id, provider";
+        // Skip accounts whose parent org is suspended (Disconnected), so suspending
+        // an AWS/GCP org pauses its scheduled collection — parity with a suspended
+        // Azure tenant being excluded from GetAllActive.
+        const string sql = @"
+            SELECT ca.account_id AS AccountId, ca.tenant_id AS TenantId, ca.org_id AS OrgId, ca.provider AS Provider,
+                   ca.external_id AS ExternalId, ca.display_name AS DisplayName, ca.status AS Status,
+                   ca.credential_secret_name AS CredentialSecretName, ca.regions_json AS RegionsJson,
+                   ca.last_inventory_at AS LastInventoryAt, ca.last_error AS LastError,
+                   ca.created_at AS CreatedAt, ca.created_by AS CreatedBy
+            FROM cloud_accounts ca
+            LEFT JOIN cloud_orgs co ON co.org_id = ca.org_id
+            WHERE ca.status IN ('Connected', 'Degraded')
+              AND (co.status IS NULL OR co.status <> 'Disconnected')
+            ORDER BY ca.tenant_id, ca.provider";
         var rows = await conn.QueryAsync<CloudAccountRow>(sql);
         return rows.Select(r => r.ToModel()).ToList();
     }

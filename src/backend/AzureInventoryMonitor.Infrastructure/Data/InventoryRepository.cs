@@ -236,6 +236,20 @@ public sealed class InventoryRepository : IInventoryRepository
             new { TenantId = tenantId });
     }
 
+    public async Task<IReadOnlyDictionary<string, int>> GetResourceCountsBySubscriptionAsync(Guid tenantId, string provider)
+    {
+        await using var conn = await _connectionFactory.CreateConnectionAsync(tenantId);
+        var rows = await conn.QueryAsync<(string SubscriptionId, int Count)>(
+            @"SELECT ir.subscription_id AS SubscriptionId, COUNT(*) AS Count
+              FROM inventory_resources ir
+              INNER JOIN latest_snapshots ls ON ir.tenant_id = ls.tenant_id AND ir.snapshot_id = ls.snapshot_id
+              WHERE ir.tenant_id = @TenantId AND ir.provider = @Provider
+              GROUP BY ir.subscription_id",
+            new { TenantId = tenantId, Provider = provider });
+
+        return rows.ToDictionary(r => r.SubscriptionId, r => r.Count, StringComparer.OrdinalIgnoreCase);
+    }
+
     public async Task<IReadOnlyList<ResourceTypeSummary>> GetResourceTypeSummaryAsync(Guid tenantId, long? snapshotId = null)
     {
         await using var conn = await _connectionFactory.CreateConnectionAsync(tenantId);

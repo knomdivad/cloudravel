@@ -496,6 +496,18 @@ export async function createCloudOrg(
   });
 }
 
+/** Suspend / reactivate an AWS or GCP organization (parity with Azure tenant status). */
+export async function updateCloudOrgStatus(
+  tenantId: string,
+  orgId: string,
+  status: string
+): Promise<{ orgId: string; status: string }> {
+  return apiCall(`/cloud-orgs/${orgId}/status`, tenantId, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
 export async function linkCloudAccount(
   tenantId: string,
   request: {
@@ -548,6 +560,7 @@ export const api = {
   getCloudAccounts,
   getCloudOrgs,
   createCloudOrg,
+  updateCloudOrgStatus,
   linkCloudAccount,
   collectCloudAccount,
   getPlatformInfo,

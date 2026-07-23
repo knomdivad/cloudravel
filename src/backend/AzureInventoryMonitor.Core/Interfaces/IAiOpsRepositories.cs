@@ -98,6 +98,7 @@ public interface ICloudOrgRepository
     Task<CloudOrg> CreateAsync(CloudOrg org);
     Task<CloudOrg?> GetByIdAsync(Guid tenantId, Guid orgId);
     Task<IReadOnlyList<CloudOrg>> GetByTenantAsync(Guid tenantId);
+    Task UpdateStatusAsync(Guid tenantId, Guid orgId, CloudAccountStatus status);
 }
 
 /// <summary>

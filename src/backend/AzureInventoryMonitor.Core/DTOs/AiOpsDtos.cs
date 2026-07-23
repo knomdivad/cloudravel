@@ -159,8 +159,18 @@ public sealed class CloudOrgDto
     public string? ExternalId { get; set; }
     public string Status { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
+    // Rollup across member accounts/projects (parity with the Azure tenant card)
+    public int AccountCount { get; set; }
+    public int ResourceCount { get; set; }
+    public DateTime? LastInventoryAt { get; set; }
     /// <summary>Accounts/projects belonging to this org.</summary>
     public IReadOnlyList<CloudAccountDto> Accounts { get; set; } = [];
+}
+
+public sealed class UpdateCloudOrgStatusRequest
+{
+    /// <summary>Active | Degraded | Disconnected</summary>
+    public string Status { get; set; } = string.Empty;
 }
 
 public sealed class CreateCloudOrgRequest
@@ -190,6 +200,7 @@ public sealed class CloudAccountDto
     public List<string>? Regions { get; set; }
     public DateTime? LastInventoryAt { get; set; }
     public string? LastError { get; set; }
+    public int ResourceCount { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 

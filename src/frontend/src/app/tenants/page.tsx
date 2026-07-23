@@ -35,6 +35,17 @@ const statusBadge = (status: string) => {
   return styles[status.toLowerCase()] || 'bg-gray-100 text-gray-800';
 };
 
+// AWS/GCP org status lifecycle (cloud_orgs: Active | Degraded | Disconnected),
+// mirroring the Azure tenant suspend/reactivate actions.
+const getOrgStatusActions = (status: string): { label: string; value: string; destructive?: boolean }[] => {
+  switch (status.toLowerCase()) {
+    case 'active': return [{ label: 'Suspend', value: 'Disconnected', destructive: true }];
+    case 'degraded': return [{ label: 'Reactivate', value: 'Active' }, { label: 'Suspend', value: 'Disconnected', destructive: true }];
+    case 'disconnected': return [{ label: 'Reactivate', value: 'Active' }];
+    default: return [];
+  }
+};
+
 export default function CloudsPage() {
   const { tenantId, currentOrg, refreshOrganizations } = useTenantContext();
 
@@ -47,8 +58,11 @@ export default function CloudsPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [statusAction, setStatusAction] = useState<{ tenant: TenantSummary; newStatus: string } | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [orgStatusAction, setOrgStatusAction] = useState<{ org: CloudOrg; newStatus: string } | null>(null);
+  const [updatingOrgStatus, setUpdatingOrgStatus] = useState(false);
   const [collectingTenant, setCollectingTenant] = useState<string | null>(null);
   const [collectingAccount, setCollectingAccount] = useState<string | null>(null);
+  const [collectingOrg, setCollectingOrg] = useState<string | null>(null);
   const [isDev, setIsDev] = useState(true);
 
   useEffect(() => { api.getPlatformInfo().then(p => setIsDev(p.environment.toLowerCase() !== 'production')).catch(() => {}); }, []);
@@ -128,6 +142,39 @@ export default function CloudsPage() {
       showToast(err instanceof Error ? err.message : 'Collection failed.', 'error');
     } finally {
       setCollectingAccount(null);
+    }
+  };
+
+  const handleOrgStatusUpdate = async () => {
+    if (!orgStatusAction) return;
+    setUpdatingOrgStatus(true);
+    try {
+      await api.updateCloudOrgStatus(tenantId!, orgStatusAction.org.orgId, orgStatusAction.newStatus);
+      showToast(`${orgStatusAction.org.name} → ${orgStatusAction.newStatus}.`, 'success');
+      setOrgStatusAction(null);
+      fetchOrgs();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to update status.', 'error');
+    } finally {
+      setUpdatingOrgStatus(false);
+    }
+  };
+
+  const handleCollectAllInOrg = async (org: CloudOrg) => {
+    setCollectingOrg(org.orgId);
+    try {
+      let total = 0;
+      for (const acct of org.accounts) {
+        const res = await api.collectCloudAccount(tenantId!, acct.accountId);
+        total += res.resourcesCollected;
+      }
+      const noun = org.provider.toLowerCase() === 'aws' ? 'account' : 'project';
+      showToast(`Collected ${total} resources across ${org.accounts.length} ${noun}${org.accounts.length === 1 ? '' : 's'} in "${org.name}".`, 'success');
+      fetchOrgs();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Collection failed.', 'error');
+    } finally {
+      setCollectingOrg(null);
     }
   };
 
@@ -223,6 +270,33 @@ export default function CloudsPage() {
         </div>
       )}
 
+      {/* Org status change confirm (AWS/GCP) */}
+      {orgStatusAction && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {orgStatusAction.newStatus === 'Active' ? 'Reactivate' : 'Suspend'} organization
+            </h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Change <strong>{orgStatusAction.org.name}</strong> to <strong>{orgStatusAction.newStatus}</strong>?
+            </p>
+            <p className="text-xs text-gray-400">
+              {orgStatusAction.newStatus === 'Active'
+                ? 'Scheduled collection resumes for this organization.'
+                : 'Scheduled collection pauses for this organization and its accounts.'}
+            </p>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setOrgStatusAction(null)} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={handleOrgStatusUpdate} disabled={updatingOrgStatus}
+                className={`px-4 py-2 rounded-lg text-sm text-white flex items-center gap-2 disabled:opacity-50 ${orgStatusAction.newStatus === 'Active' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
+                {updatingOrgStatus && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
+                {updatingOrgStatus ? 'Updating...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Azure */}
       <section>
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Azure</h2>
@@ -285,18 +359,23 @@ export default function CloudsPage() {
 
       {/* AWS orgs */}
       <OrgSection label="AWS" emptyHint="No AWS organizations yet." orgs={awsOrgs} onAddAccount={setAddAccountFor}
-        onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)} />
+        onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)}
+        onStatusAction={(org, newStatus) => setOrgStatusAction({ org, newStatus })}
+        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} />
 
       {/* GCP orgs */}
       <OrgSection label="Google Cloud" emptyHint="No GCP organizations yet." orgs={gcpOrgs} onAddAccount={setAddAccountFor}
-        onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)} />
+        onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)}
+        onStatusAction={(org, newStatus) => setOrgStatusAction({ org, newStatus })}
+        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} />
     </div>
   );
 }
 
-function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collecting, isDev, onAdd }: {
+function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collecting, isDev, onAdd, onStatusAction, onCollectAll, collectingOrg }: {
   label: string; emptyHint: string; orgs: CloudOrg[]; onAddAccount: (o: CloudOrg) => void;
   onCollect: (a: CloudAccount) => void; collecting: string | null; isDev: boolean; onAdd: () => void;
+  onStatusAction: (o: CloudOrg, newStatus: string) => void; onCollectAll: (o: CloudOrg) => void; collectingOrg: string | null;
 }) {
   const accountNoun = label === 'AWS' ? 'account' : 'project';
   return (
@@ -311,59 +390,99 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
         </div>
       ) : (
         <div className="space-y-4">
-          {orgs.map(org => (
-            <div key={org.orgId} className="bg-white rounded-lg border border-gray-200 p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[org.provider.toLowerCase()] ?? ''}`}>{org.provider.toUpperCase()}</span>
-                  <div className="min-w-0">
-                    <h3 className="font-semibold text-gray-900 truncate">{org.name}</h3>
-                    {org.externalId && <p className="text-xs text-gray-400 font-mono truncate">Org ID: {org.externalId}</p>}
-                  </div>
-                </div>
-                <button onClick={() => onAddAccount(org)} className="text-xs font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">
-                  + Add {accountNoun}
-                </button>
-              </div>
-
-              {org.accounts.length === 0 ? (
-                <p className="text-sm text-gray-400 py-2">
-                  No {accountNoun}s pinned. Add specific {accountNoun}s here, or leave empty to cover all {accountNoun}s discovered on collection.
-                </p>
-              ) : (
-                <div className="divide-y divide-gray-100 border-t border-gray-100">
-                  {org.accounts.map(acct => (
-                    <div key={acct.accountId} className="py-2.5 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{acct.displayName}</p>
-                        <p className="text-xs text-gray-400 font-mono truncate">
-                          {acct.externalId}{acct.regions && acct.regions.length > 0 ? ` · ${acct.regions.join(', ')}` : ''}
-                        </p>
-                        {acct.lastError && <p className="text-xs text-red-600 truncate">{acct.lastError}</p>}
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0">
-                        <div className="text-right">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(acct.status)}`}>{acct.status}</span>
-                          <p className="text-xs text-gray-400 mt-1">
-                            {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleDateString() : 'never'}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => onCollect(acct)}
-                          disabled={isDev || collecting === acct.accountId}
-                          title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
-                          className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
-                        >
-                          {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
-                          {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
-                        </button>
-                      </div>
+          {orgs.map(org => {
+            const actions = getOrgStatusActions(org.status);
+            const accountCount = org.accountCount ?? org.accounts.length;
+            const busyCollectingAll = collectingOrg === org.orgId;
+            return (
+              <div key={org.orgId} className="bg-white rounded-lg border border-gray-200 p-5">
+                {/* Header: provider badge, name, org status badge — parity with Azure card */}
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[org.provider.toLowerCase()] ?? ''}`}>{org.provider.toUpperCase()}</span>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-gray-900 truncate">{org.name}</h3>
+                      {org.externalId && <p className="text-xs text-gray-400 font-mono truncate">Org ID: {org.externalId}</p>}
                     </div>
-                  ))}
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(org.status)}`}>{org.status}</span>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Rollup stats — same three-stat grid as the Azure tenant card */}
+                <div className="grid grid-cols-3 gap-2 text-center mb-4">
+                  <div><p className="text-lg font-bold text-gray-900">{accountCount}</p><p className="text-xs text-gray-500">{accountNoun[0].toUpperCase()}{accountNoun.slice(1)}s</p></div>
+                  <div><p className="text-lg font-bold text-gray-900">{org.resourceCount ?? '—'}</p><p className="text-xs text-gray-500">Resources</p></div>
+                  <div><p className="text-xs text-gray-500 mt-1">{org.lastInventoryAt ? new Date(org.lastInventoryAt).toLocaleDateString() : 'never'}</p><p className="text-xs text-gray-500">Last Collection</p></div>
+                </div>
+
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{accountNoun}s</span>
+                  <button onClick={() => onAddAccount(org)} className="text-xs font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">
+                    + Add {accountNoun}
+                  </button>
+                </div>
+
+                {org.accounts.length === 0 ? (
+                  <p className="text-sm text-gray-400 py-2">
+                    No {accountNoun}s pinned. Add specific {accountNoun}s here, or leave empty to cover all {accountNoun}s discovered on collection.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-gray-100 border-t border-gray-100">
+                    {org.accounts.map(acct => (
+                      <div key={acct.accountId} className="py-2.5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{acct.displayName}</p>
+                          <p className="text-xs text-gray-400 font-mono truncate">
+                            {acct.externalId}
+                            {typeof acct.resourceCount === 'number' ? ` · ${acct.resourceCount} resources` : ''}
+                            {acct.regions && acct.regions.length > 0 ? ` · ${acct.regions.join(', ')}` : ''}
+                          </p>
+                          {acct.lastError && <p className="text-xs text-red-600 truncate">{acct.lastError}</p>}
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <div className="text-right">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(acct.status)}`}>{acct.status}</span>
+                            <p className="text-xs text-gray-400 mt-1">
+                              {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleDateString() : 'never'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => onCollect(acct)}
+                            disabled={isDev || collecting === acct.accountId}
+                            title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
+                            className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
+                          >
+                            {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+                            {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Footer: org-level status actions + collect-all — parity with Azure */}
+                {(actions.length > 0 || org.accounts.length > 0) && (
+                  <div className="flex gap-2 pt-3 mt-3 border-t border-gray-100">
+                    {actions.map(action => (
+                      <button key={action.value} onClick={() => onStatusAction(org, action.value)}
+                        className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${action.destructive ? 'text-red-600 border border-red-200 hover:bg-red-50' : 'text-green-600 border border-green-200 hover:bg-green-50'}`}>
+                        {action.label}
+                      </button>
+                    ))}
+                    {org.accounts.length > 0 && (
+                      <button onClick={() => onCollectAll(org)} disabled={isDev || busyCollectingAll}
+                        title={isDev ? 'Inventory collection is disabled in development' : `Collect all ${accountNoun}s now`}
+                        className="flex-1 px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                        {busyCollectingAll && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+                        {busyCollectingAll ? 'Collecting...' : 'Collect all'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

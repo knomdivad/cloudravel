@@ -274,6 +274,7 @@ export interface CloudAccount {
   regions?: string[];
   lastInventoryAt?: string;
   lastError?: string;
+  resourceCount?: number;
   createdAt: string;
 }
 
@@ -284,6 +285,9 @@ export interface CloudOrg {
   externalId?: string;
   status: 'Active' | 'Degraded' | 'Disconnected' | 'Connected';
   createdAt: string;
+  accountCount?: number;
+  resourceCount?: number;
+  lastInventoryAt?: string;
   accounts: CloudAccount[];
 }
 

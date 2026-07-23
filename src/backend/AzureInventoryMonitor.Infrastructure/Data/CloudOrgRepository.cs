@@ -67,6 +67,20 @@ public sealed class CloudOrgRepository : ICloudOrgRepository
         return rows.Select(r => r.ToModel()).ToList();
     }
 
+    public async Task UpdateStatusAsync(Guid tenantId, Guid orgId, CloudAccountStatus status)
+    {
+        await using var conn = await _connectionFactory.CreateConnectionAsync(tenantId);
+        var affected = await conn.ExecuteAsync(
+            "UPDATE cloud_orgs SET status = @Status WHERE tenant_id = @TenantId AND org_id = @OrgId",
+            new { TenantId = tenantId, OrgId = orgId, Status = status.ToString() });
+
+        if (affected == 0)
+            throw new KeyNotFoundException($"Cloud org {orgId} not found.");
+
+        _logger.LogInformation("Set cloud org {OrgId} status to {Status} in workspace {TenantId}",
+            orgId, status, tenantId);
+    }
+
     private sealed class CloudOrgRow
     {
         public Guid OrgId { get; set; }
