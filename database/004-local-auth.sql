@@ -8,7 +8,7 @@
 -- which one applies to a given row.
 --
 -- Password hash format: pbkdf2$sha256$<iterations>$<saltBase64>$<hashBase64>
--- (see AzureInventoryMonitor.Core/Auth/PasswordHasher.cs for the reader/writer).
+-- (see CloudRavel.Core/Auth/PasswordHasher.cs for the reader/writer).
 --
 -- Run after 001-schema.sql, 002-fix-rls-bypass.sql, 003-aiops-multicloud.sql.
 -- ============================================================================

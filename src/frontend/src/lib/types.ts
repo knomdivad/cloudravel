@@ -1,5 +1,5 @@
 /**
- * Type definitions for the AIM API responses.
+ * Type definitions for the CloudRavel API responses.
  * These mirror the backend DTOs for type-safe frontend usage.
  */
 

@@ -5,16 +5,16 @@
 ### Option A: Azure Lighthouse (Preferred for CSP)
 
 ```
-MSP Admin initiates onboarding in AIM UI
-  → AIM generates ARM template with Lighthouse delegation:
+MSP Admin initiates onboarding in the CloudRavel UI
+  → CloudRavel generates ARM template with Lighthouse delegation:
       - managedByTenantId: MSP tenant ID
       - authorizations:
           - MSP Reader group → Reader role on customer subscriptions
           - MSP Automation SPN → Reader role (for ARI)
           - MSP Automation SPN → Log Analytics Reader (for Activity Log)
   → Customer admin deploys template in their tenant
-  → AIM callback validates delegation
-  → AIM creates tenant record:
+  → CloudRavel callback validates delegation
+  → CloudRavel creates tenant record:
       - tenant_id, display_name, onboarding_method = 'lighthouse'
       - delegation_template_id
       - active = true
@@ -25,9 +25,9 @@ MSP Admin initiates onboarding in AIM UI
 ### Option B: Per-Tenant App Registration (For non-Lighthouse scenarios)
 
 ```
-MSP Admin initiates onboarding in AIM UI
-  → AIM provides instructions for customer:
-      1. Register AIM app in customer Entra ID
+MSP Admin initiates onboarding in the CloudRavel UI
+  → CloudRavel provides instructions for customer:
+      1. Register the CloudRavel app in customer Entra ID
       2. Grant API permissions: 
          - Microsoft.Graph: Directory.Read.All (delegated)
       3. Assign Azure RBAC:
@@ -36,8 +36,8 @@ MSP Admin initiates onboarding in AIM UI
       4. Create client secret or certificate
       5. Provide: tenant_id, client_id, client_secret (or cert thumbprint)
   → MSP enters credentials
-  → AIM stores secret in Key Vault (tagged by tenant_id)
-  → AIM validates connectivity:
+  → CloudRavel stores the secret in the secret store (tagged by tenant_id)
+  → CloudRavel validates connectivity:
       - GET /subscriptions?api-version=2022-12-01
   → Creates tenant record with onboarding_method = 'app_registration'
   → First ARI snapshot triggered
@@ -48,22 +48,25 @@ MSP Admin initiates onboarding in AIM UI
 ### Frontend → API
 
 ```
-1. User authenticates via MSAL.js to MSP Entra ID
-2. Token audience: api://{AIM_API_CLIENT_ID}
+1. User authenticates via MSAL.js to MSP Entra ID (or via local username/password login)
+2. Token audience: api://{CLOUDRAVEL_API_CLIENT_ID} (Entra) or cloudravel-api (local)
 3. Token includes:
-   - oid (user object ID)
-   - tid (MSP tenant ID — always the MSP tenant)
-   - roles (aim.admin, aim.operator, aim.auditor)
+   - oid/sub (user object ID)
+   - tid (MSP tenant ID — always the MSP tenant, Entra only)
+   - system role resolved server-side from users.global_role (system_admin, member)
    - groups (optional, for team-based access)
 4. API validates token:
-   - Issuer: https://login.microsoftonline.com/{MSP_TENANT_ID}/v2.0
-   - Audience: api://{AIM_API_CLIENT_ID}
-   - Signature: via JWKS endpoint
+   - Issuer: https://login.microsoftonline.com/{MSP_TENANT_ID}/v2.0 (Entra) or
+     cloudravel-local-auth (local)
+   - Audience: api://{CLOUDRAVEL_API_CLIENT_ID} (Entra) or cloudravel-api (local)
+   - Signature: via JWKS endpoint (Entra) or the derived HMAC key (local)
 5. API resolves user permissions:
-   - Query user_tenant_access table for authorized tenants
-   - If role = aim.admin: access to all tenants
-   - If role = aim.operator: access to assigned tenants
-   - If role = aim.auditor: read-only to assigned tenants
+   - Query user_tenant_access for the caller's per-organization role
+   - system_admin: implicit org_admin on every organization, plus system settings
+     and user management
+   - org_admin: manage the organization's users, clouds, and SSO settings
+   - cloud_admin: manage the organization's clouds; read everything else
+   - read_only: read-only access to the organization
 ```
 
 ### API → Customer Tenant
@@ -83,13 +86,16 @@ Option B (App Registration):
 
 ## RBAC Model
 
-| Role | Scope | Permissions |
-|---|---|---|
-| `aim.admin` | Global | All tenants, user management, onboarding, settings, remediation approval, auto-remediation policy |
-| `aim.operator` | Per-tenant | View inventory, changes, recommendations; run AI queries; acknowledge findings; triage anomalies/incidents; approve/reject remediations |
-| `aim.auditor` | Per-tenant | Read-only view of all data (including remediation history); export reports; no mutations |
-| `customer.admin` | Own tenant | View own tenant data; manage own tenant preferences |
-| `customer.viewer` | Own tenant | Read-only view of own tenant data |
+Two independent tiers: a system tier (`users.global_role`) and a per-organization tier
+(`user_tenant_access.role`). A `system_admin` acts as `org_admin` on every organization.
+
+| Tier | Role | Scope | Permissions |
+|---|---|---|---|
+| System | `system_admin` | Global | Create organizations; configure system settings (AI model/endpoint/key); manage all users; implicit `org_admin` everywhere |
+| System | `member` | Global | No system privileges; all access comes from per-organization grants below |
+| Org | `org_admin` | Per-organization | Manage the organization's users, clouds, and SSO settings; everything `cloud_admin` can do |
+| Org | `cloud_admin` | Per-organization | Connect/manage clouds; trigger snapshots; triage anomalies/incidents; propose/approve/reject remediations |
+| Org | `read_only` | Per-organization | Read-only view of inventory, changes, recommendations, AI queries; no mutations |
 
 ## Data Isolation Enforcement Points
 

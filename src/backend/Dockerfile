@@ -16,18 +16,18 @@ ENV DOTNET_SYSTEM_NET_DISABLEIPV6=1
 # Restore first for better layer caching. Cache mount: NuGet packages persist
 # across builds even when a .csproj change invalidates the layer above, so
 # that only costs re-resolving the dependency graph, not re-downloading it.
-COPY AzureInventoryMonitor.Core/*.csproj AzureInventoryMonitor.Core/
-COPY AzureInventoryMonitor.Infrastructure/*.csproj AzureInventoryMonitor.Infrastructure/
-COPY AzureInventoryMonitor.Api/*.csproj AzureInventoryMonitor.Api/
+COPY CloudRavel.Core/*.csproj CloudRavel.Core/
+COPY CloudRavel.Infrastructure/*.csproj CloudRavel.Infrastructure/
+COPY CloudRavel.Api/*.csproj CloudRavel.Api/
 RUN --mount=type=cache,target=/root/.nuget/packages \
-    dotnet restore AzureInventoryMonitor.Api/AzureInventoryMonitor.Api.csproj
+    dotnet restore CloudRavel.Api/CloudRavel.Api.csproj
 
 COPY . .
 # --no-restore skips re-resolving, but publish still reads the actual package
 # files from the global cache on disk — needs the same mount as restore above,
 # since a cache mount is only attached to the RUN instruction that declares it.
 RUN --mount=type=cache,target=/root/.nuget/packages \
-    dotnet publish AzureInventoryMonitor.Api/AzureInventoryMonitor.Api.csproj -c Release -o /app/publish --no-restore
+    dotnet publish CloudRavel.Api/CloudRavel.Api.csproj -c Release -o /app/publish --no-restore
 
 # The official Azure Functions dotnet-isolated image only ships amd64 (no
 # arm64 manifest as of this writing) — force it so this also builds on

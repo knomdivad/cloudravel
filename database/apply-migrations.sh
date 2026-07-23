@@ -14,7 +14,8 @@ set -euo pipefail
 
 SQLCMD=/opt/mssql-tools/bin/sqlcmd
 SERVER=mssql
-DB=aimdb
+DB=cloudraveldb
+LEGACY_DB=aimdb
 # Applied in order; the demo seed runs last (once) so a fresh stack has data.
 MIGRATIONS=(
   001-schema
@@ -46,6 +47,14 @@ for i in $(seq 1 60); do
 done
 
 echo "Ensuring database '$DB' exists..."
+if run -b -Q "SET NOCOUNT ON; SELECT 1;" >/dev/null 2>&1 && \
+   [ "$(run -h -1 -W -b -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.databases WHERE name = N'$DB';" | tr -d '[:space:]')" = "0" ] && \
+   [ "$(run -h -1 -W -b -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.databases WHERE name = N'$LEGACY_DB';" | tr -d '[:space:]')" = "1" ]; then
+  echo "Renaming existing database '$LEGACY_DB' -> '$DB' (data-preserving, one-time)..."
+  run -b -Q "ALTER DATABASE [$LEGACY_DB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;"
+  run -b -Q "ALTER DATABASE [$LEGACY_DB] MODIFY NAME = [$DB];"
+  run -b -Q "ALTER DATABASE [$DB] SET MULTI_USER;"
+fi
 run -b -Q "IF DB_ID(N'$DB') IS NULL CREATE DATABASE [$DB];"
 
 echo "Ensuring migration ledger exists..."

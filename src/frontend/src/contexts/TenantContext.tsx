@@ -44,7 +44,7 @@ interface TenantContextState {
 
 const TenantContext = createContext<TenantContextState | undefined>(undefined);
 
-const WORKSPACE_STORAGE_KEY = 'aim-selected-tenant';
+const WORKSPACE_STORAGE_KEY = 'cloudravel-selected-tenant';
 
 function toRef(org: Organization): WorkspaceRef {
   return { tenantId: org.orgId, displayName: org.name, status: org.status };

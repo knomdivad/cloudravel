@@ -100,7 +100,7 @@ services:
       #     Set to Production when onboarding real clouds. ---
       Platform__Environment: ${PLATFORM_ENVIRONMENT:-Development}
       # --- Database (also backs the DatabaseJobQueue — no Service Bus needed) ---
-      SqlConnectionString: "Server=mssql,1433;Database=aimdb;User ID=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;"
+      SqlConnectionString: "Server=mssql,1433;Database=cloudraveldb;User ID=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;"
       # --- Secret store: OpenBao (cloud-agnostic) ---
       OpenBao__Address: "http://openbao:8200"
       OpenBao__Token: ${OPENBAO_TOKEN:-root}

@@ -6,7 +6,7 @@
 -- remediation actions so every page in the UI has something to show.
 --
 -- Safe to re-run: skips entirely if "Contoso Corp" already exists.
--- Run after 001-008: sqlcmd -S localhost -d aimdb -i seed-demo-data.sql
+-- Run after 001-008: sqlcmd -S localhost -d cloudraveldb -i seed-demo-data.sql
 -- ============================================================================
 
 EXEC sp_set_session_context @key = N'bypass_rls', @value = 1;

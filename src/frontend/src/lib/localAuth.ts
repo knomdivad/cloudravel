@@ -5,7 +5,7 @@
  * completely independent of this file.
  */
 
-const STORAGE_KEY = 'aim-local-token';
+const STORAGE_KEY = 'cloudravel-local-token';
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/api';
 
 export interface LocalSession {

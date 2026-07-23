@@ -151,7 +151,7 @@ dotnet restore
 dotnet build
 
 # Run the Functions host locally
-cd AzureInventoryMonitor.Api
+cd CloudRavel.Api
 func start
 ```
 
@@ -169,11 +169,11 @@ npm run dev
 ```bash
 # Apply migrations in order to a local or Azure SQL instance
 cd database
-sqlcmd -S localhost -d aimdb -i 001-schema.sql
-sqlcmd -S localhost -d aimdb -i 002-fix-rls-bypass.sql
-sqlcmd -S localhost -d aimdb -i 003-aiops-multicloud.sql
-sqlcmd -S localhost -d aimdb -i 004-local-auth.sql
-sqlcmd -S localhost -d aimdb -i 005-job-queue.sql
+sqlcmd -S localhost -d cloudraveldb -i 001-schema.sql
+sqlcmd -S localhost -d cloudraveldb -i 002-fix-rls-bypass.sql
+sqlcmd -S localhost -d cloudraveldb -i 003-aiops-multicloud.sql
+sqlcmd -S localhost -d cloudraveldb -i 004-local-auth.sql
+sqlcmd -S localhost -d cloudraveldb -i 005-job-queue.sql
 ```
 
 ### Run the full stack with Docker (local / OrbStack)
@@ -228,7 +228,7 @@ Notes:
 
 #### Local Configuration
 
-Copy `src/backend/AzureInventoryMonitor.Api/local.settings.json` and set:
+Copy `src/backend/CloudRavel.Api/local.settings.json` and set:
 
 | Setting | Description |
 |---|---|
@@ -257,7 +257,7 @@ set for anyone to be able to log in.
 │   └── 001-schema.sql              # 14 tables, RLS, views, stored procedures
 ├── src/
 │   ├── backend/
-│   │   ├── AzureInventoryMonitor.Api/
+│   │   ├── CloudRavel.Api/
 │   │   │   ├── Functions/
 │   │   │   │   ├── InventoryFunctions.cs   # GET /api/inventory/*
 │   │   │   │   ├── ChangeFunctions.cs      # GET /api/changes/*
@@ -270,7 +270,7 @@ set for anyone to be able to log in.
 │   │   │   │   └── TenantContextMiddleware.cs
 │   │   │   ├── Program.cs
 │   │   │   └── host.json
-│   │   ├── AzureInventoryMonitor.Core/
+│   │   ├── CloudRavel.Core/
 │   │   │   ├── Interfaces/
 │   │   │   │   ├── IRepositories.cs        # ITenantRepository, IInventoryRepository, etc.
 │   │   │   │   ├── IServices.cs            # IAzureCredentialFactory, IAriIngestionService, etc.
@@ -279,7 +279,7 @@ set for anyone to be able to log in.
 │   │   │   ├── DTOs/ApiDtos.cs             # All API DTOs
 │   │   │   ├── Exceptions/AimExceptions.cs # Domain exception hierarchy
 │   │   │   └── AI/                         # Tool definitions, system prompts
-│   │   └── AzureInventoryMonitor.Infrastructure/
+│   │   └── CloudRavel.Infrastructure/
 │   │       ├── Data/
 │   │       │   ├── TenantDbConnectionFactory.cs  # RLS session context enforcement
 │   │       │   ├── InventoryRepository.cs

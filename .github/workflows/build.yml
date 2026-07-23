@@ -1,4 +1,4 @@
-name: AIM — Build & Test
+name: CloudRavel — Build & Test
 
 on:
   workflow_dispatch:
@@ -29,13 +29,13 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
-        run: dotnet restore AzureInventoryMonitor.sln
+        run: dotnet restore CloudRavel.sln
 
       - name: Build
-        run: dotnet build AzureInventoryMonitor.sln --configuration Release --no-restore
+        run: dotnet build CloudRavel.sln --configuration Release --no-restore
 
       - name: Publish API
-        run: dotnet publish ${{ env.BACKEND_PATH }}/AzureInventoryMonitor.Api/AzureInventoryMonitor.Api.csproj --configuration Release --output ./publish/api --no-build
+        run: dotnet publish ${{ env.BACKEND_PATH }}/CloudRavel.Api/CloudRavel.Api.csproj --configuration Release --output ./publish/api --no-build
 
       - name: Upload API artifact
         uses: actions/upload-artifact@v4
