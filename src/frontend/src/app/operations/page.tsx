@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { useOpsSummary, useAnomalies } from '../../lib/hooks';
-import { updateAnomalyStatus, linkCloudAccount } from '../../lib/api';
+import { updateAnomalyStatus } from '../../lib/api';
 import type { Anomaly, Incident, RemediationAction, CloudAccount } from '../../lib/types';
 
 const SEVERITY_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -37,8 +37,6 @@ export default function OperationsPage() {
     status: 'Open',
     limit: 100,
   });
-  const [showLinkModal, setShowLinkModal] = useState(false);
-
   if (!tenantId) {
     return <div className="text-center py-20 text-gray-500">Select a tenant to view operations.</div>;
   }
@@ -156,12 +154,9 @@ export default function OperationsPage() {
               <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
                 Cloud Accounts
               </h2>
-              <button
-                onClick={() => setShowLinkModal(true)}
-                className="text-xs font-medium text-azure-600 hover:text-azure-700"
-              >
-                + Link AWS/GCP
-              </button>
+              <a href="/tenants" className="text-xs font-medium text-azure-600 hover:text-azure-700">
+                Manage in Clouds →
+              </a>
             </div>
             <div className="space-y-2">
               <div className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
@@ -175,273 +170,16 @@ export default function OperationsPage() {
                 <CloudAccountRow key={a.accountId} account={a} />
               ))}
               {summary.cloudAccounts.length === 0 && (
-                <button
-                  onClick={() => setShowLinkModal(true)}
-                  className="w-full bg-white rounded-xl border border-dashed border-gray-300 p-3 text-sm text-gray-500 hover:border-azure-300 hover:text-azure-600 transition-colors"
+                <a
+                  href="/tenants"
+                  className="block w-full bg-white rounded-xl border border-dashed border-gray-300 p-3 text-sm text-gray-500 hover:border-azure-300 hover:text-azure-600 transition-colors text-center"
                 >
-                  Link an AWS account or GCP project to extend monitoring across clouds.
-                </button>
+                  Connect an AWS or GCP organization on the Clouds page to extend monitoring.
+                </a>
               )}
             </div>
           </section>
         </div>
-      </div>
-
-      {showLinkModal && (
-        <LinkCloudAccountModal
-          tenantId={tenantId}
-          onClose={() => setShowLinkModal(false)}
-          onLinked={async () => {
-            setShowLinkModal(false);
-            await mutate();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function LinkCloudAccountModal({
-  tenantId,
-  onClose,
-  onLinked,
-}: {
-  tenantId: string;
-  onClose: () => void;
-  onLinked: () => Promise<void>;
-}) {
-  const [provider, setProvider] = useState<'aws' | 'gcp'>('aws');
-  const [externalId, setExternalId] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [regions, setRegions] = useState('');
-  // AWS fields
-  const [accessKeyId, setAccessKeyId] = useState('');
-  const [secretAccessKey, setSecretAccessKey] = useState('');
-  const [sessionToken, setSessionToken] = useState('');
-  const [defaultRegion, setDefaultRegion] = useState('us-east-1');
-  // GCP field
-  const [serviceAccountJson, setServiceAccountJson] = useState('');
-
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-
-    let credentialJson: string | undefined;
-    try {
-      if (provider === 'aws') {
-        if (accessKeyId && secretAccessKey) {
-          credentialJson = JSON.stringify({
-            accessKeyId: accessKeyId.trim(),
-            secretAccessKey: secretAccessKey.trim(),
-            sessionToken: sessionToken.trim() || undefined,
-            defaultRegion: defaultRegion.trim() || 'us-east-1',
-          });
-        }
-      } else {
-        if (serviceAccountJson.trim()) {
-          // Validate it parses before sending
-          JSON.parse(serviceAccountJson);
-          credentialJson = serviceAccountJson.trim();
-        }
-      }
-    } catch {
-      setError('The GCP service account key must be valid JSON.');
-      setBusy(false);
-      return;
-    }
-
-    const regionList = regions
-      .split(/[,\n]+/)
-      .map((r) => r.trim())
-      .filter(Boolean);
-
-    try {
-      await linkCloudAccount(tenantId, {
-        provider,
-        externalId: externalId.trim(),
-        displayName: displayName.trim(),
-        credentialJson,
-        regions: regionList.length > 0 ? regionList : undefined,
-      });
-      await onLinked();
-    } catch (err: any) {
-      setError(err.message ?? 'Failed to link cloud account.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Link Cloud Account</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
-        )}
-
-        <form onSubmit={submit} className="space-y-4">
-          {/* Provider */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
-            <div className="grid grid-cols-2 gap-2">
-              {(['aws', 'gcp'] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setProvider(p)}
-                  className={`px-3 py-2 rounded-lg border text-sm font-medium text-center transition-colors ${
-                    provider === p
-                      ? 'border-azure-500 bg-azure-50 text-azure-700'
-                      : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {p === 'aws' ? 'AWS' : 'Google Cloud'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* External ID */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {provider === 'aws' ? 'AWS Account ID' : 'GCP Project ID'} <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={externalId}
-              onChange={(e) => setExternalId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
-              placeholder={provider === 'aws' ? '123456789012' : 'my-gcp-project'}
-            />
-          </div>
-
-          {/* Display Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Display Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
-              placeholder={provider === 'aws' ? 'Production AWS' : 'Production GCP'}
-            />
-          </div>
-
-          {/* Credentials */}
-          {provider === 'aws' ? (
-            <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-xs text-gray-500">
-                Provide IAM access keys with read (tag:GetResources) plus the write permissions for any
-                playbooks you enable. Stored only in Azure Key Vault — never in the database.
-              </p>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Access Key ID</label>
-                <input
-                  type="text"
-                  value={accessKeyId}
-                  onChange={(e) => setAccessKeyId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
-                  placeholder="AKIA..."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Secret Access Key</label>
-                <input
-                  type="password"
-                  value={secretAccessKey}
-                  onChange={(e) => setSecretAccessKey(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
-                  placeholder="Secret access key"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Session Token (optional)</label>
-                <input
-                  type="password"
-                  value={sessionToken}
-                  onChange={(e) => setSessionToken(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
-                  placeholder="For temporary STS credentials"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
-                <input
-                  type="text"
-                  value={defaultRegion}
-                  onChange={(e) => setDefaultRegion(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
-                  placeholder="us-east-1"
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-xs text-gray-500">
-                Paste the service account key JSON (roles/cloudasset.viewer plus write roles for enabled
-                playbooks). Stored only in Azure Key Vault — never in the database.
-              </p>
-              <textarea
-                value={serviceAccountJson}
-                onChange={(e) => setServiceAccountJson(e.target.value)}
-                rows={5}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
-                placeholder={'{\n  "type": "service_account",\n  "client_email": "...",\n  "private_key": "..."\n}'}
-              />
-            </div>
-          )}
-
-          {/* Regions */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {provider === 'aws' ? 'Regions to scan' : 'Regions / zones (optional)'}
-            </label>
-            <input
-              type="text"
-              value={regions}
-              onChange={(e) => setRegions(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
-              placeholder={provider === 'aws' ? 'us-east-1, us-west-2' : 'Leave blank for project-wide'}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Comma-separated. {provider === 'aws' ? 'Defaults to the default region if blank.' : 'GCP asset inventory is project-wide.'}
-            </p>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-4 py-2 bg-azure-600 text-white rounded-lg text-sm hover:bg-azure-700 disabled:opacity-50 flex items-center gap-2"
-            >
-              {busy && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
-              {busy ? 'Linking...' : 'Link Account'}
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   );

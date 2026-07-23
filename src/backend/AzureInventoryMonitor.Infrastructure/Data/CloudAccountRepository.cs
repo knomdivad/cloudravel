@@ -12,7 +12,7 @@ namespace AzureInventoryMonitor.Infrastructure.Data;
 public sealed class CloudAccountRepository : ICloudAccountRepository
 {
     private const string SelectColumns = @"
-        SELECT account_id AS AccountId, tenant_id AS TenantId, provider AS Provider,
+        SELECT account_id AS AccountId, tenant_id AS TenantId, org_id AS OrgId, provider AS Provider,
                external_id AS ExternalId, display_name AS DisplayName, status AS Status,
                credential_secret_name AS CredentialSecretName, regions_json AS RegionsJson,
                last_inventory_at AS LastInventoryAt, last_error AS LastError,
@@ -36,16 +36,17 @@ public sealed class CloudAccountRepository : ICloudAccountRepository
 
         const string sql = @"
             INSERT INTO cloud_accounts
-                (account_id, tenant_id, provider, external_id, display_name, status,
+                (account_id, tenant_id, org_id, provider, external_id, display_name, status,
                  credential_secret_name, regions_json, created_by)
             VALUES
-                (@AccountId, @TenantId, @Provider, @ExternalId, @DisplayName, @Status,
+                (@AccountId, @TenantId, @OrgId, @Provider, @ExternalId, @DisplayName, @Status,
                  @CredentialSecretName, @RegionsJson, @CreatedBy)";
 
         await conn.ExecuteAsync(sql, new
         {
             account.AccountId,
             account.TenantId,
+            account.OrgId,
             Provider = account.Provider.ToString(),
             account.ExternalId,
             account.DisplayName,
@@ -73,6 +74,14 @@ public sealed class CloudAccountRepository : ICloudAccountRepository
         await using var conn = await _connectionFactory.CreateConnectionAsync(tenantId);
         var sql = SelectColumns + " WHERE tenant_id = @TenantId ORDER BY provider, display_name";
         var rows = await conn.QueryAsync<CloudAccountRow>(sql, new { TenantId = tenantId });
+        return rows.Select(r => r.ToModel()).ToList();
+    }
+
+    public async Task<IReadOnlyList<CloudAccount>> GetByOrgAsync(Guid tenantId, Guid orgId)
+    {
+        await using var conn = await _connectionFactory.CreateConnectionAsync(tenantId);
+        var sql = SelectColumns + " WHERE tenant_id = @TenantId AND org_id = @OrgId ORDER BY display_name";
+        var rows = await conn.QueryAsync<CloudAccountRow>(sql, new { TenantId = tenantId, OrgId = orgId });
         return rows.Select(r => r.ToModel()).ToList();
     }
 
@@ -106,6 +115,7 @@ public sealed class CloudAccountRepository : ICloudAccountRepository
     {
         public Guid AccountId { get; set; }
         public Guid TenantId { get; set; }
+        public Guid OrgId { get; set; }
         public string Provider { get; set; } = string.Empty;
         public string ExternalId { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
@@ -123,6 +133,7 @@ public sealed class CloudAccountRepository : ICloudAccountRepository
             {
                 AccountId = AccountId,
                 TenantId = TenantId,
+                OrgId = OrgId,
                 ExternalId = ExternalId,
                 DisplayName = DisplayName,
                 CredentialSecretName = CredentialSecretName,

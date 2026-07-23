@@ -79,13 +79,26 @@ public interface IRemediationRepository
 }
 
 /// <summary>
-/// Repository for linked multi-cloud accounts (AWS accounts, GCP projects).
+/// Repository for cloud organizations (top-level provider-agnostic grouping:
+/// Azure tenant / AWS Organization / GCP Organization).
+/// </summary>
+public interface ICloudOrgRepository
+{
+    Task<CloudOrg> CreateAsync(CloudOrg org);
+    Task<CloudOrg?> GetByIdAsync(Guid tenantId, Guid orgId);
+    Task<IReadOnlyList<CloudOrg>> GetByTenantAsync(Guid tenantId);
+}
+
+/// <summary>
+/// Repository for linked multi-cloud accounts (AWS accounts, GCP projects),
+/// each belonging to a <see cref="CloudOrg"/>.
 /// </summary>
 public interface ICloudAccountRepository
 {
     Task<CloudAccount> CreateAsync(CloudAccount account);
     Task<CloudAccount?> GetByIdAsync(Guid tenantId, Guid accountId);
     Task<IReadOnlyList<CloudAccount>> GetByTenantAsync(Guid tenantId);
+    Task<IReadOnlyList<CloudAccount>> GetByOrgAsync(Guid tenantId, Guid orgId);
     Task<IReadOnlyList<CloudAccount>> GetAllActiveAsync();
     Task UpdateStatusAsync(Guid accountId, CloudAccountStatus status, string? lastError);
     Task TouchInventoryAsync(Guid accountId, DateTime inventoryAt);

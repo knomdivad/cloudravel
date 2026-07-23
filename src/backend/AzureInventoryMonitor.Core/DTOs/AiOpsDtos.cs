@@ -144,7 +144,35 @@ public sealed class PlaybookDto
     public string? ParametersSchemaJson { get; set; }
 }
 
-// --- Cloud accounts ---
+// --- Cloud orgs (top-level provider-agnostic grouping) ---
+
+public sealed class CloudOrgsResponse
+{
+    public IReadOnlyList<CloudOrgDto> Orgs { get; set; } = [];
+}
+
+public sealed class CloudOrgDto
+{
+    public Guid OrgId { get; set; }
+    public string Provider { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? ExternalId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    /// <summary>Accounts/projects belonging to this org.</summary>
+    public IReadOnlyList<CloudAccountDto> Accounts { get; set; } = [];
+}
+
+public sealed class CreateCloudOrgRequest
+{
+    /// <summary>azure | aws | gcp</summary>
+    public string Provider { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Optional: AWS Organization ID / GCP Organization ID / Azure tenant GUID.</summary>
+    public string? ExternalId { get; set; }
+}
+
+// --- Cloud accounts (children of an org) ---
 
 public sealed class CloudAccountsResponse
 {
@@ -154,6 +182,7 @@ public sealed class CloudAccountsResponse
 public sealed class CloudAccountDto
 {
     public Guid AccountId { get; set; }
+    public Guid OrgId { get; set; }
     public string Provider { get; set; } = string.Empty;
     public string ExternalId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
@@ -166,11 +195,13 @@ public sealed class CloudAccountDto
 
 public sealed class LinkCloudAccountRequest
 {
+    /// <summary>The org this account/project belongs to (required).</summary>
+    public Guid OrgId { get; set; }
     /// <summary>aws | gcp</summary>
     public string Provider { get; set; } = string.Empty;
     public string ExternalId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    /// <summary>Credential payload stored in Key Vault; never persisted in SQL.</summary>
+    /// <summary>Credential payload stored in the secret store; never persisted in SQL.</summary>
     public string? CredentialJson { get; set; }
     public List<string>? Regions { get; set; }
 }

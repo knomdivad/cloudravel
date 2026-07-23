@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { useTenantContext } from '@/contexts/TenantContext';
-import type { CloudAccount } from '@/lib/types';
+import type { CloudOrg, CloudAccount } from '@/lib/types';
 
 interface TenantSummary {
   tenantId: string;
@@ -16,7 +16,6 @@ interface TenantSummary {
 }
 
 type ToastType = 'success' | 'error';
-type Provider = 'azure' | 'aws' | 'gcp';
 
 const PROVIDER_BADGES: Record<string, string> = {
   azure: 'bg-blue-100 text-blue-700',
@@ -24,36 +23,26 @@ const PROVIDER_BADGES: Record<string, string> = {
   gcp: 'bg-emerald-100 text-emerald-700',
 };
 
-const INITIAL_FORM = {
-  provider: 'azure' as Provider,
-  // Azure tenant onboarding
-  displayName: '',
-  azureTenantId: '',
-  onboardingMethod: 'lighthouse' as 'lighthouse' | 'app_registration',
-  clientId: '',
-  clientSecret: '',
-  lighthouseDelegationId: '',
-  subscriptionIds: '',
-  // AWS / GCP cloud account
-  externalId: '',
-  awsAccessKeyId: '',
-  awsSecretAccessKey: '',
-  awsSessionToken: '',
-  awsDefaultRegion: 'us-east-1',
-  gcpServiceAccountJson: '',
-  regions: '',
+const statusBadge = (status: string) => {
+  const styles: Record<string, string> = {
+    active: 'bg-green-100 text-green-800',
+    connected: 'bg-green-100 text-green-800',
+    degraded: 'bg-yellow-100 text-yellow-800',
+    suspended: 'bg-red-100 text-red-800',
+    disconnected: 'bg-red-100 text-red-800',
+    offboarded: 'bg-gray-100 text-gray-800',
+  };
+  return styles[status.toLowerCase()] || 'bg-gray-100 text-gray-800';
 };
 
 export default function CloudsPage() {
   const { tenantId, currentTenant } = useTenantContext();
 
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
-  const [cloudAccounts, setCloudAccounts] = useState<CloudAccount[]>([]);
+  const [orgs, setOrgs] = useState<CloudOrg[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [formData, setFormData] = useState(INITIAL_FORM);
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [addAccountFor, setAddAccountFor] = useState<CloudOrg | null>(null);
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [statusAction, setStatusAction] = useState<{ tenant: TenantSummary; newStatus: string } | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -68,128 +57,36 @@ export default function CloudsPage() {
     try {
       const data = await api.getTenants();
       setTenants(data || []);
-    } catch (err) {
-      console.error('Failed to load tenants', err);
-      showToast('Failed to load clouds.', 'error');
+    } catch {
+      showToast('Failed to load Azure tenants.', 'error');
     } finally {
       setLoading(false);
     }
   }, [showToast]);
 
-  const fetchCloudAccounts = useCallback(async () => {
-    if (!tenantId) {
-      setCloudAccounts([]);
-      return;
-    }
+  const fetchOrgs = useCallback(async () => {
+    if (!tenantId) { setOrgs([]); return; }
     try {
-      const data = await api.getCloudAccounts(tenantId);
-      setCloudAccounts(data.accounts || []);
-    } catch (err) {
-      console.error('Failed to load cloud accounts', err);
+      const data = await api.getCloudOrgs(tenantId);
+      setOrgs(data.orgs || []);
+    } catch {
+      /* non-fatal */
     }
   }, [tenantId]);
 
   useEffect(() => { fetchTenants(); }, [fetchTenants]);
-  useEffect(() => { fetchCloudAccounts(); }, [fetchCloudAccounts]);
-
-  const openAdd = () => {
-    setFormData(INITIAL_FORM);
-    setFormError(null);
-    setShowAdd(true);
-  };
-
-  const setProvider = (provider: Provider) =>
-    setFormData(d => ({ ...d, provider }));
-
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
-    setSubmitting(true);
-
-    try {
-      if (formData.provider === 'azure') {
-        const isAppReg = formData.onboardingMethod === 'app_registration';
-        const subIds = formData.subscriptionIds
-          .split(/[,\n]+/)
-          .map(s => s.trim())
-          .filter(Boolean);
-
-        await api.onboardTenant({
-          displayName: formData.displayName,
-          azureTenantId: formData.azureTenantId,
-          onboardingMethod: formData.onboardingMethod,
-          clientId: isAppReg ? formData.clientId : undefined,
-          clientSecret: isAppReg ? formData.clientSecret || undefined : undefined,
-          lighthouseDelegationId: !isAppReg ? formData.lighthouseDelegationId || undefined : undefined,
-          subscriptionIds: subIds.length > 0 ? subIds : undefined,
-        });
-        showToast(`Azure tenant "${formData.displayName}" onboarded.`, 'success');
-        fetchTenants();
-      } else {
-        // AWS / GCP attach to the currently selected cloud (tenant).
-        if (!tenantId) {
-          setFormError('Select or onboard an Azure tenant first — AWS/GCP accounts attach to a cloud context.');
-          setSubmitting(false);
-          return;
-        }
-
-        let credentialJson: string | undefined;
-        if (formData.provider === 'aws') {
-          if (formData.awsAccessKeyId && formData.awsSecretAccessKey) {
-            credentialJson = JSON.stringify({
-              accessKeyId: formData.awsAccessKeyId.trim(),
-              secretAccessKey: formData.awsSecretAccessKey.trim(),
-              sessionToken: formData.awsSessionToken.trim() || undefined,
-              defaultRegion: formData.awsDefaultRegion.trim() || 'us-east-1',
-            });
-          }
-        } else {
-          if (formData.gcpServiceAccountJson.trim()) {
-            JSON.parse(formData.gcpServiceAccountJson); // validate before send
-            credentialJson = formData.gcpServiceAccountJson.trim();
-          }
-        }
-
-        const regionList = formData.regions
-          .split(/[,\n]+/)
-          .map(r => r.trim())
-          .filter(Boolean);
-
-        await api.linkCloudAccount(tenantId, {
-          provider: formData.provider,
-          externalId: formData.externalId.trim(),
-          displayName: formData.displayName.trim(),
-          credentialJson,
-          regions: regionList.length > 0 ? regionList : undefined,
-        });
-        showToast(`${formData.provider.toUpperCase()} account "${formData.displayName}" linked.`, 'success');
-        fetchCloudAccounts();
-      }
-      setShowAdd(false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to add cloud.';
-      setFormError(formData.provider === 'gcp' && msg.includes('JSON')
-        ? 'The GCP service account key must be valid JSON.'
-        : msg);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  useEffect(() => { fetchOrgs(); }, [fetchOrgs]);
 
   const handleStatusUpdate = async () => {
     if (!statusAction) return;
     setUpdatingStatus(true);
     try {
       await api.updateTenantStatus(statusAction.tenant.tenantId, statusAction.newStatus);
-      showToast(
-        `${statusAction.tenant.displayName} status changed to ${statusAction.newStatus}.`,
-        'success'
-      );
+      showToast(`${statusAction.tenant.displayName} → ${statusAction.newStatus}.`, 'success');
       setStatusAction(null);
       fetchTenants();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to update status.';
-      showToast(msg, 'error');
+      showToast(err instanceof Error ? err.message : 'Failed to update status.', 'error');
     } finally {
       setUpdatingStatus(false);
     }
@@ -202,64 +99,34 @@ export default function CloudsPage() {
       showToast(`Inventory collected for "${tenant.displayName}".`, 'success');
       fetchTenants();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to collect inventory.';
-      showToast(msg, 'error');
+      showToast(err instanceof Error ? err.message : 'Failed to collect inventory.', 'error');
     } finally {
       setCollectingTenant(null);
     }
   };
 
-  const statusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      active: 'bg-green-100 text-green-800',
-      connected: 'bg-green-100 text-green-800',
-      degraded: 'bg-yellow-100 text-yellow-800',
-      suspended: 'bg-red-100 text-red-800',
-      disconnected: 'bg-red-100 text-red-800',
-      offboarded: 'bg-gray-100 text-gray-800',
-    };
-    return styles[status.toLowerCase()] || 'bg-gray-100 text-gray-800';
-  };
-
   const getStatusActions = (status: string): { label: string; value: string; destructive?: boolean }[] => {
     switch (status) {
-      case 'active':
-        return [
-          { label: 'Suspend', value: 'suspended', destructive: true },
-          { label: 'Offboard', value: 'offboarded', destructive: true },
-        ];
-      case 'degraded':
-        return [
-          { label: 'Reactivate', value: 'active' },
-          { label: 'Suspend', value: 'suspended', destructive: true },
-        ];
-      case 'suspended':
-        return [
-          { label: 'Reactivate', value: 'active' },
-          { label: 'Offboard', value: 'offboarded', destructive: true },
-        ];
-      default:
-        return [];
+      case 'active': return [{ label: 'Suspend', value: 'suspended', destructive: true }, { label: 'Offboard', value: 'offboarded', destructive: true }];
+      case 'degraded': return [{ label: 'Reactivate', value: 'active' }, { label: 'Suspend', value: 'suspended', destructive: true }];
+      case 'suspended': return [{ label: 'Reactivate', value: 'active' }, { label: 'Offboard', value: 'offboarded', destructive: true }];
+      default: return [];
     }
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-      </div>
-    );
+    return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   }
 
-  const totalClouds = tenants.length + cloudAccounts.length;
+  const awsOrgs = orgs.filter(o => o.provider.toLowerCase() === 'aws');
+  const gcpOrgs = orgs.filter(o => o.provider.toLowerCase() === 'gcp');
+  const totalClouds = tenants.length + orgs.length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {toast && (
         <div className={`fixed top-4 right-4 z-[60] max-w-sm px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 ${
-          toast.type === 'success'
-            ? 'bg-green-50 border border-green-200 text-green-800'
-            : 'bg-red-50 border border-red-200 text-red-800'
+          toast.type === 'success' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'
         }`}>
           <span>{toast.type === 'success' ? '✓' : '✕'}</span>
           <span className="flex-1">{toast.message}</span>
@@ -267,357 +134,49 @@ export default function CloudsPage() {
         </div>
       )}
 
-      {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clouds</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Azure tenants, AWS accounts, and GCP projects &middot; {totalClouds} connected
+            Azure tenants, AWS organizations, and GCP organizations — independent peers &middot; {totalClouds} connected
           </p>
         </div>
-        <button
-          onClick={openAdd}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-        >
+        <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
           + Add Cloud
         </button>
       </div>
 
-      {/* Add Cloud Modal */}
       {showAdd && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Add Cloud</h2>
-              <button onClick={() => setShowAdd(false)} className="text-gray-400 hover:text-gray-600">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-
-            {/* Provider selector */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['azure', 'aws', 'gcp'] as Provider[]).map(p => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setProvider(p)}
-                    className={`px-3 py-2 rounded-lg border text-sm font-medium text-center transition-colors ${
-                      formData.provider === p
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {p === 'azure' ? 'Azure' : p === 'aws' ? 'AWS' : 'Google Cloud'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {formError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleAdd} className="space-y-4">
-              {/* Display Name (all providers) */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Display Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.displayName}
-                  onChange={e => setFormData(d => ({ ...d, displayName: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder={formData.provider === 'azure' ? 'Contoso Corp' : formData.provider === 'aws' ? 'Production AWS' : 'Production GCP'}
-                />
-              </div>
-
-              {/* ---------- Azure ---------- */}
-              {formData.provider === 'azure' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Azure Tenant ID <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-                      title="Must be a valid GUID (e.g. 00000000-0000-0000-0000-000000000000)"
-                      value={formData.azureTenantId}
-                      onChange={e => setFormData(d => ({ ...d, azureTenantId: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="00000000-0000-0000-0000-000000000000"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Onboarding Method</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setFormData(d => ({ ...d, onboardingMethod: 'lighthouse' }))}
-                        className={`px-3 py-2 rounded-lg border text-sm font-medium text-center transition-colors ${
-                          formData.onboardingMethod === 'lighthouse'
-                            ? 'border-blue-500 bg-blue-50 text-blue-700'
-                            : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        Azure Lighthouse
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFormData(d => ({ ...d, onboardingMethod: 'app_registration' }))}
-                        className={`px-3 py-2 rounded-lg border text-sm font-medium text-center transition-colors ${
-                          formData.onboardingMethod === 'app_registration'
-                            ? 'border-blue-500 bg-blue-50 text-blue-700'
-                            : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        App Registration
-                      </button>
-                    </div>
-                  </div>
-
-                  {formData.onboardingMethod === 'lighthouse' && (
-                    <div className="space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <p className="text-xs text-gray-500">
-                        Azure Lighthouse provides cross-tenant access without storing credentials.
-                        Deploy the delegation template in the customer&apos;s tenant first.
-                      </p>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Lighthouse Delegation ID</label>
-                        <input
-                          type="text"
-                          value={formData.lighthouseDelegationId}
-                          onChange={e => setFormData(d => ({ ...d, lighthouseDelegationId: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Optional — auto-discovered if omitted"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {formData.onboardingMethod === 'app_registration' && (
-                    <div className="space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <p className="text-xs text-gray-500">
-                        Create an app registration in the customer&apos;s Entra ID with
-                        <strong> Reader</strong> and <strong>Security Reader</strong> roles on target subscriptions.
-                      </p>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Client ID <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-                          title="Must be a valid GUID"
-                          value={formData.clientId}
-                          onChange={e => setFormData(d => ({ ...d, clientId: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Application (client) ID"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Client Secret</label>
-                        <input
-                          type="password"
-                          value={formData.clientSecret}
-                          onChange={e => setFormData(d => ({ ...d, clientSecret: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Client secret value"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">
-                          Stored securely in the platform&apos;s secret store. Leave blank to add later.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Subscription IDs</label>
-                    <textarea
-                      value={formData.subscriptionIds}
-                      onChange={e => setFormData(d => ({ ...d, subscriptionIds: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      rows={2}
-                      placeholder={"One per line or comma-separated"}
-                    />
-                    <p className="text-xs text-gray-400 mt-1">
-                      Optional — leave blank to discover automatically.
-                    </p>
-                  </div>
-                </>
-              )}
-
-              {/* ---------- AWS / GCP: attach-to note ---------- */}
-              {formData.provider !== 'azure' && (
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-                  {tenantId
-                    ? <>Attaching to cloud context: <strong>{currentTenant?.displayName}</strong>. Switch the cloud in the sidebar to attach elsewhere.</>
-                    : <>No cloud context selected. Onboard or select an Azure tenant first — AWS/GCP accounts attach to one.</>}
-                </div>
-              )}
-
-              {/* ---------- AWS ---------- */}
-              {formData.provider === 'aws' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      AWS Account ID <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.externalId}
-                      onChange={e => setFormData(d => ({ ...d, externalId: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="123456789012"
-                    />
-                  </div>
-                  <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <p className="text-xs text-gray-500">
-                      IAM access keys with <code>tag:GetResources</code> (read) plus the write permissions
-                      for any playbooks you enable. Stored only in the secret store.
-                    </p>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Access Key ID</label>
-                      <input type="text" value={formData.awsAccessKeyId}
-                        onChange={e => setFormData(d => ({ ...d, awsAccessKeyId: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="AKIA..." />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Secret Access Key</label>
-                      <input type="password" value={formData.awsSecretAccessKey}
-                        onChange={e => setFormData(d => ({ ...d, awsSecretAccessKey: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="Secret access key" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Session Token (optional)</label>
-                      <input type="password" value={formData.awsSessionToken}
-                        onChange={e => setFormData(d => ({ ...d, awsSessionToken: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="For temporary STS credentials" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
-                      <input type="text" value={formData.awsDefaultRegion}
-                        onChange={e => setFormData(d => ({ ...d, awsDefaultRegion: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="us-east-1" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Regions to scan</label>
-                    <input type="text" value={formData.regions}
-                      onChange={e => setFormData(d => ({ ...d, regions: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="us-east-1, us-west-2 (defaults to the default region)" />
-                  </div>
-                </>
-              )}
-
-              {/* ---------- GCP ---------- */}
-              {formData.provider === 'gcp' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      GCP Project ID <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.externalId}
-                      onChange={e => setFormData(d => ({ ...d, externalId: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="my-gcp-project"
-                    />
-                  </div>
-                  <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <p className="text-xs text-gray-500">
-                      Service account key JSON (<code>roles/cloudasset.viewer</code> plus write roles for
-                      enabled playbooks). Stored only in the secret store.
-                    </p>
-                    <textarea
-                      value={formData.gcpServiceAccountJson}
-                      onChange={e => setFormData(d => ({ ...d, gcpServiceAccountJson: e.target.value }))}
-                      rows={5}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder={'{\n  "type": "service_account",\n  "client_email": "...",\n  "private_key": "..."\n}'}
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* Actions */}
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => setShowAdd(false)}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-                >
-                  {submitting && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
-                  {submitting
-                    ? (formData.provider === 'azure' ? 'Onboarding...' : 'Linking...')
-                    : (formData.provider === 'azure' ? 'Onboard Tenant' : 'Link Account')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AddCloudModal
+          tenantId={tenantId}
+          onClose={() => setShowAdd(false)}
+          onAdded={(msg) => { showToast(msg, 'success'); setShowAdd(false); fetchTenants(); fetchOrgs(); }}
+        />
       )}
 
-      {/* Status Change Confirmation Modal */}
+      {addAccountFor && (
+        <AddAccountModal
+          tenantId={tenantId!}
+          org={addAccountFor}
+          onClose={() => setAddAccountFor(null)}
+          onAdded={(msg) => { showToast(msg, 'success'); setAddAccountFor(null); fetchOrgs(); }}
+        />
+      )}
+
+      {/* Status change confirm */}
       {statusAction && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              {statusAction.newStatus === 'Active' ? 'Reactivate' : statusAction.newStatus} Tenant
+              {statusAction.newStatus === 'active' ? 'Reactivate' : statusAction.newStatus} Tenant
             </h3>
             <p className="text-sm text-gray-600 mb-1">
-              Are you sure you want to change <strong>{statusAction.tenant.displayName}</strong> to <strong>{statusAction.newStatus}</strong>?
+              Change <strong>{statusAction.tenant.displayName}</strong> to <strong>{statusAction.newStatus}</strong>?
             </p>
-            {statusAction.newStatus === 'Offboarded' && (
-              <p className="text-sm text-amber-600 mt-2">
-                Offboarding will stop all monitoring and data collection for this tenant.
-              </p>
-            )}
-            {statusAction.newStatus === 'Suspended' && (
-              <p className="text-sm text-amber-600 mt-2">
-                Suspending will pause all monitoring and change polling for this tenant.
-              </p>
-            )}
             <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setStatusAction(null)}
-                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleStatusUpdate}
-                disabled={updatingStatus}
-                className={`px-4 py-2 rounded-lg text-sm text-white flex items-center gap-2 disabled:opacity-50 ${
-                  statusAction.newStatus === 'Active'
-                    ? 'bg-green-600 hover:bg-green-700'
-                    : 'bg-red-600 hover:bg-red-700'
-                }`}
-              >
+              <button onClick={() => setStatusAction(null)} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={handleStatusUpdate} disabled={updatingStatus}
+                className={`px-4 py-2 rounded-lg text-sm text-white flex items-center gap-2 disabled:opacity-50 ${statusAction.newStatus === 'active' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
                 {updatingStatus && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
                 {updatingStatus ? 'Updating...' : 'Confirm'}
               </button>
@@ -628,73 +187,41 @@ export default function CloudsPage() {
 
       {/* Azure tenants */}
       {tenants.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Azure Tenants</h2>
+        <section>
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Azure</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {tenants.map(tenant => {
               const actions = getStatusActions(tenant.status);
               return (
-                <div
-                  key={tenant.tenantId}
-                  className="bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow"
-                >
+                <div key={tenant.tenantId} className="bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES.azure}`}>Azure</span>
                       <h3 className="font-semibold text-gray-900 truncate">{tenant.displayName}</h3>
                     </div>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(tenant.status)}`}>
-                      {tenant.status}
-                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(tenant.status)}`}>{tenant.status}</span>
                   </div>
                   <p className="text-xs text-gray-500 font-mono mb-4 truncate">{tenant.azureTenantId}</p>
                   <div className="grid grid-cols-3 gap-2 text-center mb-4">
-                    <div>
-                      <p className="text-lg font-bold text-gray-900">{tenant.resourceCount ?? '—'}</p>
-                      <p className="text-xs text-gray-500">Resources</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-bold text-gray-900">{tenant.changes24H ?? '—'}</p>
-                      <p className="text-xs text-gray-500">Changes 24h</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {tenant.lastSnapshotAt
-                          ? new Date(tenant.lastSnapshotAt).toLocaleDateString()
-                          : 'No snapshot'}
-                      </p>
-                      <p className="text-xs text-gray-500">Last Snapshot</p>
-                    </div>
+                    <div><p className="text-lg font-bold text-gray-900">{tenant.resourceCount ?? '—'}</p><p className="text-xs text-gray-500">Resources</p></div>
+                    <div><p className="text-lg font-bold text-gray-900">{tenant.changes24H ?? '—'}</p><p className="text-xs text-gray-500">Changes 24h</p></div>
+                    <div><p className="text-xs text-gray-500 mt-1">{tenant.lastSnapshotAt ? new Date(tenant.lastSnapshotAt).toLocaleDateString() : 'No snapshot'}</p><p className="text-xs text-gray-500">Last Snapshot</p></div>
                   </div>
-
                   {actions.length > 0 && (
                     <div className="flex gap-2 pt-3 border-t border-gray-100">
                       {actions.map(action => (
-                        <button
-                          key={action.value}
-                          onClick={() => setStatusAction({ tenant, newStatus: action.value })}
-                          className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                            action.destructive
-                              ? 'text-red-600 border border-red-200 hover:bg-red-50'
-                              : 'text-green-600 border border-green-200 hover:bg-green-50'
-                          }`}
-                        >
+                        <button key={action.value} onClick={() => setStatusAction({ tenant, newStatus: action.value })}
+                          className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${action.destructive ? 'text-red-600 border border-red-200 hover:bg-red-50' : 'text-green-600 border border-green-200 hover:bg-green-50'}`}>
                           {action.label}
                         </button>
                       ))}
                     </div>
                   )}
-
                   {tenant.status === 'active' && (
                     <div className="pt-2">
-                      <button
-                        onClick={() => handleCollectInventory(tenant)}
-                        disabled={collectingTenant === tenant.tenantId}
-                        className="w-full px-3 py-1.5 rounded text-xs font-medium transition-colors text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        {collectingTenant === tenant.tenantId && (
-                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />
-                        )}
+                      <button onClick={() => handleCollectInventory(tenant)} disabled={collectingTenant === tenant.tenantId}
+                        className="w-full px-3 py-1.5 rounded text-xs font-medium transition-colors text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-50 flex items-center justify-center gap-2">
+                        {collectingTenant === tenant.tenantId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
                         {collectingTenant === tenant.tenantId ? 'Collecting...' : 'Collect Inventory'}
                       </button>
                     </div>
@@ -703,65 +230,333 @@ export default function CloudsPage() {
               );
             })}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Linked AWS / GCP accounts */}
-      {cloudAccounts.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
-            AWS &amp; GCP Accounts{currentTenant ? ` — ${currentTenant.displayName}` : ''}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {cloudAccounts.map(acct => (
-              <div key={acct.accountId} className="bg-white rounded-lg border border-gray-200 p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[acct.provider.toLowerCase()] ?? ''}`}>
-                      {acct.provider.toUpperCase()}
-                    </span>
-                    <h3 className="font-semibold text-gray-900 truncate">{acct.displayName}</h3>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(acct.status)}`}>
-                    {acct.status}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 font-mono mb-3 truncate">{acct.externalId}</p>
-                {acct.regions && acct.regions.length > 0 && (
-                  <p className="text-xs text-gray-500 mb-2">Regions: {acct.regions.join(', ')}</p>
-                )}
-                <p className="text-xs text-gray-500">
-                  Last inventory: {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleString() : 'never'}
-                </p>
-                {acct.lastError && (
-                  <p className="text-xs text-red-600 mt-2 break-words">{acct.lastError}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* AWS orgs */}
+      {awsOrgs.length > 0 && (
+        <OrgSection label="AWS" orgs={awsOrgs} onAddAccount={setAddAccountFor} />
       )}
 
-      {/* Empty state */}
+      {/* GCP orgs */}
+      {gcpOrgs.length > 0 && (
+        <OrgSection label="Google Cloud" orgs={gcpOrgs} onAddAccount={setAddAccountFor} />
+      )}
+
       {totalClouds === 0 && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-          <div className="mx-auto mb-4">
-            <svg className="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z" />
-            </svg>
-          </div>
           <p className="text-gray-500 mb-1">No clouds connected yet</p>
-          <p className="text-sm text-gray-400 mb-4">
-            Connect an Azure tenant, AWS account, or GCP project to start monitoring.
-          </p>
-          <button
-            onClick={openAdd}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-          >
-            Add First Cloud
-          </button>
+          <p className="text-sm text-gray-400 mb-4">Connect an Azure tenant, AWS organization, or GCP organization to start monitoring.</p>
+          <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">Add First Cloud</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function OrgSection({ label, orgs, onAddAccount }: { label: string; orgs: CloudOrg[]; onAddAccount: (o: CloudOrg) => void }) {
+  const accountNoun = label === 'AWS' ? 'account' : 'project';
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">{label}</h2>
+      <div className="space-y-4">
+        {orgs.map(org => (
+          <div key={org.orgId} className="bg-white rounded-lg border border-gray-200 p-5">
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[org.provider.toLowerCase()] ?? ''}`}>{org.provider.toUpperCase()}</span>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-gray-900 truncate">{org.name}</h3>
+                  {org.externalId && <p className="text-xs text-gray-400 font-mono truncate">Org ID: {org.externalId}</p>}
+                </div>
+              </div>
+              <button onClick={() => onAddAccount(org)} className="text-xs font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">
+                + Add {accountNoun}
+              </button>
+            </div>
+
+            {org.accounts.length === 0 ? (
+              <p className="text-sm text-gray-400 py-2">No {accountNoun}s yet — add one to start collecting inventory.</p>
+            ) : (
+              <div className="divide-y divide-gray-100 border-t border-gray-100">
+                {org.accounts.map(acct => (
+                  <div key={acct.accountId} className="py-2.5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{acct.displayName}</p>
+                      <p className="text-xs text-gray-400 font-mono truncate">
+                        {acct.externalId}{acct.regions && acct.regions.length > 0 ? ` · ${acct.regions.join(', ')}` : ''}
+                      </p>
+                      {acct.lastError && <p className="text-xs text-red-600 truncate">{acct.lastError}</p>}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(acct.status)}`}>{acct.status}</span>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleDateString() : 'never'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ============================================================================
+// Add Cloud modal — Azure tenant, or a new AWS/GCP org
+// ============================================================================
+
+function AddCloudModal({ tenantId, onClose, onAdded }: {
+  tenantId: string | null;
+  onClose: () => void;
+  onAdded: (message: string) => void;
+}) {
+  const [provider, setProvider] = useState<'azure' | 'aws' | 'gcp'>('azure');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Azure fields
+  const [displayName, setDisplayName] = useState('');
+  const [azureTenantId, setAzureTenantId] = useState('');
+  const [onboardingMethod, setOnboardingMethod] = useState<'lighthouse' | 'app_registration'>('lighthouse');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  // Org (aws/gcp) fields
+  const [orgName, setOrgName] = useState('');
+  const [orgExternalId, setOrgExternalId] = useState('');
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      if (provider === 'azure') {
+        await api.onboardTenant({
+          displayName, azureTenantId, onboardingMethod,
+          clientId: onboardingMethod === 'app_registration' ? clientId : undefined,
+          clientSecret: onboardingMethod === 'app_registration' ? clientSecret || undefined : undefined,
+        });
+        onAdded(`Azure tenant "${displayName}" onboarded.`);
+      } else {
+        if (!tenantId) { setError('No workspace selected. Add or select an Azure tenant first to establish the workspace.'); setBusy(false); return; }
+        await api.createCloudOrg(tenantId, { provider, name: orgName, externalId: orgExternalId || undefined });
+        onAdded(`${provider.toUpperCase()} organization "${orgName}" created. Add accounts to it next.`);
+      }
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to add cloud.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Add Cloud</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+          <div className="grid grid-cols-3 gap-2">
+            {(['azure', 'aws', 'gcp'] as const).map(p => (
+              <button key={p} type="button" onClick={() => setProvider(p)}
+                className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${provider === p ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                {p === 'azure' ? 'Azure' : p === 'aws' ? 'AWS' : 'Google Cloud'}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">
+            {provider === 'azure' ? 'Onboard an Azure tenant.' : `Create a new ${provider.toUpperCase()} organization — a top-level grouping for its ${provider === 'aws' ? 'accounts' : 'projects'}. Independent of Azure.`}
+          </p>
+        </div>
+
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+
+        <form onSubmit={submit} className="space-y-4">
+          {provider === 'azure' ? (
+            <>
+              <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Contoso Corp" />
+              <Field label="Azure Tenant ID" required mono value={azureTenantId} onChange={setAzureTenantId}
+                placeholder="00000000-0000-0000-0000-000000000000"
+                pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Onboarding Method</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['lighthouse', 'app_registration'] as const).map(m => (
+                    <button key={m} type="button" onClick={() => setOnboardingMethod(m)}
+                      className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${onboardingMethod === m ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                      {m === 'lighthouse' ? 'Azure Lighthouse' : 'App Registration'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {onboardingMethod === 'app_registration' && (
+                <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <Field label="Client ID" required mono value={clientId} onChange={setClientId} placeholder="Application (client) ID"
+                    pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" />
+                  <Field label="Client Secret" type="password" mono value={clientSecret} onChange={setClientSecret} placeholder="Client secret value" />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <Field label={`${provider.toUpperCase()} Organization Name`} required value={orgName} onChange={setOrgName}
+                placeholder={provider === 'aws' ? 'Contoso AWS Organization' : 'Contoso GCP Organization'} />
+              <Field label="Organization ID (optional)" mono value={orgExternalId} onChange={setOrgExternalId}
+                placeholder={provider === 'aws' ? 'o-abc123def4' : '849021304719'} />
+            </>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={busy} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+              {busy && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
+              {busy ? 'Working...' : provider === 'azure' ? 'Onboard Tenant' : 'Create Organization'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Add Account modal — an AWS account / GCP project under an org
+// ============================================================================
+
+function AddAccountModal({ tenantId, org, onClose, onAdded }: {
+  tenantId: string;
+  org: CloudOrg;
+  onClose: () => void;
+  onAdded: (message: string) => void;
+}) {
+  const isAws = org.provider.toLowerCase() === 'aws';
+  const noun = isAws ? 'account' : 'project';
+
+  const [externalId, setExternalId] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [regions, setRegions] = useState('');
+  // AWS creds
+  const [accessKeyId, setAccessKeyId] = useState('');
+  const [secretAccessKey, setSecretAccessKey] = useState('');
+  const [sessionToken, setSessionToken] = useState('');
+  const [defaultRegion, setDefaultRegion] = useState('us-east-1');
+  // GCP creds
+  const [serviceAccountJson, setServiceAccountJson] = useState('');
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    let credentialJson: string | undefined;
+    try {
+      if (isAws) {
+        if (accessKeyId && secretAccessKey) {
+          credentialJson = JSON.stringify({
+            accessKeyId: accessKeyId.trim(), secretAccessKey: secretAccessKey.trim(),
+            sessionToken: sessionToken.trim() || undefined, defaultRegion: defaultRegion.trim() || 'us-east-1',
+          });
+        }
+      } else if (serviceAccountJson.trim()) {
+        JSON.parse(serviceAccountJson);
+        credentialJson = serviceAccountJson.trim();
+      }
+    } catch {
+      setError('The GCP service account key must be valid JSON.'); setBusy(false); return;
+    }
+
+    const regionList = regions.split(/[,\n]+/).map(r => r.trim()).filter(Boolean);
+    try {
+      await api.linkCloudAccount(tenantId, {
+        orgId: org.orgId,
+        externalId: externalId.trim(),
+        displayName: displayName.trim(),
+        credentialJson,
+        regions: regionList.length > 0 ? regionList : undefined,
+      });
+      onAdded(`${noun[0].toUpperCase()}${noun.slice(1)} "${displayName}" added to ${org.name}.`);
+    } catch (err: any) {
+      setError(err.message ?? `Failed to add ${noun}.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">Add {isAws ? 'AWS account' : 'GCP project'}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">Under organization <strong>{org.name}</strong></p>
+
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+
+        <form onSubmit={submit} className="space-y-4">
+          <Field label={isAws ? 'AWS Account ID' : 'GCP Project ID'} required mono value={externalId} onChange={setExternalId}
+            placeholder={isAws ? '123456789012' : 'my-gcp-project'} />
+          <Field label="Display Name" required value={displayName} onChange={setDisplayName}
+            placeholder={isAws ? 'Production account' : 'Production project'} />
+
+          {isAws ? (
+            <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <p className="text-xs text-gray-500">IAM access keys (read + write for enabled playbooks). Stored only in the secret store.</p>
+              <Field label="Access Key ID" mono value={accessKeyId} onChange={setAccessKeyId} placeholder="AKIA..." />
+              <Field label="Secret Access Key" type="password" mono value={secretAccessKey} onChange={setSecretAccessKey} placeholder="Secret access key" />
+              <Field label="Session Token (optional)" type="password" mono value={sessionToken} onChange={setSessionToken} placeholder="For temporary STS credentials" />
+              <Field label="Default Region" mono value={defaultRegion} onChange={setDefaultRegion} placeholder="us-east-1" />
+            </div>
+          ) : (
+            <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <p className="text-xs text-gray-500">Service account key JSON. Stored only in the secret store.</p>
+              <textarea value={serviceAccountJson} onChange={e => setServiceAccountJson(e.target.value)} rows={5}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder={'{\n  "type": "service_account",\n  "client_email": "...",\n  "private_key": "..."\n}'} />
+            </div>
+          )}
+
+          <Field label="Regions to scan" mono value={regions} onChange={setRegions}
+            placeholder={isAws ? 'us-east-1, us-west-2' : 'Leave blank for project-wide'} />
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={busy} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+              {busy && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
+              {busy ? 'Adding...' : `Add ${noun}`}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Small labeled input helper
+function Field({ label, value, onChange, placeholder, required, mono, type = 'text', pattern }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
+  required?: boolean; mono?: boolean; type?: string; pattern?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label}{required && <span className="text-red-500"> *</span>}
+      </label>
+      <input
+        type={type} required={required} pattern={pattern} value={value}
+        onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${mono ? 'font-mono' : ''}`}
+      />
     </div>
   );
 }

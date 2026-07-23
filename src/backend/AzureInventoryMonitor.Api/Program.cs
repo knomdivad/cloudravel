@@ -64,6 +64,7 @@ var host = new HostBuilder()
         services.AddScoped<IAnomalyRepository, AnomalyRepository>();
         services.AddScoped<IIncidentRepository, IncidentRepository>();
         services.AddScoped<IRemediationRepository, RemediationRepository>();
+        services.AddScoped<ICloudOrgRepository, CloudOrgRepository>();
         services.AddScoped<ICloudAccountRepository, CloudAccountRepository>();
 
         // Azure services — Scoped to avoid singleton-depends-on-scoped issue

@@ -162,15 +162,32 @@ VALUES
      NULL, NULL, 'gcp');
 
 -- ============================================================================
--- Linked cloud accounts (AWS + GCP) — Azure works via tenant onboarding above
+-- Cloud orgs (AWS + GCP) — independent peers of Azure, each grouping accounts
+-- ============================================================================
+DECLARE @AwsOrgId UNIQUEIDENTIFIER = 'C0000000-0000-0000-0000-00000000B001';
+DECLARE @GcpOrgId UNIQUEIDENTIFIER = 'C0000000-0000-0000-0000-00000000B002';
+
+INSERT INTO cloud_orgs (org_id, tenant_id, provider, name, external_id, status, created_at, created_by)
+VALUES
+    (@AwsOrgId, @TenantId, 'Aws', 'Contoso AWS Organization', 'o-abc123def4', 'Active',
+     DATEADD(DAY, -60, @Now), CONVERT(NVARCHAR(128), @AdminUserId)),
+    (@GcpOrgId, @TenantId, 'Gcp', 'Contoso GCP Organization', '849021304719', 'Active',
+     DATEADD(DAY, -45, @Now), CONVERT(NVARCHAR(128), @AdminUserId));
+
+-- ============================================================================
+-- Linked cloud accounts (AWS accounts + GCP projects) under their orgs.
+-- Azure works via tenant onboarding above.
 -- ============================================================================
 INSERT INTO cloud_accounts
-    (account_id, tenant_id, provider, external_id, display_name, status, regions_json, last_inventory_at, created_at, created_by)
+    (account_id, tenant_id, org_id, provider, external_id, display_name, status, regions_json, last_inventory_at, created_at, created_by)
 VALUES
-    ('C0000000-0000-0000-0000-0000000000A1', @TenantId, 'Aws', '123456789012', 'Contoso Production (AWS)',
+    ('C0000000-0000-0000-0000-0000000000A1', @TenantId, @AwsOrgId, 'Aws', '123456789012', 'Contoso Production (AWS)',
      'Connected', '["us-east-1","us-west-2"]', DATEADD(HOUR, -6, @Now), DATEADD(DAY, -60, @Now), CONVERT(NVARCHAR(128), @AdminUserId)),
 
-    ('C0000000-0000-0000-0000-0000000000A2', @TenantId, 'Gcp', 'contoso-prod-472019', 'Contoso GCP Project',
+    ('C0000000-0000-0000-0000-0000000000A3', @TenantId, @AwsOrgId, 'Aws', '210987654321', 'Contoso Sandbox (AWS)',
+     'Connected', '["us-east-1"]', DATEADD(HOUR, -6, @Now), DATEADD(DAY, -20, @Now), CONVERT(NVARCHAR(128), @AdminUserId)),
+
+    ('C0000000-0000-0000-0000-0000000000A2', @TenantId, @GcpOrgId, 'Gcp', 'contoso-prod-472019', 'Contoso GCP Project',
      'Connected', '["us-central1"]', DATEADD(HOUR, -6, @Now), DATEADD(DAY, -45, @Now), CONVERT(NVARCHAR(128), @AdminUserId));
 
 -- ============================================================================

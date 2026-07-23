@@ -23,6 +23,7 @@ MIGRATIONS=(
   004-local-auth
   005-job-queue
   006-rename-secret-column
+  007-cloud-orgs
   seed-demo-data
 )
 

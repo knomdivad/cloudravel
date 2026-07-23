@@ -13,14 +13,36 @@ public enum CloudProvider
 }
 
 /// <summary>
-/// A cloud account attached to a tenant: an Azure subscription set is implicit
-/// via the tenant's Lighthouse/App Registration onboarding, while AWS accounts
-/// and GCP projects are linked explicitly with credentials held in Key Vault.
+/// A provider-agnostic cloud organization — the top-level grouping and a peer
+/// across providers: an Azure tenant, an AWS Organization, or a GCP Organization.
+/// AWS accounts and GCP projects belong to one of these, NOT to an Azure tenant.
+/// tenant_id here is only the workspace / RLS boundary (the enterprise).
+/// </summary>
+public sealed class CloudOrg
+{
+    public Guid OrgId { get; set; }
+    public Guid TenantId { get; set; }
+    public CloudProvider Provider { get; set; }
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Azure tenant GUID / AWS Organization ID / GCP Organization ID (optional).</summary>
+    public string? ExternalId { get; set; }
+    public CloudAccountStatus Status { get; set; } = CloudAccountStatus.Connected;
+    public DateTime CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A cloud account/project belonging to a <see cref="CloudOrg"/>: an AWS member
+/// account or a GCP project, linked explicitly with credentials held in the
+/// secret store. Grouped under its org; the workspace (tenant_id) is inherited
+/// from the org for RLS.
 /// </summary>
 public sealed class CloudAccount
 {
     public Guid AccountId { get; set; }
     public Guid TenantId { get; set; }
+    /// <summary>Parent organization this account/project belongs to.</summary>
+    public Guid OrgId { get; set; }
     public CloudProvider Provider { get; set; }
 
     /// <summary>AWS account ID, GCP project ID, or Azure subscription/tenant ID.</summary>

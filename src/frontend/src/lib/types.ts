@@ -251,6 +251,7 @@ export interface Playbook {
 
 export interface CloudAccount {
   accountId: string;
+  orgId: string;
   provider: 'Azure' | 'Aws' | 'Gcp';
   externalId: string;
   displayName: string;
@@ -259,6 +260,16 @@ export interface CloudAccount {
   lastInventoryAt?: string;
   lastError?: string;
   createdAt: string;
+}
+
+export interface CloudOrg {
+  orgId: string;
+  provider: 'Azure' | 'Aws' | 'Gcp';
+  name: string;
+  externalId?: string;
+  status: 'Active' | 'Degraded' | 'Disconnected' | 'Connected';
+  createdAt: string;
+  accounts: CloudAccount[];
 }
 
 export interface OpsSummary {

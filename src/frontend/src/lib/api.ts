@@ -19,6 +19,7 @@ import type {
   RemediationAction,
   Playbook,
   CloudAccount,
+  CloudOrg,
   OpsSummary,
 } from './types';
 
@@ -415,10 +416,24 @@ export async function getCloudAccounts(tenantId: string): Promise<{ accounts: Cl
   return apiCall(`/cloud-accounts`, tenantId);
 }
 
+export async function getCloudOrgs(tenantId: string): Promise<{ orgs: CloudOrg[] }> {
+  return apiCall(`/cloud-orgs`, tenantId);
+}
+
+export async function createCloudOrg(
+  tenantId: string,
+  request: { provider: string; name: string; externalId?: string }
+): Promise<CloudOrg> {
+  return apiCall<CloudOrg>('/cloud-orgs', tenantId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
 export async function linkCloudAccount(
   tenantId: string,
   request: {
-    provider: string;
+    orgId: string;
     externalId: string;
     displayName: string;
     credentialJson?: string;
@@ -462,5 +477,7 @@ export const api = {
   rejectRemediation,
   getPlaybooks,
   getCloudAccounts,
+  getCloudOrgs,
+  createCloudOrg,
   linkCloudAccount,
 };

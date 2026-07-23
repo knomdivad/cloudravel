@@ -21,6 +21,7 @@ public sealed class AiOpsFunctions
     private readonly IIncidentRepository _incidentRepo;
     private readonly IRemediationRepository _remediationRepo;
     private readonly IRemediationService _remediationService;
+    private readonly ICloudOrgRepository _cloudOrgRepo;
     private readonly ICloudAccountRepository _cloudAccountRepo;
     private readonly ICloudProviderAdapterFactory _adapterFactory;
     private readonly ITenantRepository _tenantRepo;
@@ -32,6 +33,7 @@ public sealed class AiOpsFunctions
         IIncidentRepository incidentRepo,
         IRemediationRepository remediationRepo,
         IRemediationService remediationService,
+        ICloudOrgRepository cloudOrgRepo,
         ICloudAccountRepository cloudAccountRepo,
         ICloudProviderAdapterFactory adapterFactory,
         ITenantRepository tenantRepo,
@@ -42,6 +44,7 @@ public sealed class AiOpsFunctions
         _incidentRepo = incidentRepo;
         _remediationRepo = remediationRepo;
         _remediationService = remediationService;
+        _cloudOrgRepo = cloudOrgRepo;
         _cloudAccountRepo = cloudAccountRepo;
         _adapterFactory = adapterFactory;
         _tenantRepo = tenantRepo;
@@ -371,10 +374,76 @@ public sealed class AiOpsFunctions
     }
 
     // ========================================================================
-    // Cloud accounts (multi-cloud)
+    // Cloud orgs + accounts (multi-cloud, provider-agnostic peers)
     // ========================================================================
 
-    /// <summary>GET /api/cloud-accounts — linked AWS/GCP accounts for the tenant.</summary>
+    /// <summary>GET /api/cloud-orgs — cloud organizations with their accounts/projects.</summary>
+    [Function("GetCloudOrgs")]
+    public async Task<HttpResponseData> GetCloudOrgs(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "cloud-orgs")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var orgs = await _cloudOrgRepo.GetByTenantAsync(tenantId);
+        var accounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
+        var byOrg = accounts.GroupBy(a => a.OrgId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new CloudOrgsResponse
+        {
+            Orgs = orgs.Select(o => new CloudOrgDto
+            {
+                OrgId = o.OrgId,
+                Provider = o.Provider.ToString(),
+                Name = o.Name,
+                ExternalId = o.ExternalId,
+                Status = o.Status.ToString(),
+                CreatedAt = o.CreatedAt,
+                Accounts = (byOrg.TryGetValue(o.OrgId, out var list) ? list : new List<CloudAccount>())
+                    .Select(ToDto).ToList()
+            }).ToList()
+        });
+        return response;
+    }
+
+    /// <summary>POST /api/cloud-orgs — create a cloud organization (Azure/AWS/GCP peer grouping).</summary>
+    [Function("CreateCloudOrg")]
+    public async Task<HttpResponseData> CreateCloudOrg(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "cloud-orgs")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+        var body = await req.ReadFromJsonAsync<CreateCloudOrgRequest>();
+
+        if (body == null || string.IsNullOrWhiteSpace(body.Name))
+            return await BadRequest(req, "INVALID_REQUEST", "provider and name are required.");
+        if (!Enum.TryParse<CloudProvider>(body.Provider, true, out var provider))
+            return await BadRequest(req, "INVALID_PROVIDER", "Provider must be azure, aws, or gcp.");
+
+        var org = await _cloudOrgRepo.CreateAsync(new CloudOrg
+        {
+            OrgId = Guid.NewGuid(),
+            TenantId = tenantId,
+            Provider = provider,
+            Name = body.Name.Trim(),
+            ExternalId = string.IsNullOrWhiteSpace(body.ExternalId) ? null : body.ExternalId.Trim(),
+            CreatedBy = GetActor(req)
+        });
+
+        var response = req.CreateCorsResponse(HttpStatusCode.Created);
+        await response.WriteAsJsonAsync(new CloudOrgDto
+        {
+            OrgId = org.OrgId,
+            Provider = org.Provider.ToString(),
+            Name = org.Name,
+            ExternalId = org.ExternalId,
+            Status = org.Status.ToString(),
+            CreatedAt = org.CreatedAt
+        });
+        return response;
+    }
+
+    /// <summary>GET /api/cloud-accounts — flat list of all linked accounts/projects.</summary>
     [Function("GetCloudAccounts")]
     public async Task<HttpResponseData> GetCloudAccounts(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "cloud-accounts")] HttpRequestData req,
@@ -392,8 +461,9 @@ public sealed class AiOpsFunctions
     }
 
     /// <summary>
-    /// POST /api/cloud-accounts — link an AWS account or GCP project.
+    /// POST /api/cloud-accounts — add an AWS account or GCP project to a cloud org.
     /// Credentials go straight to the secret store; SQL only stores the secret name.
+    /// The account inherits its provider from its org.
     /// </summary>
     [Function("LinkCloudAccount")]
     public async Task<HttpResponseData> LinkCloudAccount(
@@ -403,17 +473,22 @@ public sealed class AiOpsFunctions
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<LinkCloudAccountRequest>();
 
-        if (body == null || string.IsNullOrWhiteSpace(body.ExternalId) || string.IsNullOrWhiteSpace(body.DisplayName))
-            return await BadRequest(req, "INVALID_REQUEST", "provider, externalId, and displayName are required.");
+        if (body == null || body.OrgId == Guid.Empty || string.IsNullOrWhiteSpace(body.ExternalId) || string.IsNullOrWhiteSpace(body.DisplayName))
+            return await BadRequest(req, "INVALID_REQUEST", "orgId, externalId, and displayName are required.");
 
-        if (!Enum.TryParse<CloudProvider>(body.Provider, true, out var provider) || provider == CloudProvider.Azure)
+        var org = await _cloudOrgRepo.GetByIdAsync(tenantId, body.OrgId);
+        if (org == null)
+            return await NotFound(req, $"Cloud org {body.OrgId} not found.");
+        if (org.Provider == CloudProvider.Azure)
             return await BadRequest(req, "INVALID_PROVIDER",
-                "Provider must be 'aws' or 'gcp' (Azure subscriptions are onboarded via tenant onboarding).");
+                "Azure subscriptions are managed via tenant onboarding, not as cloud accounts.");
 
+        var provider = org.Provider;
         var account = new CloudAccount
         {
             AccountId = Guid.NewGuid(),
             TenantId = tenantId,
+            OrgId = org.OrgId,
             Provider = provider,
             ExternalId = body.ExternalId,
             DisplayName = body.DisplayName,
@@ -584,6 +659,7 @@ public sealed class AiOpsFunctions
     private static CloudAccountDto ToDto(CloudAccount a) => new()
     {
         AccountId = a.AccountId,
+        OrgId = a.OrgId,
         Provider = a.Provider.ToString(),
         ExternalId = a.ExternalId,
         DisplayName = a.DisplayName,
