@@ -20,8 +20,6 @@
 #   job queue→ DatabaseJobQueue (SQL table) instead of Service Bus
 # ============================================================================
 
-name: ananvision
-
 services:
   # Azure SQL Edge — arm64-native (no emulation on Apple Silicon) and the same
   # engine the schema targets (RLS, SESSION_CONTEXT). Readiness is handled by the
