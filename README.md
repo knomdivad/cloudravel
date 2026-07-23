@@ -1,8 +1,8 @@
-# AnanVision — Multi-Cloud AIOps Operating Platform
+# CloudRavel — Multi-Cloud AIOps Operating Platform
 
 ## Executive Summary
 
-AnanVision is a production-ready, multi-tenant **AIOps operating platform**
+CloudRavel is a production-ready, multi-tenant **AIOps operating platform**
 for enterprise cloud estates spanning **Azure, AWS, and GCP**. It provides authoritative
 inventory baselines, change intelligence, security posture tracking, **proactive anomaly
 detection, incident management, and gated auto-remediation** — the day-to-day operational

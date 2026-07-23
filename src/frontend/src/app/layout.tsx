@@ -17,6 +17,11 @@ const entraConfigured = Boolean(process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID);
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const [msalReady, setMsalReady] = useState(false);
 
+  // Client component, so the server-only `metadata` export isn't available here.
+  useEffect(() => {
+    document.title = 'CloudRavel';
+  }, []);
+
   useEffect(() => {
     msalInstance.initialize().then(() => {
       // Set the first account as active if available
@@ -108,12 +113,8 @@ function LoginPage() {
     <div className="flex items-center justify-center h-screen bg-gradient-to-br from-azure-600 to-azure-900">
       <div className="bg-white rounded-xl shadow-2xl p-10 max-w-md w-full text-center">
         <div className="mb-6">
-          <div className="w-16 h-16 bg-azure-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-azure-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">AnanVision</h1>
+          <CloudRavelLogo className="w-16 h-16 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-900">CloudRavel</h1>
           <p className="text-gray-500 mt-2">
             Multi-cloud AIOps operating platform
           </p>
@@ -226,11 +227,9 @@ function AppShell({ children }: { children: React.ReactNode }) {
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-700">
-          <div className="w-8 h-8 bg-azure-500 rounded-lg flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-sm">A</span>
-          </div>
+          <CloudRavelLogo className="w-8 h-8 flex-shrink-0" />
           {!sidebarCollapsed && (
-            <span className="font-semibold text-sm truncate">AnanVision</span>
+            <span className="font-semibold text-sm truncate">CloudRavel</span>
           )}
         </div>
 
@@ -431,6 +430,62 @@ function TenantsIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+    </svg>
+  );
+}
+
+// CloudRavel brand mark: a faceted multi-cloud silhouette (blue/teal/orange,
+// echoing Azure/AWS/GCP) with a glowing circuit-hexagon core for "AIOps".
+function CloudRavelLogo({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 200 150" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="cr-blue" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0%" stopColor="#1e3a8a" />
+          <stop offset="100%" stopColor="#2563eb" />
+        </linearGradient>
+        <linearGradient id="cr-teal" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stopColor="#0d9488" />
+          <stop offset="100%" stopColor="#5eead4" />
+        </linearGradient>
+        <linearGradient id="cr-orange" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0%" stopColor="#f59e0b" />
+          <stop offset="100%" stopColor="#fb7185" />
+        </linearGradient>
+        <linearGradient id="cr-base" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#1d4ed8" />
+          <stop offset="50%" stopColor="#2dd4bf" />
+          <stop offset="100%" stopColor="#fb923c" />
+        </linearGradient>
+        <radialGradient id="cr-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* Cloud body — overlapping puffs, no strokes, so the seams stay invisible */}
+      <rect x="18" y="68" width="164" height="58" rx="29" fill="url(#cr-base)" />
+      <circle cx="56" cy="82" r="38" fill="url(#cr-blue)" />
+      <circle cx="102" cy="52" r="46" fill="url(#cr-teal)" />
+      <circle cx="148" cy="84" r="34" fill="url(#cr-orange)" />
+
+      {/* Circuit-hexagon core */}
+      <circle cx="100" cy="95" r="26" fill="url(#cr-glow)" />
+      <g stroke="#ffffff" strokeWidth="2.5" fill="none" opacity="0.95">
+        <line x1="100" y1="95" x2="100" y2="60" />
+        <line x1="100" y1="95" x2="72" y2="72" />
+        <line x1="100" y1="95" x2="128" y2="72" />
+        <line x1="100" y1="95" x2="80" y2="115" />
+        <line x1="100" y1="95" x2="122" y2="115" />
+      </g>
+      <g fill="#ffffff">
+        <circle cx="100" cy="60" r="5" />
+        <circle cx="72" cy="72" r="4" />
+        <circle cx="128" cy="72" r="4" />
+        <circle cx="80" cy="115" r="4" />
+        <circle cx="122" cy="115" r="4" />
+        <polygon points="113,95 106.5,83.7 93.5,83.7 87,95 93.5,106.3 106.5,106.3" />
+      </g>
     </svg>
   );
 }

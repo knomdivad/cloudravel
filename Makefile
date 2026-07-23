@@ -1,4 +1,4 @@
-# AnanVision — local / OrbStack stack convenience targets.
+# CloudRavel — local / OrbStack stack convenience targets.
 #
 # Docker Compose has no config option to "always detach" — `up` stays attached
 # unless you pass -d. These targets pass it for you, so the stack keeps running

@@ -1,5 +1,5 @@
 # ============================================================================
-# AnanVision — local / OrbStack stack (runs anywhere: no Azure-only services)
+# CloudRavel — local / OrbStack stack (runs anywhere: no Azure-only services)
 #
 #   cp .env.example .env      # set MSSQL_SA_PASSWORD; the rest have working defaults
 #   make up                   # build + start DETACHED (safe to close the shell)
