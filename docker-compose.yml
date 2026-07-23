@@ -18,9 +18,11 @@
 name: ananvision
 
 services:
+  # Azure SQL Edge — arm64-native (no emulation on Apple Silicon) and the same
+  # engine the schema targets (RLS, SESSION_CONTEXT). Readiness is handled by the
+  # migrator's own connection-retry loop, so there's no in-image sqlcmd healthcheck.
   mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    platform: linux/amd64
+    image: mcr.microsoft.com/azure-sql-edge:latest
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
@@ -29,12 +31,6 @@ services:
       - "1433:1433"
     volumes:
       - mssql-data:/var/opt/mssql
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' -b"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
 
   # Cloud-agnostic secret store (Vault-API-compatible). Dev mode keeps secrets
   # in memory with a fixed root token — fine for local; use a real OpenBao/Vault
@@ -66,7 +62,7 @@ services:
     platform: linux/amd64
     depends_on:
       mssql:
-        condition: service_healthy
+        condition: service_started
     environment:
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
     volumes:
@@ -83,7 +79,7 @@ services:
       dockerfile: Dockerfile
     depends_on:
       mssql:
-        condition: service_healthy
+        condition: service_started
       azurite:
         condition: service_started
       openbao:
