@@ -12,7 +12,7 @@ public sealed class Tenant
     public TenantStatus Status { get; set; } = TenantStatus.Active;
     public int SnapshotFrequencyMinutes { get; set; } = 360;
     public int ChangePollFrequencyMinutes { get; set; } = 15;
-    public string? KeyVaultSecretName { get; set; }
+    public string? SecretName { get; set; }
     public string? LighthouseDelegationId { get; set; }
 
     /// <summary>Governs whether proposed remediations require human approval. Default: gated.</summary>

@@ -49,7 +49,7 @@ public sealed class TenantRepository : ITenantRepository
                    {OnboardingMethodCase} AS OnboardingMethod, status AS Status,
                    snapshot_frequency_minutes AS SnapshotFrequencyMinutes,
                    change_poll_frequency_minutes AS ChangePollFrequencyMinutes,
-                   key_vault_secret_name AS KeyVaultSecretName,
+                   secret_name AS SecretName,
                    lighthouse_delegation_id AS LighthouseDelegationId,
                    auto_remediation_mode AS AutoRemediationMode,
                    aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
@@ -67,7 +67,7 @@ public sealed class TenantRepository : ITenantRepository
                    {OnboardingMethodCase} AS OnboardingMethod, status AS Status,
                    snapshot_frequency_minutes AS SnapshotFrequencyMinutes,
                    change_poll_frequency_minutes AS ChangePollFrequencyMinutes,
-                   key_vault_secret_name AS KeyVaultSecretName,
+                   secret_name AS SecretName,
                    lighthouse_delegation_id AS LighthouseDelegationId,
                    auto_remediation_mode AS AutoRemediationMode,
                    aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
@@ -87,7 +87,7 @@ public sealed class TenantRepository : ITenantRepository
                    {OnboardingMethodCaseT} AS OnboardingMethod, t.status AS Status,
                    t.snapshot_frequency_minutes AS SnapshotFrequencyMinutes,
                    t.change_poll_frequency_minutes AS ChangePollFrequencyMinutes,
-                   t.key_vault_secret_name AS KeyVaultSecretName,
+                   t.secret_name AS SecretName,
                    t.lighthouse_delegation_id AS LighthouseDelegationId,
                    t.auto_remediation_mode AS AutoRemediationMode,
                    t.aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
@@ -110,11 +110,11 @@ public sealed class TenantRepository : ITenantRepository
         const string sql = @"
             INSERT INTO tenants (tenant_id, display_name, azure_tenant_id, onboarding_method, status,
                                  snapshot_frequency_minutes, change_poll_frequency_minutes,
-                                 key_vault_secret_name, lighthouse_delegation_id,
+                                 secret_name, lighthouse_delegation_id,
                                  auto_remediation_mode, aiops_monitoring_enabled, created_by)
             VALUES (@TenantId, @DisplayName, @AzureTenantId, @OnboardingMethod, @Status,
                     @SnapshotFrequencyMinutes, @ChangePollFrequencyMinutes,
-                    @KeyVaultSecretName, @LighthouseDelegationId,
+                    @SecretName, @LighthouseDelegationId,
                     @AutoRemediationMode, @AiOpsMonitoringEnabled, @CreatedBy)";
 
         await conn.ExecuteAsync(sql, new
@@ -126,7 +126,7 @@ public sealed class TenantRepository : ITenantRepository
             Status = tenant.Status.ToString().ToLowerInvariant(),
             tenant.SnapshotFrequencyMinutes,
             tenant.ChangePollFrequencyMinutes,
-            tenant.KeyVaultSecretName,
+            tenant.SecretName,
             tenant.LighthouseDelegationId,
             AutoRemediationMode = tenant.AutoRemediationMode.ToString().ToLowerInvariant(),
             tenant.AiOpsMonitoringEnabled,
@@ -167,7 +167,7 @@ public sealed class TenantRepository : ITenantRepository
                 onboarding_method = @OnboardingMethod,
                 snapshot_frequency_minutes = @SnapshotFrequencyMinutes,
                 change_poll_frequency_minutes = @ChangePollFrequencyMinutes,
-                key_vault_secret_name = @KeyVaultSecretName,
+                secret_name = @SecretName,
                 lighthouse_delegation_id = @LighthouseDelegationId,
                 auto_remediation_mode = @AutoRemediationMode,
                 aiops_monitoring_enabled = @AiOpsMonitoringEnabled,
@@ -181,7 +181,7 @@ public sealed class TenantRepository : ITenantRepository
             OnboardingMethod = ToDbValue(tenant.OnboardingMethod),
             tenant.SnapshotFrequencyMinutes,
             tenant.ChangePollFrequencyMinutes,
-            tenant.KeyVaultSecretName,
+            tenant.SecretName,
             tenant.LighthouseDelegationId,
             AutoRemediationMode = tenant.AutoRemediationMode.ToString().ToLowerInvariant(),
             tenant.AiOpsMonitoringEnabled

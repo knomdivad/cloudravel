@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AzureInventoryMonitor.Core.Interfaces;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
@@ -5,8 +6,8 @@ using Microsoft.Extensions.Logging;
 namespace AzureInventoryMonitor.Api.Functions;
 
 /// <summary>
-/// Timer and Service Bus-triggered background workers.
-/// These functions execute the scheduled data collection pipelines.
+/// Timer-triggered background workers. These functions execute the scheduled
+/// data collection pipelines.
 /// </summary>
 public sealed class WorkerFunctions
 {
@@ -15,6 +16,7 @@ public sealed class WorkerFunctions
     private readonly IAriIngestionService _ariIngestion;
     private readonly IInventoryCollectionService _inventoryCollection;
     private readonly ITenantRepository _tenantRepo;
+    private readonly IJobQueue _jobQueue;
     private readonly ILogger<WorkerFunctions> _logger;
 
     public WorkerFunctions(
@@ -23,6 +25,7 @@ public sealed class WorkerFunctions
         IAriIngestionService ariIngestion,
         IInventoryCollectionService inventoryCollection,
         ITenantRepository tenantRepo,
+        IJobQueue jobQueue,
         ILogger<WorkerFunctions> logger)
     {
         _changePolling = changePolling;
@@ -30,6 +33,7 @@ public sealed class WorkerFunctions
         _ariIngestion = ariIngestion;
         _inventoryCollection = inventoryCollection;
         _tenantRepo = tenantRepo;
+        _jobQueue = jobQueue;
         _logger = logger;
     }
 
@@ -183,44 +187,75 @@ public sealed class WorkerFunctions
     }
 
     /// <summary>
-    /// Processes snapshot-ready messages from Service Bus.
-    /// Triggered when ARI runbook completes and uploads output to Blob Storage.
+    /// Drains the "snapshot-ingestion" queue every minute. Fed by the ARI
+    /// Automation runbook (via IJobQueue.EnqueueAsync, or directly against
+    /// Service Bus when that's the active queue — see automation/Invoke-AriSnapshot.ps1)
+    /// once it uploads output to Blob Storage. Polling the abstraction instead
+    /// of a native [ServiceBusTrigger] binding means the Functions host never
+    /// hard-depends on Service Bus just to start: DatabaseJobQueue (the
+    /// default when no Service Bus connection is configured) needs nothing
+    /// beyond the SQL database every deployment already requires.
     /// </summary>
-    [Function("SnapshotIngestionWorker")]
-    public async Task ProcessSnapshot(
-        [ServiceBusTrigger("snapshot-ingestion", Connection = "ServiceBusConnection")] SnapshotMessage message)
+    [Function("SnapshotIngestionQueueTimer")]
+    public async Task ProcessSnapshotQueue([TimerTrigger("0 * * * * *")] TimerInfo timer)
     {
-        _logger.LogInformation("Received snapshot message: type={Type}, tenant={TenantId}, blob={BlobPath}",
+        var jobs = await _jobQueue.DequeueBatchAsync("snapshot-ingestion", maxCount: 20);
+        if (jobs.Count == 0) return;
+
+        foreach (var job in jobs)
+        {
+            SnapshotMessage? message;
+            try
+            {
+                message = JsonSerializer.Deserialize<SnapshotMessage>(job.PayloadJson);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Malformed snapshot message (job {JobId}), discarding", job.Id);
+                await _jobQueue.CompleteAsync(job);
+                continue;
+            }
+
+            if (message == null)
+            {
+                await _jobQueue.CompleteAsync(job);
+                continue;
+            }
+
+            await ProcessSnapshotMessageAsync(job, message);
+        }
+    }
+
+    private async Task ProcessSnapshotMessageAsync(Core.Models.QueuedJob job, SnapshotMessage message)
+    {
+        _logger.LogInformation("Processing snapshot message: type={Type}, tenant={TenantId}, blob={BlobPath}",
             message.Type, message.TenantId, message.BlobPath);
 
         if (message.Type == "snapshot-failed")
         {
             _logger.LogError("Snapshot failed for tenant {TenantId}: {Error}", message.TenantId, message.Error);
-            // Update snapshot record as failed
+            await _jobQueue.CompleteAsync(job);
             return;
         }
 
         if (message.Type != "snapshot-ready")
         {
             _logger.LogWarning("Unknown message type: {Type}", message.Type);
+            await _jobQueue.CompleteAsync(job);
             return;
         }
 
-        if (string.IsNullOrEmpty(message.BlobPath))
+        if (string.IsNullOrEmpty(message.BlobPath) || !Guid.TryParse(message.TenantId, out var tenantId))
         {
-            _logger.LogError("Snapshot-ready message for tenant {TenantId} missing BlobPath", message.TenantId);
-            return;
-        }
-
-        if (!Guid.TryParse(message.TenantId, out var tenantId))
-        {
-            _logger.LogError("Invalid tenant ID in snapshot message: {TenantId}", message.TenantId);
+            _logger.LogError("Snapshot-ready message missing BlobPath or has an invalid tenant ID: {TenantId}", message.TenantId);
+            await _jobQueue.CompleteAsync(job);
             return;
         }
 
         try
         {
             var snapshotId = await _ariIngestion.IngestSnapshotAsync(tenantId, message.BlobPath, "schedule");
+            await _jobQueue.CompleteAsync(job);
             _logger.LogInformation("Snapshot ingestion completed: {SnapshotId} for tenant {TenantId}",
                 snapshotId, tenantId);
         }
@@ -228,7 +263,7 @@ public sealed class WorkerFunctions
         {
             _logger.LogError(ex, "Snapshot ingestion failed for tenant {TenantId} from {BlobPath}",
                 message.TenantId, message.BlobPath);
-            throw; // Let Service Bus handle retry
+            await _jobQueue.FailAsync(job, ex.Message, TimeSpan.FromMinutes(5));
         }
     }
 }

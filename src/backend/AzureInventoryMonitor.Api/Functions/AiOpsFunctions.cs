@@ -24,7 +24,7 @@ public sealed class AiOpsFunctions
     private readonly ICloudAccountRepository _cloudAccountRepo;
     private readonly ICloudProviderAdapterFactory _adapterFactory;
     private readonly ITenantRepository _tenantRepo;
-    private readonly Azure.Security.KeyVault.Secrets.SecretClient? _secretClient;
+    private readonly ISecretStore? _secretStore;
     private readonly ILogger<AiOpsFunctions> _logger;
 
     public AiOpsFunctions(
@@ -36,7 +36,7 @@ public sealed class AiOpsFunctions
         ICloudProviderAdapterFactory adapterFactory,
         ITenantRepository tenantRepo,
         ILogger<AiOpsFunctions> logger,
-        Azure.Security.KeyVault.Secrets.SecretClient? secretClient = null)
+        ISecretStore? secretStore = null)
     {
         _anomalyRepo = anomalyRepo;
         _incidentRepo = incidentRepo;
@@ -45,7 +45,7 @@ public sealed class AiOpsFunctions
         _cloudAccountRepo = cloudAccountRepo;
         _adapterFactory = adapterFactory;
         _tenantRepo = tenantRepo;
-        _secretClient = secretClient;
+        _secretStore = secretStore;
         _logger = logger;
     }
 
@@ -70,7 +70,7 @@ public sealed class AiOpsFunctions
 
         var anomalies = await _anomalyRepo.GetAnomaliesAsync(tenantId, status, severity, kind, offset, limit);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new AnomaliesResponse
         {
             Anomalies = anomalies.Select(ToDto).ToList(),
@@ -102,7 +102,7 @@ public sealed class AiOpsFunctions
             return await NotFound(req, $"Anomaly {id} not found.");
         }
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { id, status = status.ToString() });
         return response;
     }
@@ -127,7 +127,7 @@ public sealed class AiOpsFunctions
 
         var incidents = await _incidentRepo.GetIncidentsAsync(tenantId, status, severity, offset, limit);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new IncidentsResponse
         {
             Incidents = incidents.Select(i => ToDto(i, null)).ToList(),
@@ -150,7 +150,7 @@ public sealed class AiOpsFunctions
 
         var events = await _incidentRepo.GetEventsAsync(tenantId, id);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(ToDto(incident, events));
         return response;
     }
@@ -220,7 +220,7 @@ public sealed class AiOpsFunctions
 
         var updated = await _incidentRepo.GetByIdAsync(tenantId, id);
         var events = await _incidentRepo.GetEventsAsync(tenantId, id);
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(ToDto(updated!, events));
         return response;
     }
@@ -244,7 +244,7 @@ public sealed class AiOpsFunctions
 
         var actions = await _remediationRepo.GetActionsAsync(tenantId, status, offset, limit);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new RemediationActionsResponse
         {
             Actions = actions.Select(ToDto).ToList(),
@@ -273,7 +273,7 @@ public sealed class AiOpsFunctions
                 body.ParametersJson,
                 requestedBy: $"user:{GetActor(req)}");
 
-            var response = req.CreateResponse(HttpStatusCode.Created);
+            var response = req.CreateCorsResponse(HttpStatusCode.Created);
             await response.WriteAsJsonAsync(ToDto(action));
             return response;
         }
@@ -302,7 +302,7 @@ public sealed class AiOpsFunctions
             // worker is the safety net for anything that slips through.
             var executed = await _remediationService.ExecuteAsync(tenantId, id);
 
-            var response = req.CreateResponse(HttpStatusCode.OK);
+            var response = req.CreateCorsResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(ToDto(executed));
             return response;
         }
@@ -329,7 +329,7 @@ public sealed class AiOpsFunctions
         try
         {
             var action = await _remediationService.RejectAsync(tenantId, id, GetActor(req), body?.Reason);
-            var response = req.CreateResponse(HttpStatusCode.OK);
+            var response = req.CreateCorsResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(ToDto(action));
             return response;
         }
@@ -351,7 +351,7 @@ public sealed class AiOpsFunctions
     {
         var playbooks = await _remediationRepo.GetPlaybooksAsync();
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new PlaybooksResponse
         {
             Playbooks = playbooks.Select(p => new PlaybookDto
@@ -383,7 +383,7 @@ public sealed class AiOpsFunctions
         var tenantId = context.GetTenantId();
         var accounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new CloudAccountsResponse
         {
             Accounts = accounts.Select(ToDto).ToList()
@@ -393,7 +393,7 @@ public sealed class AiOpsFunctions
 
     /// <summary>
     /// POST /api/cloud-accounts — link an AWS account or GCP project.
-    /// Credentials go straight to Key Vault; SQL only stores the secret name.
+    /// Credentials go straight to the secret store; SQL only stores the secret name.
     /// </summary>
     [Function("LinkCloudAccount")]
     public async Task<HttpResponseData> LinkCloudAccount(
@@ -423,14 +423,12 @@ public sealed class AiOpsFunctions
 
         if (!string.IsNullOrEmpty(body.CredentialJson))
         {
-            if (_secretClient == null)
-                return await BadRequest(req, "KEYVAULT_UNAVAILABLE",
-                    "Key Vault is not configured; cannot store cloud credentials.");
+            if (_secretStore == null)
+                return await BadRequest(req, "SECRETSTORE_UNAVAILABLE",
+                    "Secret store is not configured; cannot store cloud credentials.");
 
             account.CredentialSecretName = $"cloudaccount-{account.AccountId}";
-            var secret = new Azure.Security.KeyVault.Secrets.KeyVaultSecret(account.CredentialSecretName, body.CredentialJson);
-            secret.Properties.ContentType = "application/json";
-            await _secretClient.SetSecretAsync(secret);
+            await _secretStore.SetSecretAsync(account.CredentialSecretName, body.CredentialJson);
         }
 
         await _cloudAccountRepo.CreateAsync(account);
@@ -451,7 +449,7 @@ public sealed class AiOpsFunctions
             await _cloudAccountRepo.UpdateStatusAsync(account.AccountId, CloudAccountStatus.Degraded, ex.Message);
         }
 
-        var response = req.CreateResponse(HttpStatusCode.Created);
+        var response = req.CreateCorsResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(ToDto(account));
         return response;
     }
@@ -486,7 +484,7 @@ public sealed class AiOpsFunctions
             .ToList();
         var recentWeekActions = recentActions.Where(a => a.CreatedAt >= week).ToList();
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new OpsSummaryResponse
         {
             TenantId = tenantId,
@@ -606,14 +604,14 @@ public sealed class AiOpsFunctions
 
     private static async Task<HttpResponseData> BadRequest(HttpRequestData req, string code, string message)
     {
-        var response = req.CreateResponse(HttpStatusCode.BadRequest);
+        var response = req.CreateCorsResponse(HttpStatusCode.BadRequest);
         await response.WriteAsJsonAsync(new ErrorResponse { Code = code, Message = message });
         return response;
     }
 
     private static async Task<HttpResponseData> NotFound(HttpRequestData req, string message)
     {
-        var response = req.CreateResponse(HttpStatusCode.NotFound);
+        var response = req.CreateCorsResponse(HttpStatusCode.NotFound);
         await response.WriteAsJsonAsync(new ErrorResponse { Code = "NOT_FOUND", Message = message });
         return response;
     }

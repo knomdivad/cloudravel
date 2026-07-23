@@ -1,6 +1,7 @@
 import { InteractionRequiredAuthError } from '@azure/msal-browser';
 import { apiScopes } from './auth';
 import { msalInstance } from './msalInstance';
+import { getStoredLocalToken } from './localAuth';
 import type {
   TenantSummary,
   TenantDashboard,
@@ -25,9 +26,15 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/
 
 /**
  * Acquires a fresh access token for API calls.
- * Uses silent token acquisition (cached token) first, falls back to interactive.
+ * Checks for a local (username/password) session first; falls back to MSAL
+ * (silent acquisition, then interactive) for Entra ID SSO sessions.
  */
 async function getAccessToken(): Promise<string> {
+  const local = getStoredLocalToken();
+  if (local) {
+    return local.token;
+  }
+
   const accounts = msalInstance.getAllAccounts();
 
   if (accounts.length === 0) {

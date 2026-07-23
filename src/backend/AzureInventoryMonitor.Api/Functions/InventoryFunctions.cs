@@ -60,7 +60,7 @@ public sealed class InventoryFunctions
         var total = await _inventoryRepo.GetResourceCountAsync(tenantId, snapshotId);
         var latestSnapshot = await _inventoryRepo.GetLatestSnapshotAsync(tenantId);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new InventoryResponse
         {
             SnapshotId = latestSnapshot?.SnapshotId ?? 0,
@@ -104,7 +104,7 @@ public sealed class InventoryFunctions
         var resource = await _inventoryRepo.GetResourceByIdAsync(tenantId, decodedId);
         if (resource == null)
         {
-            var notFound = req.CreateResponse(HttpStatusCode.NotFound);
+            var notFound = req.CreateCorsResponse(HttpStatusCode.NotFound);
             await notFound.WriteAsJsonAsync(new ErrorResponse
             {
                 Code = "RESOURCE_NOT_FOUND",
@@ -113,7 +113,7 @@ public sealed class InventoryFunctions
             return notFound;
         }
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(resource);
         return response;
     }
@@ -132,7 +132,7 @@ public sealed class InventoryFunctions
         var summary = await _inventoryRepo.GetResourceTypeSummaryAsync(tenantId);
         var total = await _inventoryRepo.GetResourceCountAsync(tenantId);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
             TenantId = tenantId,
@@ -161,7 +161,7 @@ public sealed class InventoryFunctions
 
         var snapshots = await _inventoryRepo.GetSnapshotHistoryAsync(tenantId, limit);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { Snapshots = snapshots });
         return response;
     }
@@ -181,7 +181,7 @@ public sealed class InventoryFunctions
         {
             var (snapshotId, resourceCount) = await _collectionService.CollectInventoryAsync(tenantId, "manual");
 
-            var response = req.CreateResponse(HttpStatusCode.OK);
+            var response = req.CreateCorsResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new
             {
                 SnapshotId = snapshotId,
@@ -195,7 +195,7 @@ public sealed class InventoryFunctions
         {
             _logger.LogError(ex, "Snapshot trigger failed for tenant {TenantId}", tenantId);
 
-            var errResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
+            var errResponse = req.CreateCorsResponse(HttpStatusCode.InternalServerError);
             await errResponse.WriteAsJsonAsync(new ErrorResponse
             {
                 Code = "SNAPSHOT_FAILED",

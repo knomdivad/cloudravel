@@ -18,12 +18,6 @@
   "extensions": {
     "http": {
       "routePrefix": "api"
-    },
-    "serviceBus": {
-      "prefetchCount": 10,
-      "autoCompleteMessages": true,
-      "maxConcurrentCalls": 5,
-      "maxAutoLockRenewalDuration": "00:05:00"
     }
   },
   "functionTimeout": "00:10:00"

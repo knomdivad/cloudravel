@@ -332,7 +332,7 @@ export default function TenantsPage() {
                       placeholder="Client secret value"
                     />
                     <p className="text-xs text-gray-400 mt-1">
-                      Stored securely in Azure Key Vault. Leave blank to add later.
+                      Stored securely in the platform&apos;s secret store. Leave blank to add later.
                     </p>
                   </div>
                 </div>

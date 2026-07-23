@@ -4,8 +4,8 @@ using AzureInventoryMonitor.Api.Middleware;
 using AzureInventoryMonitor.Core.AI;
 using AzureInventoryMonitor.Core.DTOs;
 using AzureInventoryMonitor.Core.Interfaces;
-using Azure;
-using Azure.AI.OpenAI;
+using System.ClientModel;
+using OpenAI;
 using OpenAI.Chat;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -15,8 +15,9 @@ using Microsoft.Extensions.Logging;
 namespace AzureInventoryMonitor.Api.Functions;
 
 /// <summary>
-/// AI-assisted analysis endpoint using the latest OpenAI model on Azure OpenAI
-/// (GPT-5.5 by default) with strict tool calling.
+/// AI-assisted analysis endpoint. Talks to any OpenAI-compatible chat
+/// completions endpoint (configurable base URL + API key + model — see
+/// OpenAI:BaseUrl/ApiKey/Model) with strict tool calling.
 ///
 /// The AI agent operates under these constraints:
 ///   - Can only retrieve data via defined tools
@@ -68,7 +69,7 @@ public sealed class AiFunctions
 
     /// <summary>
     /// POST /api/ai/query
-    /// Accepts a natural language query and answers it with GPT-5.5 tool calling
+    /// Accepts a natural language query and answers it using tool calling
     /// against the platform's authoritative data stores. The optional 'mode' field
     /// selects the persona: analyst (default) | operations | security | cost.
     /// </summary>
@@ -81,23 +82,27 @@ public sealed class AiFunctions
         var request = await req.ReadFromJsonAsync<AiQueryRequest>();
         if (request == null || string.IsNullOrWhiteSpace(request.Query))
         {
-            var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
+            var badReq = req.CreateCorsResponse(HttpStatusCode.BadRequest);
             await badReq.WriteAsJsonAsync(new ErrorResponse { Code = "INVALID_QUERY", Message = "Query is required." });
             return badReq;
         }
 
         _logger.LogInformation("AI query for tenant {TenantId}: {Query}", tenantId, request.Query);
 
-        var endpoint = _config["AzureOpenAI:Endpoint"]!;
-        var apiKey = _config["AzureOpenAI:ApiKey"]!;
-        // Default to GPT-5.5 — the latest OpenAI model generally available on
-        // Azure OpenAI (Microsoft Foundry). Override via AzureOpenAI:DeploymentName.
-        var deploymentName = _config["AzureOpenAI:DeploymentName"] ?? "gpt-5.5";
+        // Any OpenAI-compatible endpoint: the official OpenAI API by default,
+        // or a self-hosted/compatible server via OpenAI:BaseUrl. Swapping the
+        // provider is just this client construction — the tool-calling loop
+        // below is unchanged, since AzureOpenAIClient and OpenAIClient both
+        // return the same OpenAI.Chat.ChatClient type from GetChatClient().
+        var apiKey = _config["OpenAI:ApiKey"]!;
+        var baseUrl = _config["OpenAI:BaseUrl"];
+        var model = _config["OpenAI:Model"] ?? "gpt-4o-mini";
 
-        var azureClient = new AzureOpenAIClient(
-            new Uri(endpoint),
-            new AzureKeyCredential(apiKey));
-        var chatClient = azureClient.GetChatClient(deploymentName);
+        var clientOptions = string.IsNullOrEmpty(baseUrl)
+            ? new OpenAIClientOptions()
+            : new OpenAIClientOptions { Endpoint = new Uri(baseUrl) };
+        var client = new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions);
+        var chatClient = client.GetChatClient(model);
 
         // Build native tool definitions for the SDK
         var toolDefinitions = BuildChatTools();
@@ -149,7 +154,7 @@ public sealed class AiFunctions
             }
 
             // No tool call — this is the final answer
-            var response = req.CreateResponse(HttpStatusCode.OK);
+            var response = req.CreateCorsResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AiQueryResponse
             {
                 Response = completion.Content[0].Text,
@@ -165,7 +170,7 @@ public sealed class AiFunctions
         }
 
         // If we reached max iterations, return what we have
-        var fallback = req.CreateResponse(HttpStatusCode.OK);
+        var fallback = req.CreateCorsResponse(HttpStatusCode.OK);
         await fallback.WriteAsJsonAsync(new AiQueryResponse
         {
             Response = "I was unable to complete the analysis within the allowed number of tool calls. Please try a more specific question.",

@@ -12,6 +12,19 @@ public sealed class User
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
+
+    /// <summary>"entra" (user_id is the Entra object ID) or "local" (username/password).</summary>
+    public string AuthProvider { get; set; } = "entra";
+    public string? Username { get; set; }
+    public string? PasswordHash { get; set; }
+}
+
+/// <summary>Result of a successful local login: a signed JWT plus the user it belongs to.</summary>
+public sealed class LocalAuthResult
+{
+    public string Token { get; set; } = string.Empty;
+    public DateTime ExpiresAt { get; set; }
+    public User User { get; set; } = new();
 }
 
 /// <summary>

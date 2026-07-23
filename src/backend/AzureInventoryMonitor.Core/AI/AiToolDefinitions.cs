@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace AzureInventoryMonitor.Core.AI;
 
 /// <summary>
-/// Defines the AI agent tools available for Azure OpenAI function calling.
+/// Defines the AI agent tools available for OpenAI-compatible function calling.
 /// 
 /// CRITICAL DESIGN RULE:
 ///   The AI agent NEVER fabricates data. It can only:
