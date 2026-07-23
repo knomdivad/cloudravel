@@ -60,6 +60,9 @@ services:
     restart: "no"
 
   api:
+    # The Azure Functions dotnet-isolated base image is amd64-only, so build and
+    # run under amd64 (OrbStack/Rosetta emulates it transparently on Apple Silicon).
+    platform: linux/amd64
     build:
       context: ./src/backend
       dockerfile: AzureInventoryMonitor.Api/Dockerfile

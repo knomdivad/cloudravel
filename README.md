@@ -160,8 +160,9 @@ docker compose up --build
 | SQL Server | localhost:1433 | `sa` / `MSSQL_SA_PASSWORD` |
 
 Notes:
-- On Apple Silicon, `mssql` and the migration tools run under `linux/amd64`
-  emulation (handled transparently by OrbStack).
+- On Apple Silicon, `mssql`, the migration tools, and the `api` (the Azure
+  Functions base image is amd64-only) run under `linux/amd64` emulation,
+  handled transparently by OrbStack. The `web` container is native arm64.
 - The `migrator` service applies `database/001`, `002`, and `003` once each,
   tracked in a `dbo.__migrations` ledger, so `docker compose up` is safe to re-run.
 - Cloud-credential-dependent triggers (change polling, Advisor/Policy/Defender
