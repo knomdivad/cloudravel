@@ -52,13 +52,10 @@ services:
 
   # Azure Storage emulator — the Functions host requires AzureWebJobsStorage for
   # timer-trigger scheduling (used by the AIOps timers), even with no real Azure.
+  # No host ports: only the api container reaches it, over the internal network.
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
     command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
-    ports:
-      - "10000:10000"
-      - "10001:10001"
-      - "10002:10002"
     volumes:
       - azurite-data:/data
 
