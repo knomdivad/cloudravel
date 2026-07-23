@@ -39,7 +39,7 @@ services:
   # in memory with a fixed root token — fine for local; use a real OpenBao/Vault
   # with persistent storage and proper auth in production.
   openbao:
-    image: openbao/openbao:latest
+    image: docker.io/openbao/openbao:latest
     command: server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200
     environment:
       BAO_DEV_ROOT_TOKEN_ID: root

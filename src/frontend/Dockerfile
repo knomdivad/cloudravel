@@ -8,7 +8,7 @@
 # args (docker compose does this from the .env file).
 # ============================================================================
 
-FROM node:20-alpine AS build
+FROM docker.io/library/node:20-alpine AS build
 WORKDIR /app
 
 # Prefer IPv4 for outbound DNS lookups. Some networks resolve registry hosts
@@ -42,6 +42,6 @@ ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
 RUN npm run build   # produces the static site in ./out
 
 # ----------------------------------------------------------------------------
-FROM nginx:alpine
+FROM docker.io/library/nginx:alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/out /usr/share/nginx/html
