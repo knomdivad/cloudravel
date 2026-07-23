@@ -47,6 +47,10 @@ export default function CloudsPage() {
   const [statusAction, setStatusAction] = useState<{ tenant: TenantSummary; newStatus: string } | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [collectingTenant, setCollectingTenant] = useState<string | null>(null);
+  const [collectingAccount, setCollectingAccount] = useState<string | null>(null);
+  const [isDev, setIsDev] = useState(true);
+
+  useEffect(() => { api.getPlatformInfo().then(p => setIsDev(p.environment.toLowerCase() !== 'production')).catch(() => {}); }, []);
 
   const showToast = useCallback((message: string, type: ToastType) => {
     setToast({ message, type });
@@ -102,6 +106,19 @@ export default function CloudsPage() {
       showToast(err instanceof Error ? err.message : 'Failed to collect inventory.', 'error');
     } finally {
       setCollectingTenant(null);
+    }
+  };
+
+  const handleCollectAccount = async (acct: CloudAccount) => {
+    setCollectingAccount(acct.accountId);
+    try {
+      const res = await api.collectCloudAccount(tenantId!, acct.accountId);
+      showToast(`Collected ${res.resourcesCollected} resources from "${acct.displayName}".`, 'success');
+      fetchOrgs();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Collection failed.', 'error');
+    } finally {
+      setCollectingAccount(null);
     }
   };
 
@@ -219,8 +236,9 @@ export default function CloudsPage() {
                   )}
                   {tenant.status === 'active' && (
                     <div className="pt-2">
-                      <button onClick={() => handleCollectInventory(tenant)} disabled={collectingTenant === tenant.tenantId}
-                        className="w-full px-3 py-1.5 rounded text-xs font-medium transition-colors text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-50 flex items-center justify-center gap-2">
+                      <button onClick={() => handleCollectInventory(tenant)} disabled={isDev || collectingTenant === tenant.tenantId}
+                        title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
+                        className="w-full px-3 py-1.5 rounded text-xs font-medium transition-colors text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                         {collectingTenant === tenant.tenantId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
                         {collectingTenant === tenant.tenantId ? 'Collecting...' : 'Collect Inventory'}
                       </button>
@@ -235,12 +253,14 @@ export default function CloudsPage() {
 
       {/* AWS orgs */}
       {awsOrgs.length > 0 && (
-        <OrgSection label="AWS" orgs={awsOrgs} onAddAccount={setAddAccountFor} />
+        <OrgSection label="AWS" orgs={awsOrgs} onAddAccount={setAddAccountFor}
+          onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} />
       )}
 
       {/* GCP orgs */}
       {gcpOrgs.length > 0 && (
-        <OrgSection label="Google Cloud" orgs={gcpOrgs} onAddAccount={setAddAccountFor} />
+        <OrgSection label="Google Cloud" orgs={gcpOrgs} onAddAccount={setAddAccountFor}
+          onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} />
       )}
 
       {totalClouds === 0 && (
@@ -254,7 +274,10 @@ export default function CloudsPage() {
   );
 }
 
-function OrgSection({ label, orgs, onAddAccount }: { label: string; orgs: CloudOrg[]; onAddAccount: (o: CloudOrg) => void }) {
+function OrgSection({ label, orgs, onAddAccount, onCollect, collecting, isDev }: {
+  label: string; orgs: CloudOrg[]; onAddAccount: (o: CloudOrg) => void;
+  onCollect: (a: CloudAccount) => void; collecting: string | null; isDev: boolean;
+}) {
   const accountNoun = label === 'AWS' ? 'account' : 'project';
   return (
     <section>
@@ -288,11 +311,22 @@ function OrgSection({ label, orgs, onAddAccount }: { label: string; orgs: CloudO
                       </p>
                       {acct.lastError && <p className="text-xs text-red-600 truncate">{acct.lastError}</p>}
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(acct.status)}`}>{acct.status}</span>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleDateString() : 'never'}
-                      </p>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <div className="text-right">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(acct.status)}`}>{acct.status}</span>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleDateString() : 'never'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => onCollect(acct)}
+                        disabled={isDev || collecting === acct.accountId}
+                        title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
+                        className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+                        {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
+                      </button>
                     </div>
                   </div>
                 ))}

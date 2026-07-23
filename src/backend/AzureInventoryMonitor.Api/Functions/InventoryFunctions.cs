@@ -23,15 +23,18 @@ public sealed class InventoryFunctions
 {
     private readonly IInventoryRepository _inventoryRepo;
     private readonly IInventoryCollectionService _collectionService;
+    private readonly IPlatformInfo _platform;
     private readonly ILogger<InventoryFunctions> _logger;
 
     public InventoryFunctions(
         IInventoryRepository inventoryRepo,
         IInventoryCollectionService collectionService,
+        IPlatformInfo platform,
         ILogger<InventoryFunctions> logger)
     {
         _inventoryRepo = inventoryRepo;
         _collectionService = collectionService;
+        _platform = platform;
         _logger = logger;
     }
 
@@ -176,6 +179,18 @@ public sealed class InventoryFunctions
         FunctionContext context)
     {
         var tenantId = context.GetTenantId();
+
+        if (!_platform.IsProduction)
+        {
+            var devResp = req.CreateCorsResponse(HttpStatusCode.BadRequest);
+            await devResp.WriteAsJsonAsync(new ErrorResponse
+            {
+                Code = "DEVELOPMENT_MODE",
+                Message = $"Inventory collection is disabled while the instance environment is {_platform.Environment}. " +
+                          "Set Platform:Environment=Production to collect against real clouds."
+            });
+            return devResp;
+        }
 
         try
         {

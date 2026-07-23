@@ -24,7 +24,9 @@ public sealed class AiOpsFunctions
     private readonly ICloudOrgRepository _cloudOrgRepo;
     private readonly ICloudAccountRepository _cloudAccountRepo;
     private readonly ICloudProviderAdapterFactory _adapterFactory;
+    private readonly IMultiCloudInventoryService _multiCloudInventory;
     private readonly ITenantRepository _tenantRepo;
+    private readonly IPlatformInfo _platform;
     private readonly ISecretStore? _secretStore;
     private readonly ILogger<AiOpsFunctions> _logger;
 
@@ -36,7 +38,9 @@ public sealed class AiOpsFunctions
         ICloudOrgRepository cloudOrgRepo,
         ICloudAccountRepository cloudAccountRepo,
         ICloudProviderAdapterFactory adapterFactory,
+        IMultiCloudInventoryService multiCloudInventory,
         ITenantRepository tenantRepo,
+        IPlatformInfo platform,
         ILogger<AiOpsFunctions> logger,
         ISecretStore? secretStore = null)
     {
@@ -47,7 +51,9 @@ public sealed class AiOpsFunctions
         _cloudOrgRepo = cloudOrgRepo;
         _cloudAccountRepo = cloudAccountRepo;
         _adapterFactory = adapterFactory;
+        _multiCloudInventory = multiCloudInventory;
         _tenantRepo = tenantRepo;
+        _platform = platform;
         _secretStore = secretStore;
         _logger = logger;
     }
@@ -527,6 +533,42 @@ public sealed class AiOpsFunctions
         var response = req.CreateCorsResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(ToDto(account));
         return response;
+    }
+
+    /// <summary>
+    /// POST /api/cloud-accounts/{id}/collect — on-demand inventory collection for
+    /// one AWS account / GCP project (parity with the Azure snapshot trigger).
+    /// Blocked in Development so demo/seed clouds are never contacted.
+    /// </summary>
+    [Function("CollectCloudAccount")]
+    public async Task<HttpResponseData> CollectCloudAccount(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "cloud-accounts/{id:guid}/collect")] HttpRequestData req,
+        Guid id,
+        FunctionContext context)
+    {
+        var tenantId = context.GetTenantId();
+
+        if (!_platform.IsProduction)
+            return await BadRequest(req, "DEVELOPMENT_MODE",
+                $"Inventory collection is disabled while the instance environment is {_platform.Environment}. " +
+                "Set Platform:Environment=Production to collect against real clouds.");
+
+        var account = await _cloudAccountRepo.GetByIdAsync(tenantId, id);
+        if (account == null)
+            return await NotFound(req, $"Cloud account {id} not found.");
+
+        try
+        {
+            var count = await _multiCloudInventory.SyncAccountAsync(account);
+            var response = req.CreateCorsResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(new { accountId = id, resourcesCollected = count });
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "On-demand collection failed for cloud account {AccountId}", id);
+            return await BadRequest(req, "COLLECTION_FAILED", ex.Message);
+        }
     }
 
     // ========================================================================

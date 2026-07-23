@@ -1,6 +1,7 @@
 using AzureInventoryMonitor.Api.Middleware;
 using AzureInventoryMonitor.Core.Auth;
 using AzureInventoryMonitor.Core.Interfaces;
+using AzureInventoryMonitor.Infrastructure;
 using AzureInventoryMonitor.Infrastructure.AiOps;
 using AzureInventoryMonitor.Infrastructure.Auth;
 using AzureInventoryMonitor.Infrastructure.Azure;
@@ -51,6 +52,9 @@ var host = new HostBuilder()
             jsonOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
             options.Serializer = new Azure.Core.Serialization.JsonObjectSerializer(jsonOptions);
         });
+        // Instance environment (Development gates real cloud inventory collection)
+        services.AddSingleton<IPlatformInfo, PlatformInfo>();
+
         // Database
         services.AddSingleton<ITenantDbConnectionFactory, TenantDbConnectionFactory>();
 

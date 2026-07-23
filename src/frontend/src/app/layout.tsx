@@ -8,6 +8,7 @@ import { swrConfig } from '../lib/hooks';
 import { msalInstance } from '../lib/msalInstance';
 import { TenantProvider } from '../contexts/TenantContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { api } from '../lib/api';
 import './globals.css';
 import React, { useEffect, useMemo, useState } from 'react';
 
@@ -196,6 +197,13 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const { userName, logout } = useAuth();
   const { tenants, currentTenant, selectTenant } = useTenantContext();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [environment, setEnvironment] = useState<string>('');
+
+  useEffect(() => {
+    api.getPlatformInfo().then((p) => setEnvironment(p.environment)).catch(() => {});
+  }, []);
+
+  const isDev = environment !== '' && environment.toLowerCase() !== 'production';
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -288,6 +296,14 @@ function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
           <div className="flex items-center gap-3">
+            {isDev && (
+              <span
+                title="Scheduled and on-demand inventory collection is disabled in this environment, so seed/demo clouds are never contacted."
+                className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 uppercase tracking-wide"
+              >
+                {environment}
+              </span>
+            )}
             {currentTenant && (
               <span
                 className={`text-xs font-medium px-2 py-1 rounded-full ${

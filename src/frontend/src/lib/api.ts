@@ -420,6 +420,22 @@ export async function getCloudOrgs(tenantId: string): Promise<{ orgs: CloudOrg[]
   return apiCall(`/cloud-orgs`, tenantId);
 }
 
+/** Instance environment (Development/Production) from the anonymous health endpoint. */
+export async function getPlatformInfo(): Promise<{ environment: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/health`);
+    const data = await res.json();
+    return { environment: data.environment ?? 'Development' };
+  } catch {
+    return { environment: 'Development' };
+  }
+}
+
+/** On-demand inventory collection for one AWS account / GCP project. */
+export async function collectCloudAccount(tenantId: string, accountId: string): Promise<{ resourcesCollected: number }> {
+  return apiCall(`/cloud-accounts/${accountId}/collect`, tenantId, { method: 'POST' });
+}
+
 export async function createCloudOrg(
   tenantId: string,
   request: { provider: string; name: string; externalId?: string }
@@ -480,4 +496,6 @@ export const api = {
   getCloudOrgs,
   createCloudOrg,
   linkCloudAccount,
+  collectCloudAccount,
+  getPlatformInfo,
 };

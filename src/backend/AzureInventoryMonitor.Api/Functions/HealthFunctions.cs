@@ -17,15 +17,18 @@ public sealed class HealthFunctions
 {
     private readonly ITenantDbConnectionFactory _connectionFactory;
     private readonly IConfiguration _config;
+    private readonly IPlatformInfo _platform;
     private readonly ILogger<HealthFunctions> _logger;
 
     public HealthFunctions(
         ITenantDbConnectionFactory connectionFactory,
         IConfiguration config,
+        IPlatformInfo platform,
         ILogger<HealthFunctions> logger)
     {
         _connectionFactory = connectionFactory;
         _config = config;
+        _platform = platform;
         _logger = logger;
     }
 
@@ -77,6 +80,7 @@ public sealed class HealthFunctions
         await response.WriteAsJsonAsync(new
         {
             status = overallHealthy ? "healthy" : "unhealthy",
+            environment = _platform.Environment,
             timestamp = DateTime.UtcNow,
             version = typeof(HealthFunctions).Assembly.GetName().Version?.ToString() ?? "1.0.0",
             checks

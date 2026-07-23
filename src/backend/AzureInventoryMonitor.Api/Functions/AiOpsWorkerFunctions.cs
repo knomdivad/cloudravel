@@ -14,6 +14,7 @@ public sealed class AiOpsWorkerFunctions
     private readonly IRemediationService _remediationService;
     private readonly IMultiCloudInventoryService _multiCloudInventory;
     private readonly ITenantRepository _tenantRepo;
+    private readonly IPlatformInfo _platform;
     private readonly ILogger<AiOpsWorkerFunctions> _logger;
 
     public AiOpsWorkerFunctions(
@@ -21,12 +22,14 @@ public sealed class AiOpsWorkerFunctions
         IRemediationService remediationService,
         IMultiCloudInventoryService multiCloudInventory,
         ITenantRepository tenantRepo,
+        IPlatformInfo platform,
         ILogger<AiOpsWorkerFunctions> logger)
     {
         _anomalyDetection = anomalyDetection;
         _remediationService = remediationService;
         _multiCloudInventory = multiCloudInventory;
         _tenantRepo = tenantRepo;
+        _platform = platform;
         _logger = logger;
     }
 
@@ -86,6 +89,12 @@ public sealed class AiOpsWorkerFunctions
     [Function("MultiCloudInventoryTimer")]
     public async Task SyncMultiCloudInventory([TimerTrigger("0 0 3 * * *")] TimerInfo timer)
     {
+        if (!_platform.IsProduction)
+        {
+            _logger.LogInformation("Skipping scheduled AWS/GCP inventory sync — instance environment is {Env}.", _platform.Environment);
+            return;
+        }
+
         _logger.LogInformation("Multi-cloud inventory sync started at {Time}", DateTime.UtcNow);
         await _multiCloudInventory.SyncAllAsync();
         _logger.LogInformation("Multi-cloud inventory sync completed");

@@ -17,6 +17,7 @@ public sealed class WorkerFunctions
     private readonly IInventoryCollectionService _inventoryCollection;
     private readonly ITenantRepository _tenantRepo;
     private readonly IJobQueue _jobQueue;
+    private readonly IPlatformInfo _platform;
     private readonly ILogger<WorkerFunctions> _logger;
 
     public WorkerFunctions(
@@ -26,6 +27,7 @@ public sealed class WorkerFunctions
         IInventoryCollectionService inventoryCollection,
         ITenantRepository tenantRepo,
         IJobQueue jobQueue,
+        IPlatformInfo platform,
         ILogger<WorkerFunctions> logger)
     {
         _changePolling = changePolling;
@@ -34,6 +36,7 @@ public sealed class WorkerFunctions
         _inventoryCollection = inventoryCollection;
         _tenantRepo = tenantRepo;
         _jobQueue = jobQueue;
+        _platform = platform;
         _logger = logger;
     }
 
@@ -158,6 +161,12 @@ public sealed class WorkerFunctions
     [Function("CollectInventoryTimer")]
     public async Task CollectInventory([TimerTrigger("0 0 2 * * *")] TimerInfo timer)
     {
+        if (!_platform.IsProduction)
+        {
+            _logger.LogInformation("Skipping scheduled Azure inventory collection — instance environment is {Env}.", _platform.Environment);
+            return;
+        }
+
         _logger.LogInformation("Daily inventory collection timer fired at {Time}", DateTime.UtcNow);
 
         var tenants = await _tenantRepo.GetAllActiveAsync();
