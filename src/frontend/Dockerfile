@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ============================================================================
 # Next.js static export (output: 'export') served by nginx.
 # nginx also reverse-proxies /api → the Functions container, so the browser
@@ -11,7 +12,12 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+# BuildKit cache mount: persists npm's download cache across builds, even when
+# package.json changes invalidate the layer above and force a fresh `npm ci` —
+# so a package.json edit costs re-resolving the tree, not re-downloading every
+# package from the registry again.
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund
 
 COPY . .
 
