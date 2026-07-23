@@ -176,35 +176,51 @@ sqlcmd -S localhost -d aimdb -i 005-job-queue.sql
 
 ### Run the full stack with Docker (local / OrbStack)
 
-The repo ships a self-contained stack — SQL Server, the Azure Storage emulator,
-the Functions API, and the Next.js UI — so you can bring everything up with one
-command. Migrations are applied automatically and idempotently.
+The repo ships a self-contained, **cloud-agnostic** stack — SQL Server, OpenBao
+(secret store), the Azure Storage emulator, the Functions API, and the Next.js
+UI — so `docker compose up` brings everything up with no dependency on any
+Azure-only service. Migrations and demo data are applied automatically.
 
 ```bash
 cp .env.example .env
-# Edit .env: set MSSQL_SA_PASSWORD and your Entra ID values
-# (NEXT_PUBLIC_AZURE_AD_* are required for the login screen).
+# Set MSSQL_SA_PASSWORD. Everything else has a working local default —
+# no Entra ID or cloud account required.
 
 docker compose up --build
 ```
 
+Then open **http://localhost:3000** and sign in with the seeded local admin:
+
+> username **`admin`** · password **`ChangeMe123!`**  *(dev default — change it)*
+
 | Service | URL / Port | Notes |
 |---|---|---|
 | Web UI | http://localhost:3000 | nginx serves the static export and proxies `/api` → the Functions host (single origin, no CORS) |
-| API (direct) | http://localhost:7071/api/health | Optional — the browser reaches the API via `/api` through the UI |
+| API (direct) | http://localhost:7071/api/health | The browser reaches the API via `/api` through the UI |
+| OpenBao | http://localhost:8200 | Dev mode, root token `root` — the cloud-agnostic secret store |
 | SQL Server | localhost:1433 | `sa` / `MSSQL_SA_PASSWORD` |
 
+Runs anywhere by design:
+- **Secrets** → OpenBao (self-hosted, Vault-API-compatible) instead of Key Vault.
+- **Auth** → local username/password. Entra ID SSO is optional — set the
+  `NEXT_PUBLIC_AZURE_AD_*` values in `.env` (and rebuild `web`) to enable it.
+- **Job queue** → `DatabaseJobQueue` (a SQL table) instead of Service Bus, so the
+  Functions host never hard-depends on Service Bus to start.
+
 Notes:
-- On Apple Silicon, `mssql`, the migration tools, and the `api` (the Azure
-  Functions base image is amd64-only) run under `linux/amd64` emulation,
-  handled transparently by OrbStack. The `web` container is native arm64.
-- The `migrator` service applies `database/001`, `002`, and `003` once each,
-  tracked in a `dbo.__migrations` ledger, so `docker compose up` is safe to re-run.
-- Cloud-credential-dependent triggers (change polling, Advisor/Policy/Defender
-  sync, ARI ingestion) are **disabled** in the container; the DB-driven AIOps
-  timers (anomaly scan, remediation queue) stay enabled so the Operations and
-  Approvals pages are live. Azure OpenAI is optional — set `AZURE_OPENAI_*` in
-  `.env` to enable the AI Insights page.
+- On Apple Silicon, `mssql`, the migration tools, and the `api` runtime (the
+  Azure Functions base image is amd64-only) run under `linux/amd64` emulation,
+  handled transparently by OrbStack. The API build stage and the `web` container
+  are native arm64.
+- The `migrator` service applies `database/001`–`006` plus the demo seed once
+  each, tracked in a `dbo.__migrations` ledger, so `docker compose up` is safe to
+  re-run and picks up newly-added migrations.
+- Cloud-credential-dependent sync timers (change polling, Advisor/Policy/Defender
+  sync, ARI collection, multi-cloud sync) are **disabled** in the container; the
+  DB-driven AIOps timers (anomaly scan, remediation queue, snapshot-queue drain)
+  stay enabled so the Operations and Approvals pages are live against the demo
+  data. The AI Insights page needs an OpenAI-compatible endpoint — set
+  `AZURE_OPENAI_*` in `.env`.
 - To ship an update: `git pull && docker compose up --build` (add `--force-recreate`
   if a container is caching an old image).
 

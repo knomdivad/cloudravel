@@ -1,21 +1,21 @@
 # ============================================================================
-# Azure Inventory Monitor — local / OrbStack stack
+# AnanVision — local / OrbStack stack (runs anywhere: no Azure-only services)
 #
-#   cp .env.example .env      # then fill in Entra + (optional) OpenAI values
+#   cp .env.example .env      # set MSSQL_SA_PASSWORD; the rest have working defaults
 #   docker compose up --build
 #
-#   Web UI      → http://localhost:3000
-#   API (direct)→ http://localhost:7071/api/health   (browser uses /api via nginx)
+#   Web UI  → http://localhost:3000   (log in with the seeded local admin:
+#                                       username 'admin', password 'ChangeMe123!')
+#   API     → http://localhost:7071/api/health
+#   OpenBao → http://localhost:8200   (dev mode, root token 'root')
 #
-# Services:
-#   mssql     SQL Server 2022 (runs under amd64 emulation on Apple Silicon)
-#   azurite   Azure Storage emulator — satisfies AzureWebJobsStorage
-#   migrator  applies database/00{1,2,3}-*.sql once, then exits
-#   api       Azure Functions (.NET 8 isolated) backend
-#   web       Next.js static export via nginx, reverse-proxies /api → api
+# Cloud-agnostic by design:
+#   secrets  → OpenBao (self-hosted, Vault-API-compatible) instead of Key Vault
+#   auth     → local username/password (Entra ID optional, not required)
+#   job queue→ DatabaseJobQueue (SQL table) instead of Service Bus
 # ============================================================================
 
-name: aim
+name: ananvision
 
 services:
   mssql:
@@ -36,6 +36,22 @@ services:
       retries: 12
       start_period: 30s
 
+  # Cloud-agnostic secret store (Vault-API-compatible). Dev mode keeps secrets
+  # in memory with a fixed root token — fine for local; use a real OpenBao/Vault
+  # with persistent storage and proper auth in production.
+  openbao:
+    image: openbao/openbao:latest
+    command: server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: root
+      BAO_ADDR: http://0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+
+  # Azure Storage emulator — the Functions host requires AzureWebJobsStorage for
+  # timer-trigger scheduling (used by the AIOps timers), even with no real Azure.
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
     command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
@@ -46,6 +62,8 @@ services:
     volumes:
       - azurite-data:/data
 
+  # Applies database/001–006 + demo seed once each (dbo.__migrations ledger),
+  # so `docker compose up` is safe to re-run and picks up new migrations.
   migrator:
     image: mcr.microsoft.com/mssql-tools:latest
     platform: linux/amd64
@@ -60,16 +78,18 @@ services:
     restart: "no"
 
   api:
-    # The Azure Functions dotnet-isolated base image is amd64-only, so build and
-    # run under amd64 (OrbStack/Rosetta emulates it transparently on Apple Silicon).
-    platform: linux/amd64
+    # src/backend/Dockerfile builds natively (fast) and pins only the runtime
+    # stage to amd64 (the Functions base image is amd64-only), so no service-
+    # level platform override is needed here.
     build:
       context: ./src/backend
-      dockerfile: AzureInventoryMonitor.Api/Dockerfile
+      dockerfile: Dockerfile
     depends_on:
       mssql:
         condition: service_healthy
       azurite:
+        condition: service_started
+      openbao:
         condition: service_started
       migrator:
         condition: service_completed_successfully
@@ -77,27 +97,29 @@ services:
       # --- Functions runtime ---
       AzureWebJobsStorage: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1"
       FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
-      # --- Database ---
+      # --- Database (also backs the DatabaseJobQueue — no Service Bus needed) ---
       SqlConnectionString: "Server=mssql,1433;Database=aimdb;User ID=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;"
-      # --- Azure OpenAI (optional — AI page needs it; other pages work without) ---
+      # --- Secret store: OpenBao (cloud-agnostic) ---
+      OpenBao__Address: "http://openbao:8200"
+      OpenBao__Token: ${OPENBAO_TOKEN:-root}
+      # --- Local auth signing key (required for the non-Entra login path) ---
+      LocalAuth__JwtSigningKey: ${LOCAL_AUTH_JWT_SIGNING_KEY:-dev-only-change-me-in-production}
+      # --- AI model: any OpenAI-compatible endpoint (optional) ---
       AzureOpenAI__Endpoint: ${AZURE_OPENAI_ENDPOINT:-}
       AzureOpenAI__ApiKey: ${AZURE_OPENAI_API_KEY:-}
       AzureOpenAI__DeploymentName: ${AZURE_OPENAI_DEPLOYMENT:-gpt-5.5}
-      # --- Entra ID (JWT config; not enforced locally, safe to leave blank) ---
+      # --- Entra ID SSO (optional — local login works without it) ---
       AzureAd__TenantId: ${AZURE_AD_TENANT_ID:-}
       AzureAd__ClientId: ${AZURE_AD_CLIENT_ID:-}
-      # --- Disable cloud-credential-dependent triggers for local dev. ---
-      # The AIOps timers (AnomalyScanTimer, RemediationQueueTimer) stay ENABLED —
-      # they run against the local DB and drive the Operations/Approvals demo.
+      # --- Disable cloud-credential-dependent sync timers for local dev. ---
+      # AnomalyScanTimer, RemediationQueueTimer and SnapshotIngestionQueueTimer
+      # (DB-driven) stay ENABLED so Operations/Approvals are live.
       AzureWebJobs.PollChangesTimer.Disabled: "true"
       AzureWebJobs.SyncAdvisorTimer.Disabled: "true"
       AzureWebJobs.SyncPolicyTimer.Disabled: "true"
       AzureWebJobs.SyncDefenderTimer.Disabled: "true"
       AzureWebJobs.CollectInventoryTimer.Disabled: "true"
       AzureWebJobs.MultiCloudInventoryTimer.Disabled: "true"
-      AzureWebJobs.SnapshotIngestionWorker.Disabled: "true"
-      # Dummy namespace so the (disabled) Service Bus trigger doesn't fail indexing.
-      ServiceBusConnection__fullyQualifiedNamespace: "localhost.servicebus.windows.net"
     ports:
       - "7071:80"
 
@@ -107,6 +129,8 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_BASE_URL: /api
+        # Entra values are optional — provide them only to enable Entra SSO
+        # alongside local login.
         NEXT_PUBLIC_AZURE_AD_CLIENT_ID: ${NEXT_PUBLIC_AZURE_AD_CLIENT_ID:-}
         NEXT_PUBLIC_AZURE_AD_TENANT_ID: ${NEXT_PUBLIC_AZURE_AD_TENANT_ID:-}
         NEXT_PUBLIC_API_SCOPE: ${NEXT_PUBLIC_API_SCOPE:-}
