@@ -22,6 +22,10 @@ import type {
   CloudOrg,
   Organization,
   OpsSummary,
+  Me,
+  SystemSettings,
+  AdminUser,
+  OrgSso,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/api';
@@ -139,6 +143,113 @@ export async function connectAzureTenant(
 ): Promise<Organization> {
   return apiCall<Organization>(`/organizations/${orgId}/azure`, orgId, {
     method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// ============================================================================
+// Auth / identity
+// ============================================================================
+
+/** The signed-in user's identity + system role — works for local and Entra sessions. */
+export async function getMe(): Promise<Me> {
+  return apiCall<Me>('/auth/me', NO_WORKSPACE);
+}
+
+// ============================================================================
+// System admin API (system_admin only)
+// ============================================================================
+
+export async function getSystemSettings(): Promise<SystemSettings> {
+  return apiCall<SystemSettings>('/admin/settings', NO_WORKSPACE);
+}
+
+export async function updateSystemSettings(request: {
+  openAiBaseUrl?: string;
+  openAiModel?: string;
+  openAiApiKey?: string;
+}): Promise<SystemSettings> {
+  return apiCall<SystemSettings>('/admin/settings', NO_WORKSPACE, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function getAllUsers(): Promise<AdminUser[]> {
+  const res = await apiCall<{ users: AdminUser[] }>('/admin/users', NO_WORKSPACE);
+  return res.users ?? [];
+}
+
+export async function createUser(request: {
+  displayName: string;
+  email: string;
+  username: string;
+  password: string;
+  globalRole?: string;
+}): Promise<AdminUser> {
+  return apiCall<AdminUser>('/admin/users', NO_WORKSPACE, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function updateUser(
+  userId: string,
+  request: { globalRole?: string; isActive?: boolean; password?: string }
+): Promise<AdminUser> {
+  return apiCall<AdminUser>(`/admin/users/${userId}`, NO_WORKSPACE, {
+    method: 'PATCH',
+    body: JSON.stringify(request),
+  });
+}
+
+// ============================================================================
+// Organization admin API (org_admin only) — users + SSO
+// ============================================================================
+
+export async function getOrgUsers(orgId: string): Promise<AdminUser[]> {
+  const res = await apiCall<{ users: AdminUser[] }>(`/organizations/${orgId}/users`, orgId);
+  return res.users ?? [];
+}
+
+export async function addOrgUser(
+  orgId: string,
+  request: { username?: string; email?: string; displayName?: string; password?: string; role: string }
+): Promise<AdminUser> {
+  return apiCall<AdminUser>(`/organizations/${orgId}/users`, orgId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function updateOrgUserRole(orgId: string, userId: string, role: string): Promise<void> {
+  await apiCall(`/organizations/${orgId}/users/${userId}`, orgId, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeOrgUser(orgId: string, userId: string): Promise<void> {
+  await apiCall(`/organizations/${orgId}/users/${userId}`, orgId, { method: 'DELETE' });
+}
+
+export async function getOrgSso(orgId: string): Promise<OrgSso> {
+  return apiCall<OrgSso>(`/organizations/${orgId}/sso`, orgId);
+}
+
+export async function updateOrgSso(
+  orgId: string,
+  request: {
+    provider: string;
+    idpTenantId?: string;
+    idpClientId?: string;
+    domain?: string;
+    enabled: boolean;
+    clientSecret?: string;
+  }
+): Promise<OrgSso> {
+  return apiCall<OrgSso>(`/organizations/${orgId}/sso`, orgId, {
+    method: 'PUT',
     body: JSON.stringify(request),
   });
 }
@@ -564,4 +675,16 @@ export const api = {
   linkCloudAccount,
   collectCloudAccount,
   getPlatformInfo,
+  getMe,
+  getSystemSettings,
+  updateSystemSettings,
+  getAllUsers,
+  createUser,
+  updateUser,
+  getOrgUsers,
+  addOrgUser,
+  updateOrgUserRole,
+  removeOrgUser,
+  getOrgSso,
+  updateOrgSso,
 };

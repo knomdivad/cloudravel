@@ -3,6 +3,46 @@
  * These mirror the backend DTOs for type-safe frontend usage.
  */
 
+// --- Admin / RBAC ---
+
+export type SystemRole = 'system_admin' | 'member';
+export type OrgRoleName = 'org_admin' | 'cloud_admin' | 'read_only';
+
+export interface Me {
+  userId: string;
+  displayName: string;
+  email: string;
+  systemRole: SystemRole;
+}
+
+export interface SystemSettings {
+  openAiBaseUrl?: string | null;
+  openAiModel?: string | null;
+  apiKeyConfigured: boolean;
+}
+
+export interface AdminUser {
+  userId: string;
+  displayName: string;
+  email: string;
+  globalRole: string;
+  isActive: boolean;
+  authProvider: string;
+  username?: string | null;
+  lastLoginAt?: string | null;
+  /** Only populated in the per-organization member listing. */
+  orgRole?: string | null;
+}
+
+export interface OrgSso {
+  provider: 'none' | 'entra' | 'oidc';
+  idpTenantId?: string | null;
+  idpClientId?: string | null;
+  domain?: string | null;
+  enabled: boolean;
+  clientSecretConfigured: boolean;
+}
+
 // --- Organization (the in-app workspace above clouds) ---
 
 export interface Organization {
@@ -15,6 +55,8 @@ export interface Organization {
   azureTenantName?: string;
   /** Number of Azure tenant connections (an org can hold more than one). */
   azureOrgCount: number;
+  /** The signed-in user's role in this organization. */
+  callerRole: 'org_admin' | 'cloud_admin' | 'read_only';
   awsOrgCount: number;
   gcpOrgCount: number;
   cloudCount: number;

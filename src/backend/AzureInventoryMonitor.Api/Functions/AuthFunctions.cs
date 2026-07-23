@@ -17,11 +17,13 @@ namespace AzureInventoryMonitor.Api.Functions;
 public sealed class AuthFunctions
 {
     private readonly ILocalAuthService _localAuth;
+    private readonly IUserRepository _userRepo;
     private readonly ILogger<AuthFunctions> _logger;
 
-    public AuthFunctions(ILocalAuthService localAuth, ILogger<AuthFunctions> logger)
+    public AuthFunctions(ILocalAuthService localAuth, IUserRepository userRepo, ILogger<AuthFunctions> logger)
     {
         _localAuth = localAuth;
+        _userRepo = userRepo;
         _logger = logger;
     }
 
@@ -61,6 +63,40 @@ public sealed class AuthFunctions
                 Email = result.User.Email,
                 GlobalRole = result.User.GlobalRole,
             }
+        });
+        return response;
+    }
+
+    /// <summary>
+    /// GET /api/auth/me — the authenticated caller's identity and system role.
+    /// Works for BOTH local and Entra sessions, giving the frontend a single,
+    /// uniform role source (Entra tokens carry no role claim of their own).
+    /// </summary>
+    [Function("Me")]
+    public async Task<HttpResponseData> Me(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "auth/me")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var userId = context.GetUserId();
+        if (userId == null)
+        {
+            var unauth = req.CreateCorsResponse(HttpStatusCode.Unauthorized);
+            await unauth.WriteAsJsonAsync(new ErrorResponse { Code = "UNAUTHENTICATED", Message = "Not signed in." });
+            return unauth;
+        }
+
+        var user = await _userRepo.GetByIdAsync(userId.Value);
+        var httpUser = context.GetHttpContext()?.User;
+
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new MeDto
+        {
+            UserId = userId.Value,
+            DisplayName = user?.DisplayName ?? httpUser?.FindFirst("name")?.Value ?? "User",
+            Email = user?.Email ?? httpUser?.FindFirst("email")?.Value ?? string.Empty,
+            // A user record may not exist yet for an Entra caller (no JIT provisioning
+            // here) — default to the least-privileged system role in that case.
+            SystemRole = user?.GlobalRole ?? "member"
         });
         return response;
     }

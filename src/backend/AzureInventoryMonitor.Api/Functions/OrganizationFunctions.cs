@@ -26,6 +26,7 @@ public sealed class OrganizationFunctions
     private readonly IOrganizationRepository _orgRepo;
     private readonly ITenantRepository _tenantRepo;
     private readonly ICloudOrgRepository _cloudOrgRepo;
+    private readonly IUserRepository _userRepo;
     private readonly ISecretStore? _secretStore;
     private readonly ILogger<OrganizationFunctions> _logger;
 
@@ -33,12 +34,14 @@ public sealed class OrganizationFunctions
         IOrganizationRepository orgRepo,
         ITenantRepository tenantRepo,
         ICloudOrgRepository cloudOrgRepo,
+        IUserRepository userRepo,
         ILogger<OrganizationFunctions> logger,
         ISecretStore? secretStore = null)
     {
         _orgRepo = orgRepo;
         _tenantRepo = tenantRepo;
         _cloudOrgRepo = cloudOrgRepo;
+        _userRepo = userRepo;
         _secretStore = secretStore;
         _logger = logger;
     }
@@ -53,10 +56,29 @@ public sealed class OrganizationFunctions
         FunctionContext context)
     {
         var orgs = await _orgRepo.GetAllAsync();
+
+        // System admins see every workspace (acting as org_admin). Everyone else
+        // sees only the workspaces they've been granted access to, tagged with
+        // their role there — the frontend uses callerRole to gate admin controls.
+        var userId = context.GetUserId();
+        var isSystemAdmin = context.IsSystemAdmin();
+        IReadOnlyDictionary<Guid, string> access = isSystemAdmin || userId == null
+            ? new Dictionary<Guid, string>()
+            : (await _userRepo.GetUserTenantAccessAsync(userId.Value))
+                .GroupBy(a => a.TenantId)
+                .ToDictionary(g => g.Key, g => g.First().Role);
+
         var dtos = new List<OrganizationDto>();
         foreach (var o in orgs)
         {
-            dtos.Add(await BuildDto(o));
+            string callerRole;
+            if (isSystemAdmin) callerRole = OrgRole.OrgAdmin;
+            else if (access.TryGetValue(o.OrgId, out var r)) callerRole = r;
+            else continue; // no access → omit from this user's list
+
+            var dto = await BuildDto(o);
+            dto.CallerRole = callerRole;
+            dtos.Add(dto);
         }
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
@@ -70,6 +92,10 @@ public sealed class OrganizationFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "organizations")] HttpRequestData req,
         FunctionContext context)
     {
+        // Only system administrators may create organizations.
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
+
         var body = await req.ReadFromJsonAsync<CreateOrganizationRequest>();
         if (body == null || string.IsNullOrWhiteSpace(body.Name))
             return await BadRequest(req, "INVALID_REQUEST", "name is required.");
@@ -106,6 +132,9 @@ public sealed class OrganizationFunctions
         Guid orgId,
         FunctionContext context)
     {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+
         var org = await _orgRepo.GetByIdAsync(orgId);
         if (org == null)
             return await NotFound(req, $"Organization {orgId} not found.");

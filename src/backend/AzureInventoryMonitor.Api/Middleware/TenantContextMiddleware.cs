@@ -85,12 +85,35 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         }
 
         var userId = context.GetUserId();
-        if (userId.HasValue && !await _userRepo.HasTenantAccessAsync(userId.Value, tenantId))
+        if (userId.HasValue)
         {
-            var response = httpRequestData.CreateResponse(System.Net.HttpStatusCode.Forbidden);
-            await response.WriteAsJsonAsync(new { code = "TENANT_FORBIDDEN", message = "You do not have access to this tenant." });
-            context.GetInvocationResult().Value = response;
-            return;
+            // Resolve the caller's roles once and stash them for downstream role
+            // gating (see AuthorizationExtensions). A system_admin has access to
+            // every workspace and acts as an org_admin within it; otherwise the
+            // caller must hold a user_tenant_access role for this workspace.
+            var user = await _userRepo.GetByIdAsync(userId.Value);
+            var isSystemAdmin = user?.GlobalRole == "system_admin";
+            context.Items["SystemRole"] = user?.GlobalRole ?? "member";
+
+            if (tenantId == Guid.Empty)
+            {
+                // Global / registry scope (the NO_WORKSPACE sentinel): there is no
+                // workspace to check access against. Endpoints gate themselves
+                // (e.g. RequireSystemAdmin), and org listing filters per-user.
+                context.Items["OrgRole"] = string.Empty;
+            }
+            else
+            {
+                var orgRole = isSystemAdmin ? "org_admin" : await _userRepo.GetTenantRoleAsync(userId.Value, tenantId);
+                if (!isSystemAdmin && orgRole == null)
+                {
+                    var response = httpRequestData.CreateResponse(System.Net.HttpStatusCode.Forbidden);
+                    await response.WriteAsJsonAsync(new { code = "TENANT_FORBIDDEN", message = "You do not have access to this tenant." });
+                    context.GetInvocationResult().Value = response;
+                    return;
+                }
+                context.Items["OrgRole"] = orgRole ?? string.Empty;
+            }
         }
 
         // Store tenant context for use by API functions

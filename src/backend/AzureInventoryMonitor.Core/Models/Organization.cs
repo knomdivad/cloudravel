@@ -27,3 +27,20 @@ public sealed class Organization
     public DateTime CreatedAt { get; set; }
     public string CreatedBy { get; set; } = "system";
 }
+
+/// <summary>
+/// Per-organization SSO configuration. Stored and manageable now; per-org token
+/// federation (multi-issuer validation, user→org mapping on first login) is a
+/// documented follow-up. The IdP client secret, if any, lives in the secret
+/// store — only its name is kept here.
+/// </summary>
+public sealed class OrgSsoSettings
+{
+    public Guid OrgId { get; set; }
+    public string Provider { get; set; } = "none"; // none | entra | oidc
+    public string? IdpTenantId { get; set; }
+    public string? IdpClientId { get; set; }
+    public string? Domain { get; set; }
+    public string? ClientSecretName { get; set; }
+    public bool Enabled { get; set; }
+}

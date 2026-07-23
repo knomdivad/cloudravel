@@ -60,6 +60,8 @@ public sealed class OrganizationDto
     public int AwsOrgCount { get; set; }
     public int GcpOrgCount { get; set; }
     public int CloudCount { get; set; }
+    /// <summary>The requesting user's role in this organization (org_admin | cloud_admin | read_only).</summary>
+    public string CallerRole { get; set; } = "read_only";
 }
 
 public sealed class CreateOrganizationRequest

@@ -8,7 +8,7 @@ public sealed class User
     public Guid UserId { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
-    public string GlobalRole { get; set; } = "operator";
+    public string GlobalRole { get; set; } = "member";
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
@@ -35,7 +35,7 @@ public sealed class UserTenantAccess
     public long Id { get; set; }
     public Guid UserId { get; set; }
     public Guid TenantId { get; set; }
-    public string Role { get; set; } = "operator";
+    public string Role { get; set; } = "read_only";
     public DateTime GrantedAt { get; set; }
     public Guid GrantedBy { get; set; }
 }

@@ -47,7 +47,7 @@ const getOrgStatusActions = (status: string): { label: string; value: string; de
 };
 
 export default function CloudsPage() {
-  const { tenantId, currentOrg, refreshOrganizations } = useTenantContext();
+  const { tenantId, currentOrg, refreshOrganizations, canManageClouds } = useTenantContext();
 
   // The Azure tenant for THIS organization lives at tenant_id = org_id.
   const [azureTenant, setAzureTenant] = useState<TenantSummary | null>(null);
@@ -227,9 +227,11 @@ export default function CloudsPage() {
             {' '}&middot; Azure tenant, AWS &amp; GCP organizations as peers &middot; {totalClouds} connected
           </p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
-          + Add Cloud
-        </button>
+        {canManageClouds && (
+          <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+            + Add Cloud
+          </button>
+        )}
       </div>
 
       {showAdd && (
@@ -308,7 +310,7 @@ export default function CloudsPage() {
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Azure</h2>
-          {azureTenant && azureOrgs.length > 0 && (
+          {canManageClouds && azureTenant && azureOrgs.length > 0 && (
             <button onClick={() => handleCollectInventory(azureTenant)} disabled={isDev || collectingTenant === azureTenant.tenantId}
               title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory for every connected Azure tenant'}
               className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
@@ -328,7 +330,7 @@ export default function CloudsPage() {
             </div>
             <div className="flex items-center gap-2">
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(azureTenant.status)}`}>{azureTenant.status}</span>
-              {getStatusActions(azureTenant.status).map(action => (
+              {canManageClouds && getStatusActions(azureTenant.status).map(action => (
                 <button key={action.value} onClick={() => setStatusAction({ tenant: azureTenant, newStatus: action.value })}
                   className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${action.destructive ? 'text-red-600 border border-red-200 hover:bg-red-50' : 'text-green-600 border border-green-200 hover:bg-green-50'}`}>
                   {action.label}
@@ -344,9 +346,11 @@ export default function CloudsPage() {
               <p className="text-sm font-medium text-gray-700">No Azure tenants connected</p>
               <p className="text-xs text-gray-400 mt-0.5">Connect one or more Azure tenants to this organization (all or specific subscriptions each).</p>
             </div>
-            <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50">
-              Connect Azure
-            </button>
+            {canManageClouds && (
+              <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50">
+                Connect Azure
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -369,7 +373,7 @@ export default function CloudsPage() {
                     <div><p className="text-lg font-bold text-gray-900">{org.resourceCount ?? '—'}</p><p className="text-xs text-gray-500">Resources</p></div>
                     <div><p className="text-xs text-gray-500 mt-1">{org.lastInventoryAt ? new Date(org.lastInventoryAt).toLocaleDateString() : 'No snapshot'}</p><p className="text-xs text-gray-500">Last Snapshot</p></div>
                   </div>
-                  {actions.length > 0 && (
+                  {canManageClouds && actions.length > 0 && (
                     <div className="flex gap-2 pt-3 border-t border-gray-100">
                       {actions.map(action => (
                         <button key={action.value} onClick={() => setOrgStatusAction({ org, newStatus: action.value })}
@@ -390,20 +394,20 @@ export default function CloudsPage() {
       <OrgSection label="AWS" emptyHint="No AWS organizations yet." orgs={awsOrgs} onAddAccount={setAddAccountFor}
         onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)}
         onStatusAction={(org, newStatus) => setOrgStatusAction({ org, newStatus })}
-        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} />
+        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} canManage={canManageClouds} />
 
       {/* GCP orgs */}
       <OrgSection label="Google Cloud" emptyHint="No GCP organizations yet." orgs={gcpOrgs} onAddAccount={setAddAccountFor}
         onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)}
         onStatusAction={(org, newStatus) => setOrgStatusAction({ org, newStatus })}
-        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} />
+        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} canManage={canManageClouds} />
     </div>
   );
 }
 
-function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collecting, isDev, onAdd, onStatusAction, onCollectAll, collectingOrg }: {
+function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collecting, isDev, onAdd, onStatusAction, onCollectAll, collectingOrg, canManage }: {
   label: string; emptyHint: string; orgs: CloudOrg[]; onAddAccount: (o: CloudOrg) => void;
-  onCollect: (a: CloudAccount) => void; collecting: string | null; isDev: boolean; onAdd: () => void;
+  onCollect: (a: CloudAccount) => void; collecting: string | null; isDev: boolean; onAdd: () => void; canManage: boolean;
   onStatusAction: (o: CloudOrg, newStatus: string) => void; onCollectAll: (o: CloudOrg) => void; collectingOrg: string | null;
 }) {
   const accountNoun = label === 'AWS' ? 'account' : 'project';
@@ -412,10 +416,12 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
       <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">{label}</h2>
       {orgs.length === 0 ? (
         <div className="bg-white rounded-lg border border-dashed border-gray-300 p-5 flex items-center justify-between">
-          <p className="text-sm text-gray-500">{emptyHint} Add one as a peer to Azure in this organization.</p>
-          <button onClick={onAdd} className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50">
-            + Add {label} org
-          </button>
+          <p className="text-sm text-gray-500">{emptyHint}{canManage ? ' Add one as a peer to Azure in this organization.' : ''}</p>
+          {canManage && (
+            <button onClick={onAdd} className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50">
+              + Add {label} org
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -446,9 +452,11 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
 
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{accountNoun}s</span>
-                  <button onClick={() => onAddAccount(org)} className="text-xs font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">
-                    + Add {accountNoun}
-                  </button>
+                  {canManage && (
+                    <button onClick={() => onAddAccount(org)} className="text-xs font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">
+                      + Add {accountNoun}
+                    </button>
+                  )}
                 </div>
 
                 {org.accounts.length === 0 ? (
@@ -475,15 +483,17 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
                               {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleDateString() : 'never'}
                             </p>
                           </div>
-                          <button
-                            onClick={() => onCollect(acct)}
-                            disabled={isDev || collecting === acct.accountId}
-                            title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
-                            className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
-                          >
-                            {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
-                            {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
-                          </button>
+                          {canManage && (
+                            <button
+                              onClick={() => onCollect(acct)}
+                              disabled={isDev || collecting === acct.accountId}
+                              title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
+                              className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
+                            >
+                              {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+                              {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -491,7 +501,7 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
                 )}
 
                 {/* Footer: org-level status actions + collect-all — parity with Azure */}
-                {(actions.length > 0 || org.accounts.length > 0) && (
+                {canManage && (actions.length > 0 || org.accounts.length > 0) && (
                   <div className="flex gap-2 pt-3 mt-3 border-t border-gray-100">
                     {actions.map(action => (
                       <button key={action.value} onClick={() => onStatusAction(org, action.value)}

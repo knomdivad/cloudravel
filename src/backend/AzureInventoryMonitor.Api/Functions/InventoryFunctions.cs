@@ -178,6 +178,9 @@ public sealed class InventoryFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "inventory/snapshots/trigger")] HttpRequestData req,
         FunctionContext context)
     {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+
         var tenantId = context.GetTenantId();
 
         if (!_platform.IsProduction)

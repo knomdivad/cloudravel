@@ -105,16 +105,95 @@ public sealed class UserRepository : IUserRepository
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
 
-        // Admins have access to all tenants
+        // System admins have access to all workspaces.
         var user = await GetByIdAsync(userId);
-        if (user?.GlobalRole == "admin") return true;
+        if (user?.GlobalRole == "system_admin") return true;
 
         const string sql = @"
-            SELECT COUNT(*) FROM user_tenant_access 
+            SELECT COUNT(*) FROM user_tenant_access
             WHERE user_id = @UserId AND tenant_id = @TenantId";
 
         var count = await conn.ExecuteScalarAsync<int>(sql, new { UserId = userId, TenantId = tenantId });
         return count > 0;
+    }
+
+    public async Task<string?> GetTenantRoleAsync(Guid userId, Guid tenantId)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        return await conn.ExecuteScalarAsync<string?>(
+            "SELECT role FROM user_tenant_access WHERE user_id = @UserId AND tenant_id = @TenantId",
+            new { UserId = userId, TenantId = tenantId });
+    }
+
+    public async Task<IReadOnlyList<User>> ListAllAsync()
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var results = await conn.QueryAsync<User>($"{SelectColumns} ORDER BY display_name");
+        return results.ToList();
+    }
+
+    public async Task<IReadOnlyList<(User User, string Role)>> ListByTenantAsync(Guid tenantId)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        const string sql = @"
+            SELECT u.user_id AS UserId, u.display_name AS DisplayName, u.email AS Email,
+                   u.global_role AS GlobalRole, u.is_active AS IsActive,
+                   u.created_at AS CreatedAt, u.last_login_at AS LastLoginAt,
+                   u.auth_provider AS AuthProvider, u.username AS Username, u.password_hash AS PasswordHash,
+                   uta.role AS Role
+            FROM user_tenant_access uta
+            INNER JOIN users u ON u.user_id = uta.user_id
+            WHERE uta.tenant_id = @TenantId
+            ORDER BY u.display_name";
+
+        var rows = await conn.QueryAsync<User, string, (User, string)>(
+            sql, (u, role) => (u, role), new { TenantId = tenantId }, splitOn: "Role");
+        return rows.ToList();
+    }
+
+    public async Task<User> CreateLocalUserAsync(User user, string passwordHash)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        user.UserId = user.UserId == Guid.Empty ? Guid.NewGuid() : user.UserId;
+        const string sql = @"
+            INSERT INTO users (user_id, display_name, email, global_role, is_active,
+                               auth_provider, username, password_hash)
+            VALUES (@UserId, @DisplayName, @Email, @GlobalRole, 1, 'local', @Username, @PasswordHash)";
+        await conn.ExecuteAsync(sql, new
+        {
+            user.UserId,
+            user.DisplayName,
+            user.Email,
+            user.GlobalRole,
+            user.Username,
+            PasswordHash = passwordHash
+        });
+        _logger.LogInformation("Created local user {UserId} ({Username})", user.UserId, user.Username);
+        return (await GetByIdAsync(user.UserId))!;
+    }
+
+    public async Task SetPasswordAsync(Guid userId, string passwordHash)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        await conn.ExecuteAsync(
+            "UPDATE users SET password_hash = @PasswordHash WHERE user_id = @UserId AND auth_provider = 'local'",
+            new { UserId = userId, PasswordHash = passwordHash });
+    }
+
+    public async Task SetGlobalRoleAsync(Guid userId, string globalRole)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        await conn.ExecuteAsync(
+            "UPDATE users SET global_role = @GlobalRole WHERE user_id = @UserId",
+            new { UserId = userId, GlobalRole = globalRole });
+    }
+
+    public async Task SetActiveAsync(Guid userId, bool isActive)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        await conn.ExecuteAsync(
+            "UPDATE users SET is_active = @IsActive WHERE user_id = @UserId",
+            new { UserId = userId, IsActive = isActive });
     }
 
     public async Task GrantTenantAccessAsync(Guid userId, Guid tenantId, string role, Guid grantedBy)

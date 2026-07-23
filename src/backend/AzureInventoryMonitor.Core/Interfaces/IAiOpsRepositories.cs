@@ -89,6 +89,13 @@ public interface IOrganizationRepository
     Task<Organization> CreateAsync(Organization org);
 }
 
+/// <summary>Repository for per-organization SSO settings.</summary>
+public interface IOrgSsoRepository
+{
+    Task<OrgSsoSettings?> GetAsync(Guid orgId);
+    Task UpsertAsync(OrgSsoSettings settings, string updatedBy);
+}
+
 /// <summary>
 /// Repository for cloud organizations (top-level provider-agnostic grouping:
 /// Azure tenant / AWS Organization / GCP Organization).

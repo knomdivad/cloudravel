@@ -26,6 +26,7 @@ MIGRATIONS=(
   007-cloud-orgs
   008-organizations
   009-azure-multi-tenant
+  010-admin-rbac
   seed-demo-data
 )
 

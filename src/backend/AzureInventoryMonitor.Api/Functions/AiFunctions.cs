@@ -38,7 +38,9 @@ public sealed class AiFunctions
     private readonly IRemediationService _remediationService;
     private readonly ICloudAccountRepository _cloudAccountRepo;
     private readonly ITenantRepository _tenantRepo;
+    private readonly ISystemSettingsRepository _systemSettings;
     private readonly IConfiguration _config;
+    private readonly ISecretStore? _secretStore;
     private readonly ILogger<AiFunctions> _logger;
 
     public AiFunctions(
@@ -51,8 +53,10 @@ public sealed class AiFunctions
         IRemediationService remediationService,
         ICloudAccountRepository cloudAccountRepo,
         ITenantRepository tenantRepo,
+        ISystemSettingsRepository systemSettings,
         IConfiguration config,
-        ILogger<AiFunctions> logger)
+        ILogger<AiFunctions> logger,
+        ISecretStore? secretStore = null)
     {
         _inventoryRepo = inventoryRepo;
         _changeRepo = changeRepo;
@@ -63,9 +67,14 @@ public sealed class AiFunctions
         _remediationService = remediationService;
         _cloudAccountRepo = cloudAccountRepo;
         _tenantRepo = tenantRepo;
+        _systemSettings = systemSettings;
         _config = config;
+        _secretStore = secretStore;
         _logger = logger;
     }
+
+    /// <summary>Treat an empty/whitespace setting value as unset (null), so it falls through to the env-var default.</summary>
+    private static string? Nz(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     /// <summary>
     /// POST /api/ai/query
@@ -90,13 +99,31 @@ public sealed class AiFunctions
         _logger.LogInformation("AI query for tenant {TenantId}: {Query}", tenantId, request.Query);
 
         // Any OpenAI-compatible endpoint: the official OpenAI API by default,
-        // or a self-hosted/compatible server via OpenAI:BaseUrl. Swapping the
-        // provider is just this client construction — the tool-calling loop
-        // below is unchanged, since AzureOpenAIClient and OpenAIClient both
-        // return the same OpenAI.Chat.ChatClient type from GetChatClient().
-        var apiKey = _config["OpenAI:ApiKey"]!;
-        var baseUrl = _config["OpenAI:BaseUrl"];
-        var model = _config["OpenAI:Model"] ?? "gpt-4o-mini";
+        // or a self-hosted/compatible server via a configured base URL. Settings
+        // configured at runtime through the system-admin UI (system_settings +
+        // secret store) take precedence over the OpenAI:* env vars, so the key/
+        // URL/model can be changed without a restart (the client is built here,
+        // per-request). Env vars remain the fallback for headless deployments.
+        var settings = await _systemSettings.GetAllAsync();
+        var baseUrl = Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiBaseUrl)) ?? _config["OpenAI:BaseUrl"];
+        var model = Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiModel)) ?? _config["OpenAI:Model"] ?? "gpt-4o-mini";
+
+        string? apiKey = null;
+        var secretName = Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiApiKeySecretName));
+        if (secretName != null && _secretStore != null)
+            apiKey = await _secretStore.GetSecretAsync(secretName);
+        apiKey ??= _config["OpenAI:ApiKey"];
+
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            var notConfigured = req.CreateCorsResponse(HttpStatusCode.ServiceUnavailable);
+            await notConfigured.WriteAsJsonAsync(new ErrorResponse
+            {
+                Code = "AI_NOT_CONFIGURED",
+                Message = "The AI model is not configured. A system administrator can set the OpenAI endpoint, key, and model under Admin → System Settings."
+            });
+            return notConfigured;
+        }
 
         var clientOptions = string.IsNullOrEmpty(baseUrl)
             ? new OpenAIClientOptions()

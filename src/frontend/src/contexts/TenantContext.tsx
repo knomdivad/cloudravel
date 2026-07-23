@@ -30,6 +30,10 @@ interface TenantContextState {
   currentTenant: WorkspaceRef | null;
   /** Current workspace ID (org_id === RLS tenant_id) */
   tenantId: string | null;
+  /** The caller is org_admin in the selected org. */
+  isOrgAdmin: boolean;
+  /** The caller can manage clouds in the selected org (cloud_admin or org_admin). */
+  canManageClouds: boolean;
   /** Select a workspace/organization by ID */
   selectTenant: (id: string) => void;
   /** Re-fetch organizations (e.g. after creating one or connecting a cloud) */
@@ -76,6 +80,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
   const refreshOrganizations = useCallback(() => { mutate(); }, [mutate]);
 
+  const callerRole = currentOrg?.callerRole;
+  const isOrgAdmin = callerRole === 'org_admin';
+  const canManageClouds = callerRole === 'org_admin' || callerRole === 'cloud_admin';
+
   return (
     <TenantContext.Provider
       value={{
@@ -84,6 +92,8 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         tenants: activeOrgs.map(toRef),
         currentTenant: currentOrg ? toRef(currentOrg) : null,
         tenantId: currentOrg?.orgId ?? null,
+        isOrgAdmin,
+        canManageClouds,
         selectTenant,
         refreshOrganizations,
         isLoading,

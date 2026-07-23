@@ -106,10 +106,13 @@ services:
       OpenBao__Token: ${OPENBAO_TOKEN:-root}
       # --- Local auth signing key (required for the non-Entra login path) ---
       LocalAuth__JwtSigningKey: ${LOCAL_AUTH_JWT_SIGNING_KEY:-dev-only-change-me-in-production}
-      # --- AI model: any OpenAI-compatible endpoint (optional) ---
-      AzureOpenAI__Endpoint: ${AZURE_OPENAI_ENDPOINT:-}
-      AzureOpenAI__ApiKey: ${AZURE_OPENAI_API_KEY:-}
-      AzureOpenAI__DeploymentName: ${AZURE_OPENAI_DEPLOYMENT:-gpt-5.5}
+      # --- AI model: any OpenAI-compatible endpoint (optional). These are the
+      #     ENV-VAR FALLBACK; a system admin can override them at runtime under
+      #     Admin → System Settings (stored in system_settings + secret store).
+      #     Keys match what the code reads (OpenAI:BaseUrl/ApiKey/Model). ---
+      OpenAI__BaseUrl: ${OPENAI_BASE_URL:-}
+      OpenAI__ApiKey: ${OPENAI_API_KEY:-}
+      OpenAI__Model: ${OPENAI_MODEL:-gpt-5.5}
       # --- Entra ID SSO (optional — local login works without it) ---
       AzureAd__TenantId: ${AZURE_AD_TENANT_ID:-}
       AzureAd__ClientId: ${AZURE_AD_CLIENT_ID:-}
