@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Multi-stage build for the .NET 8 isolated-worker Azure Functions API.
 # Build context is src/backend/ (see docker-compose.yml).
 
@@ -7,14 +8,26 @@
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# Restore first for better layer caching
+# Some networks resolve NuGet's hosts to an IPv6 address that silently
+# blackholes (connects nowhere, times out ~20-75s) instead of falling back to
+# IPv4 quickly — skipping IPv6 entirely sidesteps that regardless of cause.
+ENV DOTNET_SYSTEM_NET_DISABLEIPV6=1
+
+# Restore first for better layer caching. Cache mount: NuGet packages persist
+# across builds even when a .csproj change invalidates the layer above, so
+# that only costs re-resolving the dependency graph, not re-downloading it.
 COPY AzureInventoryMonitor.Core/*.csproj AzureInventoryMonitor.Core/
 COPY AzureInventoryMonitor.Infrastructure/*.csproj AzureInventoryMonitor.Infrastructure/
 COPY AzureInventoryMonitor.Api/*.csproj AzureInventoryMonitor.Api/
-RUN dotnet restore AzureInventoryMonitor.Api/AzureInventoryMonitor.Api.csproj
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet restore AzureInventoryMonitor.Api/AzureInventoryMonitor.Api.csproj
 
 COPY . .
-RUN dotnet publish AzureInventoryMonitor.Api/AzureInventoryMonitor.Api.csproj -c Release -o /app/publish --no-restore
+# --no-restore skips re-resolving, but publish still reads the actual package
+# files from the global cache on disk — needs the same mount as restore above,
+# since a cache mount is only attached to the RUN instruction that declares it.
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet publish AzureInventoryMonitor.Api/AzureInventoryMonitor.Api.csproj -c Release -o /app/publish --no-restore
 
 # The official Azure Functions dotnet-isolated image only ships amd64 (no
 # arm64 manifest as of this writing) — force it so this also builds on

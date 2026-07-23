@@ -11,6 +11,14 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
+# Prefer IPv4 for outbound DNS lookups. Some networks resolve registry hosts
+# (npmjs.org, Google Fonts if next/font is used, etc.) to an IPv6 address that
+# silently blackholes — no refusal, just a ~20-75s timeout per connection
+# before falling back to IPv4 — which, multiplied across hundreds of package
+# requests, turns a ~1 minute `npm ci` into 10-20x that. This affects the whole
+# build stage (npm ci AND npm run build), not just one command.
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
+
 COPY package*.json ./
 # BuildKit cache mount: persists npm's download cache across builds, even when
 # package.json changes invalidate the layer above and force a fresh `npm ci` —
