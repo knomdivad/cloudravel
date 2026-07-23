@@ -1,0 +1,68 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using AzureInventoryMonitor.Core.Auth;
+using AzureInventoryMonitor.Core.Interfaces;
+using AzureInventoryMonitor.Core.Models;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
+
+namespace AzureInventoryMonitor.Infrastructure.Auth;
+
+/// <summary>
+/// Verifies local username/password credentials and issues a JWT for the
+/// "Local" JwtBearer scheme (see Program.cs). This is the non-Entra login path.
+/// </summary>
+public sealed class LocalAuthService : ILocalAuthService
+{
+    private readonly IUserRepository _userRepo;
+    private readonly IConfiguration _config;
+    private readonly ILogger<LocalAuthService> _logger;
+
+    public LocalAuthService(IUserRepository userRepo, IConfiguration config, ILogger<LocalAuthService> logger)
+    {
+        _userRepo = userRepo;
+        _config = config;
+        _logger = logger;
+    }
+
+    public async Task<LocalAuthResult?> LoginAsync(string username, string password)
+    {
+        var user = await _userRepo.GetByUsernameAsync(username);
+        if (user == null || !user.IsActive || !PasswordHasher.Verify(password, user.PasswordHash))
+        {
+            _logger.LogWarning("Local login failed for username '{Username}'", username);
+            return null;
+        }
+
+        var signingKey = _config["LocalAuth:JwtSigningKey"];
+        if (string.IsNullOrEmpty(signingKey))
+            throw new InvalidOperationException("LocalAuth:JwtSigningKey is not configured.");
+
+        var expiresAt = DateTime.UtcNow.AddHours(12);
+        var key = new SymmetricSecurityKey(LocalAuthConstants.DeriveSigningKey(signingKey));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, user.Email),
+            new Claim("name", user.DisplayName),
+            new Claim("role", user.GlobalRole),
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: LocalAuthConstants.Issuer,
+            audience: LocalAuthConstants.Audience,
+            claims: claims,
+            expires: expiresAt,
+            signingCredentials: creds);
+
+        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
+        await _userRepo.UpdateLastLoginAsync(user.UserId);
+
+        _logger.LogInformation("Local login succeeded for user {UserId} ({Username})", user.UserId, username);
+        return new LocalAuthResult { Token = tokenString, ExpiresAt = expiresAt, User = user };
+    }
+}

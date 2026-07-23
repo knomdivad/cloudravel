@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "demo-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8934",
+        "--directory",
+        "/private/tmp/claude-501/-Users-david-code-azureinventorymanager/38eb6113-6a42-4ad8-90ef-b1ea53b0a2df/scratchpad/demo"
+      ],
+      "port": 8934
+    }
+  ]
+}
