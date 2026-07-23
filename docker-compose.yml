@@ -2,7 +2,12 @@
 # AnanVision — local / OrbStack stack (runs anywhere: no Azure-only services)
 #
 #   cp .env.example .env      # set MSSQL_SA_PASSWORD; the rest have working defaults
-#   docker compose up --build
+#   make up                   # build + start DETACHED (safe to close the shell)
+#
+#   Plain Compose stays attached unless you detach yourself:
+#     docker compose up -d --build      # same thing without make
+#     docker compose logs -f            # follow logs; Ctrl-C leaves the stack up
+#     docker compose down               # stop everything
 #
 #   Web UI  → http://localhost:3000   (log in with the seeded local admin:
 #                                       username 'admin', password 'ChangeMe123!')

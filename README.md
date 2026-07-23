@@ -113,7 +113,9 @@ cp .env.example .env
 # Edit .env: set SQL_SA_PASSWORD, LOCAL_AUTH_JWT_SIGNING_KEY, and OPENAI_API_KEY
 # at minimum. Leave AZURE_AD_* blank to skip Entra ID entirely.
 
-docker compose up --build
+make up          # build + start detached (safe to close the shell)
+# or, plain Compose (stays attached until you detach it yourself):
+#   docker compose up -d --build
 ```
 
 - Frontend: http://localhost:3000
