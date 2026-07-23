@@ -68,6 +68,7 @@ var host = new HostBuilder()
         services.AddScoped<IAnomalyRepository, AnomalyRepository>();
         services.AddScoped<IIncidentRepository, IncidentRepository>();
         services.AddScoped<IRemediationRepository, RemediationRepository>();
+        services.AddScoped<IOrganizationRepository, OrganizationRepository>();
         services.AddScoped<ICloudOrgRepository, CloudOrgRepository>();
         services.AddScoped<ICloudAccountRepository, CloudAccountRepository>();
 

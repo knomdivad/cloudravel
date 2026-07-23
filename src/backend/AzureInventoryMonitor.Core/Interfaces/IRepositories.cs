@@ -13,6 +13,12 @@ public interface ITenantRepository
     Task<Tenant> CreateAsync(Tenant tenant, Guid createdBy);
     Task UpdateStatusAsync(Guid tenantId, TenantStatus status);
     Task UpdateAsync(Tenant tenant);
+    /// <summary>
+    /// Register the Azure subscriptions to monitor for a tenant (the "specific
+    /// subscriptions" choice). Idempotent per (tenant, subscription). An empty
+    /// list means "all subscriptions" — nothing is pinned and discovery covers all.
+    /// </summary>
+    Task AddSubscriptionsAsync(Guid tenantId, IReadOnlyList<string> subscriptionIds);
 }
 
 /// <summary>

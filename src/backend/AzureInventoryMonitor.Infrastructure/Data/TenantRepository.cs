@@ -158,6 +158,35 @@ public sealed class TenantRepository : ITenantRepository
         _logger.LogInformation("Updated tenant {TenantId} status to {Status}", tenantId, status);
     }
 
+    public async Task AddSubscriptionsAsync(Guid tenantId, IReadOnlyList<string> subscriptionIds)
+    {
+        if (subscriptionIds.Count == 0) return;
+
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        // Insert only subscriptions not already registered for this tenant.
+        const string sql = @"
+            INSERT INTO tenant_subscriptions (tenant_id, subscription_id, subscription_name, status)
+            SELECT @TenantId, @SubscriptionId, @SubscriptionName, 'active'
+            WHERE NOT EXISTS (
+                SELECT 1 FROM tenant_subscriptions
+                WHERE tenant_id = @TenantId AND subscription_id = @SubscriptionId);";
+
+        foreach (var raw in subscriptionIds)
+        {
+            var subId = raw?.Trim();
+            if (string.IsNullOrWhiteSpace(subId)) continue;
+            await conn.ExecuteAsync(sql, new
+            {
+                TenantId = tenantId,
+                SubscriptionId = subId,
+                SubscriptionName = subId
+            });
+        }
+
+        _logger.LogInformation("Registered {Count} subscription(s) for tenant {TenantId}",
+            subscriptionIds.Count, tenantId);
+    }
+
     public async Task UpdateAsync(Tenant tenant)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();

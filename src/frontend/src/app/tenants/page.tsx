@@ -36,9 +36,10 @@ const statusBadge = (status: string) => {
 };
 
 export default function CloudsPage() {
-  const { tenantId, currentTenant } = useTenantContext();
+  const { tenantId, currentOrg, refreshOrganizations } = useTenantContext();
 
-  const [tenants, setTenants] = useState<TenantSummary[]>([]);
+  // The Azure tenant for THIS organization lives at tenant_id = org_id.
+  const [azureTenant, setAzureTenant] = useState<TenantSummary | null>(null);
   const [orgs, setOrgs] = useState<CloudOrg[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -57,16 +58,18 @@ export default function CloudsPage() {
     setTimeout(() => setToast(null), 5000);
   }, []);
 
-  const fetchTenants = useCallback(async () => {
+  const fetchAzureTenant = useCallback(async () => {
+    if (!tenantId) { setAzureTenant(null); setLoading(false); return; }
     try {
       const data = await api.getTenants();
-      setTenants(data || []);
+      // org_id === the RLS tenant_id, so this org's Azure tenant is the matching row.
+      setAzureTenant((data || []).find(t => t.tenantId === tenantId) ?? null);
     } catch {
-      showToast('Failed to load Azure tenants.', 'error');
+      showToast('Failed to load the Azure tenant.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [tenantId, showToast]);
 
   const fetchOrgs = useCallback(async () => {
     if (!tenantId) { setOrgs([]); return; }
@@ -78,8 +81,14 @@ export default function CloudsPage() {
     }
   }, [tenantId]);
 
-  useEffect(() => { fetchTenants(); }, [fetchTenants]);
+  useEffect(() => { fetchAzureTenant(); }, [fetchAzureTenant]);
   useEffect(() => { fetchOrgs(); }, [fetchOrgs]);
+
+  const refreshAll = useCallback(() => {
+    fetchAzureTenant();
+    fetchOrgs();
+    refreshOrganizations();
+  }, [fetchAzureTenant, fetchOrgs, refreshOrganizations]);
 
   const handleStatusUpdate = async () => {
     if (!statusAction) return;
@@ -88,7 +97,7 @@ export default function CloudsPage() {
       await api.updateTenantStatus(statusAction.tenant.tenantId, statusAction.newStatus);
       showToast(`${statusAction.tenant.displayName} → ${statusAction.newStatus}.`, 'success');
       setStatusAction(null);
-      fetchTenants();
+      fetchAzureTenant();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to update status.', 'error');
     } finally {
@@ -101,7 +110,7 @@ export default function CloudsPage() {
     try {
       await api.triggerSnapshot(tenant.tenantId);
       showToast(`Inventory collected for "${tenant.displayName}".`, 'success');
-      fetchTenants();
+      fetchAzureTenant();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to collect inventory.', 'error');
     } finally {
@@ -135,9 +144,19 @@ export default function CloudsPage() {
     return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   }
 
+  if (!tenantId) {
+    return (
+      <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+        <p className="text-gray-500 mb-1">No organization selected</p>
+        <p className="text-sm text-gray-400">Create or select an organization from the sidebar to manage its clouds.</p>
+      </div>
+    );
+  }
+
   const awsOrgs = orgs.filter(o => o.provider.toLowerCase() === 'aws');
   const gcpOrgs = orgs.filter(o => o.provider.toLowerCase() === 'gcp');
-  const totalClouds = tenants.length + orgs.length;
+  const azureConnected = !!azureTenant;
+  const totalClouds = (azureConnected ? 1 : 0) + orgs.length;
 
   return (
     <div className="space-y-8">
@@ -155,7 +174,8 @@ export default function CloudsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clouds</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Azure tenants, AWS organizations, and GCP organizations — independent peers &middot; {totalClouds} connected
+            {currentOrg ? <>Clouds in <strong>{currentOrg.name}</strong></> : 'Clouds in this organization'}
+            {' '}&middot; Azure tenant, AWS &amp; GCP organizations as peers &middot; {totalClouds} connected
           </p>
         </div>
         <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
@@ -166,8 +186,9 @@ export default function CloudsPage() {
       {showAdd && (
         <AddCloudModal
           tenantId={tenantId}
+          azureConnected={azureConnected}
           onClose={() => setShowAdd(false)}
-          onAdded={(msg) => { showToast(msg, 'success'); setShowAdd(false); fetchTenants(); fetchOrgs(); }}
+          onAdded={(msg) => { showToast(msg, 'success'); setShowAdd(false); refreshAll(); }}
         />
       )}
 
@@ -185,7 +206,7 @@ export default function CloudsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              {statusAction.newStatus === 'active' ? 'Reactivate' : statusAction.newStatus} Tenant
+              {statusAction.newStatus === 'active' ? 'Reactivate' : statusAction.newStatus} Azure tenant
             </h3>
             <p className="text-sm text-gray-600 mb-1">
               Change <strong>{statusAction.tenant.displayName}</strong> to <strong>{statusAction.newStatus}</strong>?
@@ -202,12 +223,13 @@ export default function CloudsPage() {
         </div>
       )}
 
-      {/* Azure tenants */}
-      {tenants.length > 0 && (
-        <section>
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Azure</h2>
+      {/* Azure */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Azure</h2>
+        {azureTenant ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {tenants.map(tenant => {
+            {(() => {
+              const tenant = azureTenant;
               const actions = getStatusActions(tenant.status);
               return (
                 <div key={tenant.tenantId} className="bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow">
@@ -246,109 +268,121 @@ export default function CloudsPage() {
                   )}
                 </div>
               );
-            })}
+            })()}
           </div>
-        </section>
-      )}
+        ) : (
+          <div className="bg-white rounded-lg border border-dashed border-gray-300 p-5 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-700">No Azure tenant connected</p>
+              <p className="text-xs text-gray-400 mt-0.5">Connect an Azure tenant to this organization (all or specific subscriptions).</p>
+            </div>
+            <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50">
+              Connect Azure
+            </button>
+          </div>
+        )}
+      </section>
 
       {/* AWS orgs */}
-      {awsOrgs.length > 0 && (
-        <OrgSection label="AWS" orgs={awsOrgs} onAddAccount={setAddAccountFor}
-          onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} />
-      )}
+      <OrgSection label="AWS" emptyHint="No AWS organizations yet." orgs={awsOrgs} onAddAccount={setAddAccountFor}
+        onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)} />
 
       {/* GCP orgs */}
-      {gcpOrgs.length > 0 && (
-        <OrgSection label="Google Cloud" orgs={gcpOrgs} onAddAccount={setAddAccountFor}
-          onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} />
-      )}
-
-      {totalClouds === 0 && (
-        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-          <p className="text-gray-500 mb-1">No clouds connected yet</p>
-          <p className="text-sm text-gray-400 mb-4">Connect an Azure tenant, AWS organization, or GCP organization to start monitoring.</p>
-          <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">Add First Cloud</button>
-        </div>
-      )}
+      <OrgSection label="Google Cloud" emptyHint="No GCP organizations yet." orgs={gcpOrgs} onAddAccount={setAddAccountFor}
+        onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)} />
     </div>
   );
 }
 
-function OrgSection({ label, orgs, onAddAccount, onCollect, collecting, isDev }: {
-  label: string; orgs: CloudOrg[]; onAddAccount: (o: CloudOrg) => void;
-  onCollect: (a: CloudAccount) => void; collecting: string | null; isDev: boolean;
+function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collecting, isDev, onAdd }: {
+  label: string; emptyHint: string; orgs: CloudOrg[]; onAddAccount: (o: CloudOrg) => void;
+  onCollect: (a: CloudAccount) => void; collecting: string | null; isDev: boolean; onAdd: () => void;
 }) {
   const accountNoun = label === 'AWS' ? 'account' : 'project';
   return (
     <section>
       <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">{label}</h2>
-      <div className="space-y-4">
-        {orgs.map(org => (
-          <div key={org.orgId} className="bg-white rounded-lg border border-gray-200 p-5">
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[org.provider.toLowerCase()] ?? ''}`}>{org.provider.toUpperCase()}</span>
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-gray-900 truncate">{org.name}</h3>
-                  {org.externalId && <p className="text-xs text-gray-400 font-mono truncate">Org ID: {org.externalId}</p>}
-                </div>
-              </div>
-              <button onClick={() => onAddAccount(org)} className="text-xs font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">
-                + Add {accountNoun}
-              </button>
-            </div>
-
-            {org.accounts.length === 0 ? (
-              <p className="text-sm text-gray-400 py-2">No {accountNoun}s yet — add one to start collecting inventory.</p>
-            ) : (
-              <div className="divide-y divide-gray-100 border-t border-gray-100">
-                {org.accounts.map(acct => (
-                  <div key={acct.accountId} className="py-2.5 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{acct.displayName}</p>
-                      <p className="text-xs text-gray-400 font-mono truncate">
-                        {acct.externalId}{acct.regions && acct.regions.length > 0 ? ` · ${acct.regions.join(', ')}` : ''}
-                      </p>
-                      {acct.lastError && <p className="text-xs text-red-600 truncate">{acct.lastError}</p>}
-                    </div>
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <div className="text-right">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(acct.status)}`}>{acct.status}</span>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleDateString() : 'never'}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => onCollect(acct)}
-                        disabled={isDev || collecting === acct.accountId}
-                        title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
-                        className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
-                      >
-                        {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
-                        {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
-                      </button>
-                    </div>
+      {orgs.length === 0 ? (
+        <div className="bg-white rounded-lg border border-dashed border-gray-300 p-5 flex items-center justify-between">
+          <p className="text-sm text-gray-500">{emptyHint} Add one as a peer to Azure in this organization.</p>
+          <button onClick={onAdd} className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50">
+            + Add {label} org
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {orgs.map(org => (
+            <div key={org.orgId} className="bg-white rounded-lg border border-gray-200 p-5">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[org.provider.toLowerCase()] ?? ''}`}>{org.provider.toUpperCase()}</span>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-gray-900 truncate">{org.name}</h3>
+                    {org.externalId && <p className="text-xs text-gray-400 font-mono truncate">Org ID: {org.externalId}</p>}
                   </div>
-                ))}
+                </div>
+                <button onClick={() => onAddAccount(org)} className="text-xs font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">
+                  + Add {accountNoun}
+                </button>
               </div>
-            )}
-          </div>
-        ))}
-      </div>
+
+              {org.accounts.length === 0 ? (
+                <p className="text-sm text-gray-400 py-2">
+                  No {accountNoun}s pinned. Add specific {accountNoun}s here, or leave empty to cover all {accountNoun}s discovered on collection.
+                </p>
+              ) : (
+                <div className="divide-y divide-gray-100 border-t border-gray-100">
+                  {org.accounts.map(acct => (
+                    <div key={acct.accountId} className="py-2.5 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{acct.displayName}</p>
+                        <p className="text-xs text-gray-400 font-mono truncate">
+                          {acct.externalId}{acct.regions && acct.regions.length > 0 ? ` · ${acct.regions.join(', ')}` : ''}
+                        </p>
+                        {acct.lastError && <p className="text-xs text-red-600 truncate">{acct.lastError}</p>}
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="text-right">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(acct.status)}`}>{acct.status}</span>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {acct.lastInventoryAt ? new Date(acct.lastInventoryAt).toLocaleDateString() : 'never'}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => onCollect(acct)}
+                          disabled={isDev || collecting === acct.accountId}
+                          title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
+                          className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+                          {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
 
 // ============================================================================
-// Add Cloud modal — Azure tenant, or a new AWS/GCP org
+// Add Cloud modal — connect the org's Azure tenant, or add an AWS/GCP org.
+// Everything here attaches to the CURRENT organization; nothing creates an org.
 // ============================================================================
 
-function AddCloudModal({ tenantId, onClose, onAdded }: {
-  tenantId: string | null;
+function AddCloudModal({ tenantId, azureConnected, onClose, onAdded }: {
+  tenantId: string;
+  azureConnected: boolean;
   onClose: () => void;
   onAdded: (message: string) => void;
 }) {
-  const [provider, setProvider] = useState<'azure' | 'aws' | 'gcp'>('azure');
+  // If Azure is already connected, default to adding an AWS org instead.
+  const [provider, setProvider] = useState<'azure' | 'aws' | 'gcp'>(azureConnected ? 'aws' : 'azure');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -358,6 +392,8 @@ function AddCloudModal({ tenantId, onClose, onAdded }: {
   const [onboardingMethod, setOnboardingMethod] = useState<'lighthouse' | 'app_registration'>('lighthouse');
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [subScope, setSubScope] = useState<'all' | 'specific'>('all');
+  const [subscriptions, setSubscriptions] = useState('');
   // Org (aws/gcp) fields
   const [orgName, setOrgName] = useState('');
   const [orgExternalId, setOrgExternalId] = useState('');
@@ -367,16 +403,19 @@ function AddCloudModal({ tenantId, onClose, onAdded }: {
     setBusy(true); setError(null);
     try {
       if (provider === 'azure') {
-        await api.onboardTenant({
+        const subscriptionIds = subScope === 'specific'
+          ? subscriptions.split(/[,\n]+/).map(s => s.trim()).filter(Boolean)
+          : undefined;
+        await api.connectAzureTenant(tenantId, {
           displayName, azureTenantId, onboardingMethod,
           clientId: onboardingMethod === 'app_registration' ? clientId : undefined,
           clientSecret: onboardingMethod === 'app_registration' ? clientSecret || undefined : undefined,
+          subscriptionIds,
         });
-        onAdded(`Azure tenant "${displayName}" onboarded.`);
+        onAdded(`Azure tenant "${displayName}" connected to this organization.`);
       } else {
-        if (!tenantId) { setError('No workspace selected. Add or select an Azure tenant first to establish the workspace.'); setBusy(false); return; }
         await api.createCloudOrg(tenantId, { provider, name: orgName, externalId: orgExternalId || undefined });
-        onAdded(`${provider.toUpperCase()} organization "${orgName}" created. Add accounts to it next.`);
+        onAdded(`${provider.toUpperCase()} organization "${orgName}" added. Add ${provider === 'aws' ? 'accounts' : 'projects'} to it next.`);
       }
     } catch (err: any) {
       setError(err.message ?? 'Failed to add cloud.');
@@ -398,15 +437,21 @@ function AddCloudModal({ tenantId, onClose, onAdded }: {
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
           <div className="grid grid-cols-3 gap-2">
-            {(['azure', 'aws', 'gcp'] as const).map(p => (
-              <button key={p} type="button" onClick={() => setProvider(p)}
-                className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${provider === p ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
-                {p === 'azure' ? 'Azure' : p === 'aws' ? 'AWS' : 'Google Cloud'}
-              </button>
-            ))}
+            {(['azure', 'aws', 'gcp'] as const).map(p => {
+              const disabled = p === 'azure' && azureConnected;
+              return (
+                <button key={p} type="button" disabled={disabled} onClick={() => setProvider(p)}
+                  title={disabled ? 'Azure tenant already connected to this organization' : undefined}
+                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${provider === p ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                  {p === 'azure' ? 'Azure' : p === 'aws' ? 'AWS' : 'Google Cloud'}
+                </button>
+              );
+            })}
           </div>
           <p className="text-xs text-gray-400 mt-1">
-            {provider === 'azure' ? 'Onboard an Azure tenant.' : `Create a new ${provider.toUpperCase()} organization — a top-level grouping for its ${provider === 'aws' ? 'accounts' : 'projects'}. Independent of Azure.`}
+            {provider === 'azure'
+              ? 'Connect the Azure tenant for this organization — all or specific subscriptions.'
+              : `Add a ${provider.toUpperCase()} organization to this workspace — a top-level grouping for its ${provider === 'aws' ? 'accounts' : 'projects'}, a peer to Azure.`}
           </p>
         </div>
 
@@ -415,7 +460,7 @@ function AddCloudModal({ tenantId, onClose, onAdded }: {
         <form onSubmit={submit} className="space-y-4">
           {provider === 'azure' ? (
             <>
-              <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Contoso Corp" />
+              <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Contoso Azure" />
               <Field label="Azure Tenant ID" required mono value={azureTenantId} onChange={setAzureTenantId}
                 placeholder="00000000-0000-0000-0000-000000000000"
                 pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" />
@@ -437,6 +482,22 @@ function AddCloudModal({ tenantId, onClose, onAdded }: {
                   <Field label="Client Secret" type="password" mono value={clientSecret} onChange={setClientSecret} placeholder="Client secret value" />
                 </div>
               )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Subscriptions</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['all', 'specific'] as const).map(s => (
+                    <button key={s} type="button" onClick={() => setSubScope(s)}
+                      className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${subScope === s ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                      {s === 'all' ? 'All subscriptions' : 'Specific subscriptions'}
+                    </button>
+                  ))}
+                </div>
+                {subScope === 'specific' && (
+                  <textarea value={subscriptions} onChange={e => setSubscriptions(e.target.value)} rows={3}
+                    className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder={'One subscription ID per line, or comma-separated'} />
+                )}
+              </div>
             </>
           ) : (
             <>
@@ -451,7 +512,7 @@ function AddCloudModal({ tenantId, onClose, onAdded }: {
             <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
             <button type="submit" disabled={busy} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
               {busy && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
-              {busy ? 'Working...' : provider === 'azure' ? 'Onboard Tenant' : 'Create Organization'}
+              {busy ? 'Working...' : provider === 'azure' ? 'Connect Azure' : 'Add Organization'}
             </button>
           </div>
         </form>

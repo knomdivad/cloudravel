@@ -195,9 +195,10 @@ const navItems = [
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const { userName, logout } = useAuth();
-  const { tenants, currentTenant, selectTenant } = useTenantContext();
+  const { organizations, currentOrg, currentTenant, selectTenant, refreshOrganizations } = useTenantContext();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [environment, setEnvironment] = useState<string>('');
+  const [showCreateOrg, setShowCreateOrg] = useState(false);
 
   useEffect(() => {
     api.getPlatformInfo().then((p) => setEnvironment(p.environment)).catch(() => {});
@@ -207,6 +208,16 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      {showCreateOrg && (
+        <CreateOrgModal
+          onClose={() => setShowCreateOrg(false)}
+          onCreated={(org) => {
+            setShowCreateOrg(false);
+            refreshOrganizations();
+            selectTenant(org.orgId);
+          }}
+        />
+      )}
       {/* Sidebar */}
       <aside
         className={`bg-gray-900 text-white flex flex-col transition-all duration-200 ${
@@ -223,21 +234,44 @@ function AppShell({ children }: { children: React.ReactNode }) {
           )}
         </div>
 
-        {/* Tenant Switcher */}
-        {!sidebarCollapsed && tenants.length > 0 && (
+        {/* Organization Switcher */}
+        {!sidebarCollapsed && (
           <div className="px-3 py-3 border-b border-gray-700">
-            <label className="text-xs text-gray-400 block mb-1">Cloud</label>
-            <select
-              value={currentTenant?.tenantId || ''}
-              onChange={(e) => selectTenant(e.target.value)}
-              className="w-full bg-gray-800 text-white text-sm rounded py-1.5 px-2 border border-gray-600 focus:border-azure-400 focus:outline-none"
-            >
-              {tenants.map((t) => (
-                <option key={t.tenantId} value={t.tenantId}>
-                  {t.displayName}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-gray-400">Organization</label>
+              <button
+                onClick={() => setShowCreateOrg(true)}
+                title="Create a new organization"
+                className="text-xs text-azure-300 hover:text-azure-200 font-medium"
+              >
+                + New
+              </button>
+            </div>
+            {organizations.length > 0 ? (
+              <>
+                <select
+                  value={currentOrg?.orgId || ''}
+                  onChange={(e) => selectTenant(e.target.value)}
+                  className="w-full bg-gray-800 text-white text-sm rounded py-1.5 px-2 border border-gray-600 focus:border-azure-400 focus:outline-none"
+                >
+                  {organizations.map((o) => (
+                    <option key={o.orgId} value={o.orgId}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+                {currentOrg && (
+                  <div className="flex items-center gap-2 mt-1.5 text-[11px] text-gray-400">
+                    <span className={`px-1.5 py-0.5 rounded ${currentOrg.environment === 'Production' ? 'bg-green-900/50 text-green-300' : 'bg-amber-900/50 text-amber-300'}`}>
+                      {currentOrg.environment}
+                    </span>
+                    <span>{currentOrg.cloudCount} cloud{currentOrg.cloudCount === 1 ? '' : 's'}</span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-gray-500">No organizations yet — create one to begin.</p>
+            )}
           </div>
         )}
 
@@ -406,6 +440,89 @@ function LoadingSpinner({ text }: { text?: string }) {
     <div className="flex flex-col items-center gap-3">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-azure-600" />
       {text && <p className="text-sm text-gray-500">{text}</p>}
+    </div>
+  );
+}
+
+// ============================================================================
+// Create Organization modal — a new workspace. Clouds are added to it afterwards
+// (from the Clouds page); creating one never onboards a cloud.
+// ============================================================================
+
+import type { Organization } from '../lib/types';
+
+function CreateOrgModal({ onClose, onCreated }: {
+  onClose: () => void;
+  onCreated: (org: Organization) => void;
+}) {
+  const [name, setName] = useState('');
+  const [environment, setEnvironment] = useState<'Development' | 'Production'>('Development');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const org = await api.createOrganization({ name: name.trim(), environment });
+      onCreated(org);
+    } catch (err: any) {
+      setError(err?.message ?? 'Failed to create organization.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-gray-900">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold">New Organization</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          A workspace that groups the clouds you manage. Add an Azure tenant, AWS
+          organization, or GCP organization to it from the Clouds page.
+        </p>
+
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+            <input
+              type="text" required value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="Acme Corp"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Environment</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['Development', 'Production'] as const).map((env) => (
+                <button key={env} type="button" onClick={() => setEnvironment(env)}
+                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${environment === env ? 'border-azure-500 bg-azure-50 text-azure-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                  {env}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Labels the workspace. Live inventory collection is gated by the instance
+              environment, so a Development instance never contacts real clouds.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={busy || !name.trim()} className="px-4 py-2 bg-azure-600 text-white rounded-lg text-sm hover:bg-azure-700 disabled:opacity-50 flex items-center gap-2">
+              {busy && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
+              {busy ? 'Creating...' : 'Create Organization'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

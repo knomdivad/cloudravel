@@ -6,7 +6,7 @@
 -- remediation actions so every page in the UI has something to show.
 --
 -- Safe to re-run: skips entirely if "Contoso Corp" already exists.
--- Run after 001-005: sqlcmd -S localhost -d aimdb -i seed-demo-data.sql
+-- Run after 001-008: sqlcmd -S localhost -d aimdb -i seed-demo-data.sql
 -- ============================================================================
 
 EXEC sp_set_session_context @key = N'bypass_rls', @value = 1;
@@ -32,6 +32,13 @@ INSERT INTO tenants
 VALUES
     (@TenantId, 'Contoso Corp', @AzureTenantId, 'lighthouse', 'active',
      DATEADD(DAY, -90, @Now), @Now, CONVERT(NVARCHAR(128), @AdminUserId));
+
+-- Organization workspace: the in-app "Organization" that owns Contoso's clouds
+-- (Azure tenant above + AWS/GCP orgs below). org_id = the workspace id, and this
+-- instance is labelled Development so its seed clouds are never contacted.
+IF NOT EXISTS (SELECT 1 FROM organizations WHERE org_id = @TenantId)
+    INSERT INTO organizations (org_id, name, environment, created_by)
+    VALUES (@TenantId, 'Contoso Corp', 'Development', CONVERT(NVARCHAR(256), @AdminUserId));
 
 INSERT INTO tenant_subscriptions
     (tenant_id, subscription_id, subscription_name, status, discovered_at, last_seen_at)

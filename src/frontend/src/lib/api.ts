@@ -20,6 +20,7 @@ import type {
   Playbook,
   CloudAccount,
   CloudOrg,
+  Organization,
   OpsSummary,
 } from './types';
 
@@ -91,6 +92,55 @@ async function apiCall<T>(
   }
 
   return response.json();
+}
+
+// A sentinel used for workspace-registry endpoints (list/create) that aren't
+// scoped to any one workspace. A global admin passes the access check for it.
+const NO_WORKSPACE = '00000000-0000-0000-0000-000000000000';
+
+// ============================================================================
+// Organization API — the in-app workspace above clouds
+// ============================================================================
+
+export async function getOrganizations(): Promise<Organization[]> {
+  const token = await getAccessToken();
+  const response = await fetch(`${API_BASE}/organizations`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Tenant-Id': NO_WORKSPACE,
+    },
+  });
+  const data = await response.json();
+  return data.organizations ?? data.Organizations ?? [];
+}
+
+export async function createOrganization(request: {
+  name: string;
+  environment?: string;
+}): Promise<Organization> {
+  return apiCall<Organization>('/organizations', NO_WORKSPACE, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+/** Connect the Azure tenant for an organization (never creates a new org). */
+export async function connectAzureTenant(
+  orgId: string,
+  request: {
+    displayName: string;
+    azureTenantId: string;
+    onboardingMethod: string;
+    clientId?: string;
+    clientSecret?: string;
+    lighthouseDelegationId?: string;
+    subscriptionIds?: string[];
+  }
+): Promise<Organization> {
+  return apiCall<Organization>(`/organizations/${orgId}/azure`, orgId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }
 
 // ============================================================================
@@ -467,6 +517,9 @@ export async function linkCloudAccount(
 // ============================================================================
 
 export const api = {
+  getOrganizations,
+  createOrganization,
+  connectAzureTenant,
   getTenants,
   onboardTenant,
   updateTenantStatus,

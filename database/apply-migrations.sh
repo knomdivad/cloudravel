@@ -24,6 +24,7 @@ MIGRATIONS=(
   005-job-queue
   006-rename-secret-column
   007-cloud-orgs
+  008-organizations
   seed-demo-data
 )
 

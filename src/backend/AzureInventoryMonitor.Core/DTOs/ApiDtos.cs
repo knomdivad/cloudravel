@@ -37,6 +37,52 @@ public sealed class OnboardTenantRequest
     public List<string>? SubscriptionIds { get; set; }
 }
 
+// --- Organizations (the in-app workspace above clouds) ---
+
+public sealed class OrganizationListResponse
+{
+    public IReadOnlyList<OrganizationDto> Organizations { get; set; } = [];
+}
+
+public sealed class OrganizationDto
+{
+    public Guid OrgId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Environment { get; set; } = "Development";
+    public string Status { get; set; } = "active";
+    public DateTime CreatedAt { get; set; }
+
+    // Cloud rollup for the selector / org card
+    public bool AzureConnected { get; set; }
+    public string? AzureTenantName { get; set; }
+    public int AwsOrgCount { get; set; }
+    public int GcpOrgCount { get; set; }
+    public int CloudCount { get; set; }
+}
+
+public sealed class CreateOrganizationRequest
+{
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Development (default) | Production.</summary>
+    public string? Environment { get; set; }
+}
+
+/// <summary>
+/// Connect (or, for a fresh org, establish) the Azure tenant for an Organization.
+/// Materialises the tenants row at tenant_id = org_id — it never creates a new org.
+/// </summary>
+public sealed class ConnectAzureTenantRequest
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string AzureTenantId { get; set; } = string.Empty;
+    public string OnboardingMethod { get; set; } = "lighthouse"; // lighthouse | app_registration
+    public string? ClientId { get; set; }
+    public string? ClientSecret { get; set; }
+    public string? LighthouseDelegationId { get; set; }
+    /// <summary>Specific subscriptions to monitor. Empty/null = all subscriptions.</summary>
+    public List<string>? SubscriptionIds { get; set; }
+}
+
 // --- Inventory ---
 
 public sealed class InventoryResponse

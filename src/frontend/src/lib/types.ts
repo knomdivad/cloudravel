@@ -3,6 +3,21 @@
  * These mirror the backend DTOs for type-safe frontend usage.
  */
 
+// --- Organization (the in-app workspace above clouds) ---
+
+export interface Organization {
+  orgId: string;
+  name: string;
+  environment: 'Development' | 'Production';
+  status: 'active' | 'suspended';
+  createdAt: string;
+  azureConnected: boolean;
+  azureTenantName?: string;
+  awsOrgCount: number;
+  gcpOrgCount: number;
+  cloudCount: number;
+}
+
 // --- Tenant ---
 
 export interface TenantSummary {

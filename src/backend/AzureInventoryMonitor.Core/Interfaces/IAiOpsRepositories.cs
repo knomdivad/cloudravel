@@ -79,6 +79,17 @@ public interface IRemediationRepository
 }
 
 /// <summary>
+/// Repository for Organizations — the in-app workspace (org_id = RLS boundary)
+/// that owns Azure/AWS/GCP clouds as peers.
+/// </summary>
+public interface IOrganizationRepository
+{
+    Task<IReadOnlyList<Organization>> GetAllAsync();
+    Task<Organization?> GetByIdAsync(Guid orgId);
+    Task<Organization> CreateAsync(Organization org);
+}
+
+/// <summary>
 /// Repository for cloud organizations (top-level provider-agnostic grouping:
 /// Azure tenant / AWS Organization / GCP Organization).
 /// </summary>

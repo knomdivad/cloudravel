@@ -61,8 +61,9 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         // Extract tenant ID from header
         if (!httpRequestData.Headers.TryGetValues("X-Tenant-Id", out var tenantIdValues))
         {
-            // For tenant listing endpoints, tenant header is optional
-            if (path.Contains("/tenants") && httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            // For tenant/organization listing endpoints, tenant header is optional
+            if ((path.Contains("/tenants") || path.Contains("/organizations"))
+                && httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
             {
                 await next(context);
                 return;
