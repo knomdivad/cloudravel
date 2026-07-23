@@ -1,0 +1,11 @@
+# This repo's scripts and configs run in Linux containers, so force LF on
+# checkout regardless of the client's core.autocrlf setting. Without this, a
+# client with autocrlf=true rewrites shell scripts with CRLF and bash rejects
+# them (e.g. "set: pipefail: invalid option name").
+* text=auto eol=lf
+
+# Be explicit for the files that break hardest with CRLF.
+*.sh   text eol=lf
+*.sql  text eol=lf
+Dockerfile text eol=lf
+*.yml  text eol=lf

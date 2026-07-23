@@ -67,7 +67,9 @@ services:
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
     volumes:
       - ./database:/database:ro
-    command: ["bash", "/database/apply-migrations.sh"]
+    # Strip any CR (a CRLF checkout on the host would otherwise make bash reject
+    # the script) before executing. Belt-and-suspenders with .gitattributes.
+    command: ["bash", "-c", "tr -d '\\015' < /database/apply-migrations.sh | bash"]
     restart: "no"
 
   api:
