@@ -4,7 +4,6 @@ using AzureInventoryMonitor.Api.Middleware;
 using AzureInventoryMonitor.Core.DTOs;
 using AzureInventoryMonitor.Core.Interfaces;
 using AzureInventoryMonitor.Core.Models;
-using Azure.Security.KeyVault.Secrets;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -23,7 +22,7 @@ public sealed class TenantFunctions
     private readonly IRecommendationRepository _recRepo;
     private readonly IAuditRepository _auditRepo;
     private readonly IInventoryCollectionService _inventoryCollection;
-    private readonly SecretClient? _secretClient;
+    private readonly ISecretStore? _secretStore;
     private readonly ILogger<TenantFunctions> _logger;
 
     public TenantFunctions(
@@ -34,7 +33,7 @@ public sealed class TenantFunctions
         IAuditRepository auditRepo,
         IInventoryCollectionService inventoryCollection,
         ILogger<TenantFunctions> logger,
-        SecretClient? secretClient = null)
+        ISecretStore? secretStore = null)
     {
         _tenantRepo = tenantRepo;
         _inventoryRepo = inventoryRepo;
@@ -42,7 +41,7 @@ public sealed class TenantFunctions
         _recRepo = recRepo;
         _auditRepo = auditRepo;
         _inventoryCollection = inventoryCollection;
-        _secretClient = secretClient;
+        _secretStore = secretStore;
         _logger = logger;
     }
 
@@ -79,7 +78,7 @@ public sealed class TenantFunctions
             });
         }
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new TenantListResponse { Tenants = summaries });
         return response;
     }
@@ -96,7 +95,7 @@ public sealed class TenantFunctions
     {
         if (!Guid.TryParse(tenantId, out var id))
         {
-            var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
+            var badReq = req.CreateCorsResponse(HttpStatusCode.BadRequest);
             await badReq.WriteAsJsonAsync(new ErrorResponse { Code = "INVALID_ID", Message = "Tenant ID must be a valid GUID." });
             return badReq;
         }
@@ -104,12 +103,12 @@ public sealed class TenantFunctions
         var tenant = await _tenantRepo.GetByIdAsync(id);
         if (tenant == null)
         {
-            var notFound = req.CreateResponse(HttpStatusCode.NotFound);
+            var notFound = req.CreateCorsResponse(HttpStatusCode.NotFound);
             await notFound.WriteAsJsonAsync(new ErrorResponse { Code = "TENANT_NOT_FOUND", Message = $"Tenant '{id}' not found." });
             return notFound;
         }
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(tenant);
         return response;
     }
@@ -126,7 +125,7 @@ public sealed class TenantFunctions
         var body = await req.ReadFromJsonAsync<OnboardTenantRequest>();
         if (body == null || string.IsNullOrWhiteSpace(body.DisplayName) || string.IsNullOrWhiteSpace(body.AzureTenantId))
         {
-            var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
+            var badReq = req.CreateCorsResponse(HttpStatusCode.BadRequest);
             await badReq.WriteAsJsonAsync(new ErrorResponse
             {
                 Code = "INVALID_REQUEST",
@@ -137,7 +136,7 @@ public sealed class TenantFunctions
 
         if (!Enum.TryParse<OnboardingMethod>(body.OnboardingMethod.Replace("_", ""), true, out var method))
         {
-            var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
+            var badReq = req.CreateCorsResponse(HttpStatusCode.BadRequest);
             await badReq.WriteAsJsonAsync(new ErrorResponse
             {
                 Code = "INVALID_METHOD",
@@ -155,23 +154,23 @@ public sealed class TenantFunctions
             LighthouseDelegationId = body.LighthouseDelegationId
         };
 
-        // For App Registration, a Key Vault secret name would be generated or provided
+        // For App Registration, a secret name would be generated or provided
         if (method == OnboardingMethod.AppRegistration && !string.IsNullOrEmpty(body.ClientId))
         {
-            tenant.KeyVaultSecretName = $"tenant-{body.AzureTenantId}-creds";
+            tenant.SecretName = $"tenant-{body.AzureTenantId}-creds";
         }
 
-        var createdBy = Guid.Empty; // TODO: extract from JWT claims
+        var createdBy = context.GetUserId() ?? Guid.Empty;
         var created = await _tenantRepo.CreateAsync(tenant, createdBy);
 
-        // Store credentials in Key Vault for App Registration tenants
+        // Store credentials in the secret store for App Registration tenants
         if (method == OnboardingMethod.AppRegistration
             && !string.IsNullOrEmpty(body.ClientId)
             && !string.IsNullOrEmpty(body.ClientSecret))
         {
-            if (_secretClient == null)
+            if (_secretStore == null)
             {
-                _logger.LogWarning("SecretClient not configured — cannot store credentials for tenant {TenantId}", created.TenantId);
+                _logger.LogWarning("Secret store not configured — cannot store credentials for tenant {TenantId}", created.TenantId);
             }
             else
             {
@@ -180,11 +179,9 @@ public sealed class TenantFunctions
                     clientId = body.ClientId,
                     clientSecret = body.ClientSecret
                 });
-                var secret = new Azure.Security.KeyVault.Secrets.KeyVaultSecret(created.KeyVaultSecretName, secretPayload);
-                secret.Properties.ContentType = "application/json";
-                await _secretClient.SetSecretAsync(secret);
-                _logger.LogInformation("Stored credentials in Key Vault for tenant {TenantId} as {SecretName}",
-                    created.TenantId, created.KeyVaultSecretName);
+                await _secretStore.SetSecretAsync(created.SecretName!, secretPayload);
+                _logger.LogInformation("Stored credentials in the secret store for tenant {TenantId} as {SecretName}",
+                    created.TenantId, created.SecretName);
             }
         }
 
@@ -215,7 +212,7 @@ public sealed class TenantFunctions
             }
         });
 
-        var response = req.CreateResponse(HttpStatusCode.Created);
+        var response = req.CreateCorsResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(new
         {
             created.TenantId,
@@ -238,7 +235,7 @@ public sealed class TenantFunctions
     {
         if (!Guid.TryParse(tenantId, out var id))
         {
-            var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
+            var badReq = req.CreateCorsResponse(HttpStatusCode.BadRequest);
             await badReq.WriteAsJsonAsync(new ErrorResponse { Code = "INVALID_ID", Message = "Tenant ID must be a valid GUID." });
             return badReq;
         }
@@ -246,7 +243,7 @@ public sealed class TenantFunctions
         var body = await req.ReadFromJsonAsync<StatusUpdateRequest>();
         if (body == null || !Enum.TryParse<TenantStatus>(body.Status, true, out var newStatus))
         {
-            var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
+            var badReq = req.CreateCorsResponse(HttpStatusCode.BadRequest);
             await badReq.WriteAsJsonAsync(new ErrorResponse
             {
                 Code = "INVALID_STATUS",
@@ -257,7 +254,7 @@ public sealed class TenantFunctions
 
         await _tenantRepo.UpdateStatusAsync(id, newStatus);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { TenantId = id, Status = newStatus.ToString().ToLowerInvariant(), UpdatedAt = DateTime.UtcNow });
         return response;
     }
@@ -291,7 +288,7 @@ public sealed class TenantFunctions
             .Select(g => new SeverityCountDto { Severity = g.Key, Count = g.Count() })
             .ToList();
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new TenantDashboardResponse
         {
             TenantId = tenantId,

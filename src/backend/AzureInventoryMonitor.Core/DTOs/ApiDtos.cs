@@ -232,3 +232,26 @@ public sealed class ErrorResponse
     public string Message { get; set; } = string.Empty;
     public string? TraceId { get; set; }
 }
+
+// --- Local auth ---
+
+public sealed class LoginRequestDto
+{
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+}
+
+public sealed class LoginResponseDto
+{
+    public string Token { get; set; } = string.Empty;
+    public DateTime ExpiresAt { get; set; }
+    public AuthUserDto User { get; set; } = new();
+}
+
+public sealed class AuthUserDto
+{
+    public Guid UserId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string GlobalRole { get; set; } = string.Empty;
+}

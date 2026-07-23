@@ -20,14 +20,17 @@ public sealed class UserRepository : IUserRepository
         _logger = logger;
     }
 
+    private const string SelectColumns = @"
+            SELECT user_id AS UserId, display_name AS DisplayName, email AS Email,
+                   global_role AS GlobalRole, is_active AS IsActive,
+                   created_at AS CreatedAt, last_login_at AS LastLoginAt,
+                   auth_provider AS AuthProvider, username AS Username, password_hash AS PasswordHash
+            FROM users";
+
     public async Task<User?> GetByIdAsync(Guid userId)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
-        const string sql = @"
-            SELECT user_id AS UserId, display_name AS DisplayName, email AS Email,
-                   global_role AS GlobalRole, is_active AS IsActive,
-                   created_at AS CreatedAt, last_login_at AS LastLoginAt
-            FROM users WHERE user_id = @UserId";
+        var sql = $"{SelectColumns} WHERE user_id = @UserId";
 
         return await conn.QuerySingleOrDefaultAsync<User>(sql, new { UserId = userId });
     }
@@ -35,13 +38,17 @@ public sealed class UserRepository : IUserRepository
     public async Task<User?> GetByEmailAsync(string email)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
-        const string sql = @"
-            SELECT user_id AS UserId, display_name AS DisplayName, email AS Email,
-                   global_role AS GlobalRole, is_active AS IsActive,
-                   created_at AS CreatedAt, last_login_at AS LastLoginAt
-            FROM users WHERE email = @Email";
+        var sql = $"{SelectColumns} WHERE email = @Email";
 
         return await conn.QuerySingleOrDefaultAsync<User>(sql, new { Email = email });
+    }
+
+    public async Task<User?> GetByUsernameAsync(string username)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var sql = $"{SelectColumns} WHERE username = @Username AND auth_provider = 'local'";
+
+        return await conn.QuerySingleOrDefaultAsync<User>(sql, new { Username = username });
     }
 
     public async Task<User> UpsertAsync(User user)

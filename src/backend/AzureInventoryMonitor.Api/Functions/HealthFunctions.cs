@@ -1,4 +1,5 @@
 using System.Net;
+using AzureInventoryMonitor.Api.Middleware;
 using AzureInventoryMonitor.Core.Interfaces;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -56,20 +57,23 @@ public sealed class HealthFunctions
             _logger.LogError(ex, "Health check failed: database");
         }
 
-        // Check configuration completeness
-        var requiredConfig = new[] { "AzureAd:TenantId", "AzureAd:ClientId" };
-        var missingConfig = requiredConfig.Where(k => string.IsNullOrEmpty(_config[k])).ToList();
-        if (missingConfig.Count == 0)
+        // Check configuration completeness — at least one login path must be configured.
+        // Entra ID and local auth are independent; a pure-local/no-Entra-tenant
+        // deployment is healthy as long as LocalAuth:JwtSigningKey is set.
+        var entraConfigured = !string.IsNullOrEmpty(_config["AzureAd:TenantId"]) && !string.IsNullOrEmpty(_config["AzureAd:ClientId"]);
+        var localConfigured = !string.IsNullOrEmpty(_config["LocalAuth:JwtSigningKey"]);
+        if (entraConfigured || localConfigured)
         {
-            checks["configuration"] = new ComponentHealth("healthy", "All required config present");
+            checks["configuration"] = new ComponentHealth("healthy",
+                $"Auth configured: {(entraConfigured ? "Entra ID" : "")}{(entraConfigured && localConfigured ? " + " : "")}{(localConfigured ? "Local" : "")}");
         }
         else
         {
-            checks["configuration"] = new ComponentHealth("degraded", $"Missing: {string.Join(", ", missingConfig)}");
+            checks["configuration"] = new ComponentHealth("degraded", "Neither Entra ID (AzureAd:TenantId/ClientId) nor Local auth (LocalAuth:JwtSigningKey) is configured.");
         }
 
         var status = overallHealthy ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable;
-        var response = req.CreateResponse(status);
+        var response = req.CreateCorsResponse(status);
         await response.WriteAsJsonAsync(new
         {
             status = overallHealthy ? "healthy" : "unhealthy",
@@ -95,14 +99,14 @@ public sealed class HealthFunctions
             cmd.CommandText = "SELECT COUNT(*) FROM tenants";
             await cmd.ExecuteScalarAsync();
 
-            var response = req.CreateResponse(HttpStatusCode.OK);
+            var response = req.CreateCorsResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new { status = "ready" });
             return response;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Readiness probe failed");
-            var response = req.CreateResponse(HttpStatusCode.ServiceUnavailable);
+            var response = req.CreateCorsResponse(HttpStatusCode.ServiceUnavailable);
             await response.WriteAsJsonAsync(new { status = "not_ready", error = ex.Message });
             return response;
         }

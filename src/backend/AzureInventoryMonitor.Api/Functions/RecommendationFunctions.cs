@@ -43,7 +43,7 @@ public sealed class RecommendationFunctions
 
         var recs = await _recRepo.GetAdvisorRecommendationsAsync(tenantId, category, status, offset, limit);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new RecommendationsResponse
         {
             Recommendations = recs.Select(r => new RecommendationDto
@@ -84,7 +84,7 @@ public sealed class RecommendationFunctions
 
         var records = await _recRepo.GetPolicyComplianceAsync(tenantId, complianceState, offset, limit);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
             TenantId = tenantId,
@@ -121,7 +121,7 @@ public sealed class RecommendationFunctions
 
         var findings = await _recRepo.GetDefenderFindingsAsync(tenantId, severity, status, offset, limit);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
             TenantId = tenantId,
@@ -158,7 +158,7 @@ public sealed class RecommendationFunctions
         var body = await req.ReadFromJsonAsync<LifecycleUpdateRequest>();
         if (body == null || !Enum.TryParse<RecommendationLifecycle>(body.Status, true, out var newStatus))
         {
-            var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+            var badRequest = req.CreateCorsResponse(HttpStatusCode.BadRequest);
             await badRequest.WriteAsJsonAsync(new ErrorResponse
             {
                 Code = "INVALID_STATUS",
@@ -173,7 +173,7 @@ public sealed class RecommendationFunctions
             newStatus,
             body.AcknowledgedBy);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { Status = newStatus.ToString(), UpdatedAt = DateTime.UtcNow });
         return response;
     }

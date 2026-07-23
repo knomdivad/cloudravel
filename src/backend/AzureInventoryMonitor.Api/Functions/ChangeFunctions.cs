@@ -46,7 +46,7 @@ public sealed class ChangeFunctions
         var changes = await _changeRepo.GetChangesAsync(tenantId, from, to, resourceId, classification, offset, limit);
         var total = await _changeRepo.GetChangeCountAsync(tenantId, from, to);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new ChangesResponse
         {
             Changes = changes.Select(ch => new ResourceChangeDto
@@ -88,7 +88,7 @@ public sealed class ChangeFunctions
 
         var changes = await _changeRepo.GetRecentChangesAsync(tenantId, hours);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
             TenantId = tenantId,
@@ -126,7 +126,7 @@ public sealed class ChangeFunctions
 
         var timeline = await _changeRepo.GetChangeTimelineAsync(tenantId, from, to);
 
-        var response = req.CreateResponse(HttpStatusCode.OK);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new
         {
             TenantId = tenantId,

@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using Azure.Security.KeyVault.Secrets;
 using AzureInventoryMonitor.Core.Interfaces;
 using AzureInventoryMonitor.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -10,7 +9,7 @@ namespace AzureInventoryMonitor.Infrastructure.MultiCloud;
 /// <summary>
 /// AWS adapter using SigV4-signed REST calls (no AWS SDK dependency).
 ///
-/// Credentials come from Key Vault (CloudAccount.CredentialSecretName) as JSON:
+/// Credentials come from the secret store (CloudAccount.CredentialSecretName) as JSON:
 ///   { "accessKeyId": "...", "secretAccessKey": "...", "sessionToken": "...?", "defaultRegion": "us-east-1" }
 ///
 /// Inventory: Resource Groups Tagging API GetResources — one call per region
@@ -25,16 +24,16 @@ public sealed class AwsProviderAdapter : ICloudProviderAdapter
     private static readonly HttpClient Http = new();
 
     private readonly ICloudAccountRepository _accountRepo;
-    private readonly SecretClient? _secretClient;
+    private readonly ISecretStore? _secretStore;
     private readonly ILogger<AwsProviderAdapter> _logger;
 
     public AwsProviderAdapter(
         ICloudAccountRepository accountRepo,
         ILogger<AwsProviderAdapter> logger,
-        SecretClient? secretClient = null)
+        ISecretStore? secretStore = null)
     {
         _accountRepo = accountRepo;
-        _secretClient = secretClient;
+        _secretStore = secretStore;
         _logger = logger;
     }
 
@@ -230,13 +229,14 @@ public sealed class AwsProviderAdapter : ICloudProviderAdapter
 
     private async Task<AwsCredentials> ResolveCredentialsAsync(CloudAccount account)
     {
-        if (_secretClient == null)
-            throw new InvalidOperationException("Key Vault is not configured; cannot resolve AWS credentials.");
+        if (_secretStore == null)
+            throw new InvalidOperationException("Secret store is not configured; cannot resolve AWS credentials.");
         if (string.IsNullOrEmpty(account.CredentialSecretName))
             throw new InvalidOperationException($"AWS account {account.ExternalId} has no credential secret configured.");
 
-        var secret = await _secretClient.GetSecretAsync(account.CredentialSecretName);
-        var creds = JsonSerializer.Deserialize<AwsCredentials>(secret.Value.Value,
+        var secretValue = await _secretStore.GetSecretAsync(account.CredentialSecretName)
+            ?? throw new InvalidOperationException($"No credential secret found for AWS account {account.ExternalId}.");
+        var creds = JsonSerializer.Deserialize<AwsCredentials>(secretValue,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         if (creds == null || string.IsNullOrEmpty(creds.AccessKeyId) || string.IsNullOrEmpty(creds.SecretAccessKey))
             throw new InvalidOperationException($"AWS credential secret for account {account.ExternalId} is malformed.");

@@ -1,13 +1,14 @@
-# Azure Inventory Monitor — Multi-Cloud AIOps Operating Platform
+# AnanVision — Multi-Cloud AIOps Operating Platform
 
 ## Executive Summary
 
-Azure Inventory Monitor (AIM) is a production-ready, multi-tenant **AIOps operating platform**
+AnanVision is a production-ready, multi-tenant **AIOps operating platform**
 for enterprise cloud estates spanning **Azure, AWS, and GCP**. It provides authoritative
 inventory baselines, change intelligence, security posture tracking, **proactive anomaly
 detection, incident management, and gated auto-remediation** — the day-to-day operational
 work an enterprise would otherwise outsource to a Managed Service Provider, run from a
-single control plane and driven by an AI operations engineer (GPT-5.5 on Azure OpenAI).
+single control plane and driven by an AI operations engineer (any OpenAI-compatible model —
+configurable endpoint and API key, so the model provider isn't tied to any one cloud either).
 
 ### What "MSP replacement" means here
 
@@ -43,7 +44,8 @@ auto-approval for low-risk playbooks — high-risk actions always require a huma
    directly, and every transition (proposed → approved → executed) is persisted for audit.
 
 5. **Multi-Cloud, One Model** — AWS accounts and GCP projects normalize into the same
-   inventory, anomaly, and remediation model as Azure. Credentials live only in Key Vault.
+   inventory, anomaly, and remediation model as Azure. Credentials live only in the configured
+   secret store (OpenBao — self-hosted, cloud-agnostic).
 
 ## Architecture Overview
 
@@ -64,7 +66,7 @@ auto-approval for low-risk playbooks — high-risk actions always require a huma
 │  └──────────────┘  └──────────────┘  └──────────────┘  └────────────┘  │
 │                                                                         │
 │  ┌──────────────┐  ┌──────────────┐                                     │
-│  │  Key Vault   │  │  Azure       │                                     │
+│  │  OpenBao     │  │  Azure       │                                     │
 │  │  (Secrets)   │  │  Automation  │ ← Runs ARI per tenant               │
 │  └──────────────┘  │  (Scheduler) │                                     │
 │                     └──────────────┘                                     │
@@ -83,32 +85,63 @@ auto-approval for low-risk playbooks — high-risk actions always require a huma
 
 | Component | Responsibility |
 |---|---|
-| **Next.js Frontend** | SPA with Entra ID auth, tenant switcher, inventory explorer, change timeline, dashboards |
+| **Next.js Frontend** | SPA with Entra ID SSO *and* local username/password auth, tenant switcher, inventory explorer, change timeline, dashboards |
 | **Azure Functions Backend** | REST API for inventory, changes, recommendations, AI queries, anomalies, incidents, remediation approvals, cloud accounts |
 | **AIOps Engine** | Timer-driven anomaly detectors (change velocity, security regression, config drift, unusual actors, sprawl, cost, stale telemetry) + gated remediation executor |
 | **Multi-Cloud Adapters** | AWS (SigV4 REST) + GCP (service-account JWT REST) inventory collection and playbook execution; Azure via ARM |
-| **Azure SQL** | Tenant-isolated relational store with Row-Level Security (14 tables) |
-| **Blob Storage** | Raw ARI snapshot files (normalized JSON) per tenant |
-| **Azure Automation** | Scheduled ARI runs against each customer tenant |
-| **Service Bus** | Async job processing (snapshot ingestion, change polling, recommendation sync) |
-| **Azure OpenAI** | GPT-5.5 (latest OpenAI model on Azure OpenAI) — 16 tools, function-calling only, persona modes (analyst / operations / security / cost) |
-| **Key Vault** | Per-tenant credentials, connection strings |
-| **VNet + Private Endpoints** | Network isolation for SQL, Storage, Service Bus, Key Vault, OpenAI |
+| **Azure SQL** | Tenant-isolated relational store with Row-Level Security (14 tables) — any SQL Server-compatible engine works (local dev uses Azure SQL Edge) |
+| **Blob Storage** | Raw ARI snapshot files (normalized JSON) per tenant — Azurite locally |
+| **Azure Automation** | Scheduled ARI runs against each Azure customer tenant (Azure-only by nature — ARI itself is an Azure Resource Graph tool) |
+| **Job Queue** | Snapshot ingestion, fed by the ARI runbook. Service Bus when configured; otherwise a SQL-table-backed queue — no infra dependency beyond the database itself |
+| **AI (OpenAI-compatible)** | Configurable endpoint + API key — the official OpenAI API or any compatible server — 16 tools, function-calling only, persona modes (analyst / operations / security / cost) |
+| **OpenBao** | Per-tenant credentials, connection strings — self-hosted, Vault-API-compatible secret store (optional) |
+| **VNet + Private Endpoints** | Network isolation for SQL, Storage, Service Bus, OpenAI (Azure deployments) |
 
 ---
 
 ## Quick Start
 
-### Prerequisites
+### Run locally with Docker / OrbStack (recommended)
+
+The platform runs entirely locally — no Azure subscription, no Entra tenant
+required. This is also the reference setup for self-hosting on any cloud:
+SQL Server-compatible database + blob-compatible storage are the only two
+infrastructure dependencies (Service Bus is optional — see below).
+
+```bash
+cp .env.example .env
+# Edit .env: set SQL_SA_PASSWORD, LOCAL_AUTH_JWT_SIGNING_KEY, and OPENAI_API_KEY
+# at minimum. Leave AZURE_AD_* blank to skip Entra ID entirely.
+
+docker compose up --build
+```
+
+- Frontend: http://localhost:3000
+- API: http://localhost:7071/api
+- First boot applies all `database/*.sql` migrations automatically (see the
+  `db-init` service) and seeds a default local admin account:
+  **username `admin`, password `ChangeMe123!`** — change this immediately
+  outside of local/dev use, since the hash is public (it's in source control).
+
+Sign in with that account, or with Microsoft if you've set `AZURE_AD_TENANT_ID`
+/ `AZURE_AD_CLIENT_ID` in `.env` — both login paths work side by side.
+
+Service Bus is not required to run any of this: the one function that
+consumes it (`SnapshotIngestionQueueTimer`, fed by the ARI Automation runbook)
+falls back to a SQL-table-backed queue when no Service Bus connection is
+configured, so the Functions host never depends on it just to start.
+
+### Manual setup (without Docker)
+
+#### Prerequisites
 
 - Node.js 20+
 - .NET 8 SDK
-- Azure CLI (`az`)
-- PowerShell 7+
 - SQL Server (local or Azure) for development
-- Azure subscription for deployment
+- Azure CLI (`az`) + subscription — only needed to deploy to Azure or connect
+  real Azure/AWS/GCP tenants; not needed to run the platform itself
 
-### Backend
+#### Backend
 
 ```bash
 cd src/backend
@@ -120,7 +153,7 @@ cd AzureInventoryMonitor.Api
 func start
 ```
 
-### Frontend
+#### Frontend
 
 ```bash
 cd src/frontend
@@ -129,14 +162,16 @@ npm run dev
 # Opens at http://localhost:3000
 ```
 
-### Database
+#### Database
 
 ```bash
-# Apply the schema to a local or Azure SQL instance
+# Apply migrations in order to a local or Azure SQL instance
 cd database
 sqlcmd -S localhost -d aimdb -i 001-schema.sql
 sqlcmd -S localhost -d aimdb -i 002-fix-rls-bypass.sql
 sqlcmd -S localhost -d aimdb -i 003-aiops-multicloud.sql
+sqlcmd -S localhost -d aimdb -i 004-local-auth.sql
+sqlcmd -S localhost -d aimdb -i 005-job-queue.sql
 ```
 
 ### Run the full stack with Docker (local / OrbStack)
@@ -173,21 +208,26 @@ Notes:
 - To ship an update: `git pull && docker compose up --build` (add `--force-recreate`
   if a container is caching an old image).
 
-### Local Configuration
+#### Local Configuration
 
 Copy `src/backend/AzureInventoryMonitor.Api/local.settings.json` and set:
 
 | Setting | Description |
 |---|---|
 | `SqlConnectionString` | SQL Server connection string |
-| `ServiceBusConnection__fullyQualifiedNamespace` | Service Bus FQDN |
-| `Storage__ConnectionString` | Blob Storage connection string |
-| `KeyVaultUrl` | Key Vault URI |
-| `AzureOpenAI__Endpoint` | Azure OpenAI endpoint URL |
-| `AzureOpenAI__ApiKey` | Azure OpenAI API key (Key Vault reference in production) |
-| `AzureOpenAI__DeploymentName` | Model deployment name (default: `gpt-5.5`) |
-| `AzureAd__TenantId` | Entra ID tenant for auth |
-| `AzureAd__ClientId` | Entra ID app registration client ID |
+| `Storage__ConnectionString` | Blob Storage connection string (or Azurite for local dev) |
+| `ServiceBusConnection` | Optional — Service Bus connection string. Omit to use the built-in SQL-backed job queue instead. |
+| `OpenBao__Address` | OpenBao server address, e.g. `http://localhost:8200` (optional — omit to run without credential storage) |
+| `OpenBao__Token` | OpenBao auth token |
+| `OpenAI__ApiKey` | API key for any OpenAI-compatible endpoint |
+| `OpenAI__BaseUrl` | Optional — omit to use the official OpenAI API; point at a self-hosted/compatible server otherwise |
+| `OpenAI__Model` | Model name (default: `gpt-4o-mini`) |
+| `LocalAuth__JwtSigningKey` | Signs local-login JWTs — required for the local username/password login path |
+| `AzureAd__TenantId` | Entra ID tenant for SSO (optional — omit to run local-auth-only) |
+| `AzureAd__ClientId` | Entra ID app registration client ID (optional) |
+
+At least one of `LocalAuth__JwtSigningKey` or the `AzureAd__*` pair must be
+set for anyone to be able to log in.
 
 ---
 
@@ -272,6 +312,12 @@ Copy `src/backend/AzureInventoryMonitor.Api/local.settings.json` and set:
 
 ## API Reference
 
+### Auth
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/auth/login` | Local username/password login. Returns a JWT valid for the `X-Tenant-Id`-scoped endpoints below, same as an Entra ID token. Anonymous — this is the login endpoint itself. |
+
 ### Tenant Management
 
 | Method | Path | Description |
@@ -325,7 +371,7 @@ Copy `src/backend/AzureInventoryMonitor.Api/local.settings.json` and set:
 | `POST` | `/api/remediations/{id}/reject` | Reject a gated action |
 | `GET` | `/api/remediations/playbooks` | Allow-listed playbook catalog (Azure/AWS/GCP) |
 | `GET` | `/api/cloud-accounts` | Linked AWS accounts / GCP projects |
-| `POST` | `/api/cloud-accounts` | Link an AWS account or GCP project (credentials → Key Vault) |
+| `POST` | `/api/cloud-accounts` | Link an AWS account or GCP project (credentials → secret store) |
 
 ### AI
 
@@ -340,9 +386,9 @@ Copy `src/backend/AzureInventoryMonitor.Api/local.settings.json` and set:
 | `GET` | `/api/health` | Component-level health check |
 | `GET` | `/api/health/ready` | Readiness probe for load balancers |
 
-All endpoints (except health) require:
+All endpoints (except health and login) require:
 
-- `Authorization: Bearer <JWT>` — Entra ID token
+- `Authorization: Bearer <JWT>` — an Entra ID token, or a token from `POST /api/auth/login`. Both are accepted on every request; whichever issued the token is detected automatically.
 - `X-Tenant-Id: <guid>` — Target tenant ID
 
 ---
@@ -357,10 +403,13 @@ All endpoints (except health) require:
 
 ### Authentication & Authorization
 
-- **Entra ID (MSAL)** — Frontend authenticates via MSAL popup/redirect. Backend validates JWT tokens.
-- **Two credential models per customer tenant:**
+- **Two independent login paths, both enforced identically:**
+  - **Entra ID (MSAL)** — Frontend authenticates via MSAL popup/redirect.
+  - **Local (username/password)** — `POST /api/auth/login` verifies a PBKDF2-HMACSHA256 hash and issues a platform-signed JWT. Lets the platform run without an Entra tenant at all.
+- The backend validates whichever token a request carries — a policy scheme inspects the token's issuer and forwards it to the matching `JwtBearer` scheme (`EntraId` or `Local`) for real signature/expiry validation. `[Authorize]` is enforced on every endpoint except health and login.
+- **Two credential models per Azure customer tenant** (for collecting *their* inventory — independent of how *your* users log in above):
   - **Azure Lighthouse** — DefaultAzureCredential with delegated permissions (recommended)
-  - **App Registration** — Client secret stored in Key Vault, resolved per tenant
+  - **App Registration** — Client secret stored in the secret store (OpenBao), resolved per tenant
 
 ### Network Security
 
@@ -413,18 +462,18 @@ terraform apply tfplan
 
 ## Database Schema
 
-21 tables across 7 domains:
+22 tables across 8 domains:
 
 | Domain | Tables |
 |---|---|
 | **Tenants** | `tenants`, `tenant_subscriptions` |
-| **Users** | `users`, `user_tenant_access` |
+| **Users** | `users` (Entra *or* local — `auth_provider`/`username`/`password_hash`), `user_tenant_access` |
 | **Inventory** | `inventory_snapshots`, `inventory_resources` (multi-cloud `provider` column), `latest_snapshots` |
 | **Changes** | `resource_changes`, `activity_log_events` |
 | **Recommendations** | `advisor_recommendations`, `policy_compliance`, `defender_findings` |
 | **AIOps** | `anomalies`, `metric_baselines`, `incidents`, `incident_events`, `remediation_playbooks`, `remediation_actions` |
 | **Multi-Cloud** | `cloud_accounts` |
-| **Platform** | `ai_query_log`, `audit_events` |
+| **Platform** | `ai_query_log`, `audit_events`, `job_queue` (portable queue — see below) |
 
 Key features:
 - RLS security policy on all tenant-scoped tables
@@ -457,12 +506,12 @@ Key features:
 | Backend | .NET 8, Azure Functions v4 (isolated worker) |
 | ORM | Dapper 2.1 |
 | Frontend | Next.js 14, React 18, TypeScript 5, Tailwind CSS 3 |
-| Auth | MSAL.js, Microsoft.Identity.Web |
+| Auth | MSAL.js (Entra ID SSO) + PBKDF2/JWT (local username/password) |
 | Data Fetching | SWR |
 | Charts | Recharts |
-| IaC | Terraform (azurerm ~> 4.0) |
+| IaC | Terraform (azurerm ~> 4.0), Docker Compose (local/self-hosted) |
 | CI/CD | GitHub Actions |
-| AI | Azure OpenAI — GPT-5.5 (latest OpenAI model on Azure) with function calling |
+| AI | Any OpenAI-compatible endpoint (configurable base URL + API key) with function calling |
 
 ---
 

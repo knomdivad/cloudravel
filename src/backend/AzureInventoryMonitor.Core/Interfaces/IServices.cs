@@ -68,3 +68,13 @@ public interface IRecommendationSyncService
     Task SyncPolicyComplianceAsync(Guid tenantId);
     Task SyncDefenderFindingsAsync(Guid tenantId);
 }
+
+/// <summary>
+/// Local username/password authentication — the non-Entra login path.
+/// Issues platform-signed JWTs validated by the "Local" JwtBearer scheme.
+/// </summary>
+public interface ILocalAuthService
+{
+    /// <summary>Verifies credentials and issues a signed JWT. Returns null on invalid credentials or inactive user.</summary>
+    Task<Models.LocalAuthResult?> LoginAsync(string username, string password);
+}

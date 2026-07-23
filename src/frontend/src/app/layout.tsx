@@ -1,14 +1,17 @@
 'use client';
 
-import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from '@azure/msal-react';
+import { MsalProvider, useMsal } from '@azure/msal-react';
 import { EventType } from '@azure/msal-browser';
 import { SWRConfig } from 'swr';
 import { loginRequest } from '../lib/auth';
 import { swrConfig } from '../lib/hooks';
 import { msalInstance } from '../lib/msalInstance';
 import { TenantProvider } from '../contexts/TenantContext';
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import './globals.css';
 import React, { useEffect, useMemo, useState } from 'react';
+
+const entraConfigured = Boolean(process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID);
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const [msalReady, setMsalReady] = useState(false);
@@ -52,14 +55,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="bg-gray-50 text-gray-900 antialiased">
         <MsalProvider instance={msalInstance}>
           <SWRConfig value={swrConfig}>
-            <UnauthenticatedTemplate>
-              <LoginPage />
-            </UnauthenticatedTemplate>
-            <AuthenticatedTemplate>
-              <TenantProvider>
-                <AppShell>{children}</AppShell>
-              </TenantProvider>
-            </AuthenticatedTemplate>
+            <AuthProvider>
+              <AuthGate>{children}</AuthGate>
+            </AuthProvider>
           </SWRConfig>
         </MsalProvider>
       </body>
@@ -68,11 +66,42 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 
 // ============================================================================
-// Login Page (shown when unauthenticated)
+// Auth gate — Entra ID (MSAL) and local username/password are independent
+// login paths; either one being active is enough to show the app.
 // ============================================================================
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  return (
+    <TenantProvider>
+      <AppShell>{children}</AppShell>
+    </TenantProvider>
+  );
+}
 
 function LoginPage() {
   const { instance } = useMsal();
+  const { loginLocal, loginError } = useAuth();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleLocalLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await loginLocal(username, password);
+    } catch {
+      // loginError is surfaced below; nothing further to do here
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="flex items-center justify-center h-screen bg-gradient-to-br from-azure-600 to-azure-900">
@@ -83,20 +112,63 @@ function LoginPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Azure Inventory Monitor</h1>
+          <h1 className="text-2xl font-bold text-gray-900">AnanVision</h1>
           <p className="text-gray-500 mt-2">
-            Multi-tenant Azure monitoring and recommendation platform
+            Multi-cloud AIOps operating platform
           </p>
         </div>
-        <button
-          onClick={() => instance.loginRedirect(loginRequest)}
-          className="w-full bg-azure-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-azure-700 transition-colors"
-        >
-          Sign in with Microsoft
-        </button>
-        <p className="text-xs text-gray-400 mt-4">
-          Secured by Microsoft Entra ID
-        </p>
+
+        {entraConfigured && (
+          <>
+            <button
+              onClick={() => instance.loginRedirect(loginRequest)}
+              className="w-full bg-azure-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-azure-700 transition-colors"
+            >
+              Sign in with Microsoft
+            </button>
+            <p className="text-xs text-gray-400 mt-4 mb-6">
+              Secured by Microsoft Entra ID
+            </p>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-xs text-gray-400 uppercase">or</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+          </>
+        )}
+
+        <form onSubmit={handleLocalLogin} className="text-left space-y-3">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-azure-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-azure-500 focus:outline-none"
+            />
+          </div>
+          {loginError && <p className="text-sm text-red-600">{loginError}</p>}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full border border-gray-300 text-gray-700 py-3 px-6 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            {submitting ? 'Signing in...' : 'Sign in'}
+          </button>
+        </form>
       </div>
     </div>
   );
@@ -121,11 +193,9 @@ const navItems = [
 ];
 
 function AppShell({ children }: { children: React.ReactNode }) {
-  const { instance, accounts } = useMsal();
+  const { userName, logout } = useAuth();
   const { tenants, currentTenant, selectTenant } = useTenantContext();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  const userName = accounts[0]?.name || accounts[0]?.username || 'User';
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -141,7 +211,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             <span className="text-white font-bold text-sm">A</span>
           </div>
           {!sidebarCollapsed && (
-            <span className="font-semibold text-sm truncate">AIM Platform</span>
+            <span className="font-semibold text-sm truncate">AnanVision</span>
           )}
         </div>
 
@@ -190,7 +260,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           )}
           <button
-            onClick={() => instance.logoutRedirect()}
+            onClick={logout}
             className={`text-gray-400 hover:text-white text-xs transition-colors ${
               sidebarCollapsed ? 'w-full text-center' : ''
             }`}

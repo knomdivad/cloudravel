@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Azure.Security.KeyVault.Secrets;
 using AzureInventoryMonitor.Core.Interfaces;
 using AzureInventoryMonitor.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -11,7 +10,7 @@ namespace AzureInventoryMonitor.Infrastructure.MultiCloud;
 /// <summary>
 /// GCP adapter using service-account JWT auth + REST (no Google SDK dependency).
 ///
-/// Credentials come from Key Vault (CloudAccount.CredentialSecretName) holding the
+/// Credentials come from the secret store (CloudAccount.CredentialSecretName) holding the
 /// standard service account key JSON (client_email, private_key, token_uri).
 ///
 /// Inventory: Cloud Asset API — lists every asset in the project in one paginated
@@ -26,16 +25,16 @@ public sealed class GcpProviderAdapter : ICloudProviderAdapter
     private static readonly HttpClient Http = new();
 
     private readonly ICloudAccountRepository _accountRepo;
-    private readonly SecretClient? _secretClient;
+    private readonly ISecretStore? _secretStore;
     private readonly ILogger<GcpProviderAdapter> _logger;
 
     public GcpProviderAdapter(
         ICloudAccountRepository accountRepo,
         ILogger<GcpProviderAdapter> logger,
-        SecretClient? secretClient = null)
+        ISecretStore? secretStore = null)
     {
         _accountRepo = accountRepo;
-        _secretClient = secretClient;
+        _secretStore = secretStore;
         _logger = logger;
     }
 
@@ -179,13 +178,14 @@ public sealed class GcpProviderAdapter : ICloudProviderAdapter
     /// </summary>
     private async Task<string> GetAccessTokenAsync(CloudAccount account)
     {
-        if (_secretClient == null)
-            throw new InvalidOperationException("Key Vault is not configured; cannot resolve GCP credentials.");
+        if (_secretStore == null)
+            throw new InvalidOperationException("Secret store is not configured; cannot resolve GCP credentials.");
         if (string.IsNullOrEmpty(account.CredentialSecretName))
             throw new InvalidOperationException($"GCP project {account.ExternalId} has no credential secret configured.");
 
-        var secret = await _secretClient.GetSecretAsync(account.CredentialSecretName);
-        using var keyDoc = JsonDocument.Parse(secret.Value.Value);
+        var secretValue = await _secretStore.GetSecretAsync(account.CredentialSecretName)
+            ?? throw new InvalidOperationException($"No credential secret found for GCP project {account.ExternalId}.");
+        using var keyDoc = JsonDocument.Parse(secretValue);
         var root = keyDoc.RootElement;
         var clientEmail = root.GetProperty("client_email").GetString()!;
         var privateKeyPem = root.GetProperty("private_key").GetString()!;

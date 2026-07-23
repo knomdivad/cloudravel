@@ -1,16 +1,25 @@
 using AzureInventoryMonitor.Api.Middleware;
+using AzureInventoryMonitor.Core.Auth;
 using AzureInventoryMonitor.Core.Interfaces;
 using AzureInventoryMonitor.Infrastructure.AiOps;
+using AzureInventoryMonitor.Infrastructure.Auth;
 using AzureInventoryMonitor.Infrastructure.Azure;
 using AzureInventoryMonitor.Infrastructure.Data;
 using AzureInventoryMonitor.Infrastructure.MultiCloud;
+using AzureInventoryMonitor.Infrastructure.Queue;
+using AzureInventoryMonitor.Infrastructure.Secrets;
 using Azure.Identity;
-using Azure.Security.KeyVault.Secrets;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using VaultSharp;
+using VaultSharp.V1.AuthMethods;
+using VaultSharp.V1.AuthMethods.Token;
 
 // Enable Dapper snake_case → PascalCase column mapping
 Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
@@ -22,7 +31,11 @@ Dapper.SqlMapper.AddTypeHandler(new JsonTypeHandler<List<string>>());
 var host = new HostBuilder()
     .ConfigureFunctionsWebApplication(builder =>
     {
-        // Register middleware pipeline
+        // Isolated-worker functions don't get ASP.NET Core's UseAuthentication()/
+        // UseAuthorization() pipeline or automatic [Authorize] enforcement —
+        // AuthEnforcementMiddleware does it manually via HttpContext.AuthenticateAsync(),
+        // then TenantContextMiddleware checks the authenticated user's tenant access.
+        builder.UseMiddleware<AuthEnforcementMiddleware>();
         builder.UseMiddleware<TenantContextMiddleware>();
     })
     .ConfigureServices((context, services) =>
@@ -71,23 +84,86 @@ var host = new HostBuilder()
         services.AddScoped<IAnomalyDetectionService, AnomalyDetectionService>();
         services.AddScoped<IRemediationService, RemediationService>();
 
-        // Key Vault client for storing tenant credentials
-        var vaultUri = context.Configuration["KeyVault:VaultUri"]
-            ?? context.Configuration["KeyVaultUrl"];
-        if (!string.IsNullOrEmpty(vaultUri))
+        // Local username/password auth — the non-Entra login path
+        services.AddScoped<ILocalAuthService, LocalAuthService>();
+
+        // Job queue: Service Bus when configured (default on Azure), otherwise
+        // the SQL-table-backed queue — needs no infra beyond the database, so
+        // the host never hard-depends on Service Bus just to start.
+        var serviceBusConnection = context.Configuration["ServiceBusConnection"]
+            ?? context.Configuration.GetConnectionString("ServiceBusConnection");
+        if (!string.IsNullOrEmpty(serviceBusConnection))
         {
-            services.AddSingleton(new SecretClient(new Uri(vaultUri), new DefaultAzureCredential()));
+            services.AddScoped<IJobQueue, AzureServiceBusJobQueue>();
+        }
+        else
+        {
+            services.AddScoped<IJobQueue, DatabaseJobQueue>();
         }
 
-        // Authentication
-        services.AddAuthentication()
+        // Secret storage: OpenBao (self-hosted, Vault-API-compatible) — cloud-agnostic,
+        // unlike Azure Key Vault. Optional, same as Key Vault was: a deployment with no
+        // secret store configured still boots, just can't store/retrieve credentials.
+        var openBaoAddress = context.Configuration["OpenBao:Address"];
+        if (!string.IsNullOrEmpty(openBaoAddress))
+        {
+            IAuthMethodInfo authMethod = new TokenAuthMethodInfo(context.Configuration["OpenBao:Token"] ?? "");
+            var vaultClientSettings = new VaultClientSettings(openBaoAddress, authMethod);
+            services.AddSingleton<IVaultClient>(new VaultClient(vaultClientSettings));
+            services.AddSingleton<ISecretStore, OpenBaoSecretStore>();
+        }
+
+        // Authentication — two independent login paths, both accepted on every
+        // protected endpoint. Entra ID SSO is unchanged; "Local" validates the
+        // JWTs LocalAuthService issues from POST /api/auth/login. A deployment
+        // with no Entra tenant configured (AzureAd:TenantId empty) simply never
+        // receives Entra tokens — the Local scheme still works standalone.
+        var config = context.Configuration;
+        services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = "EntraOrLocal";
+                options.DefaultChallengeScheme = "EntraOrLocal";
+            })
             .AddJwtBearer("EntraId", options =>
             {
-                var config = context.Configuration;
+                options.MapInboundClaims = false;
                 options.Authority = $"https://login.microsoftonline.com/{config["AzureAd:TenantId"]}/v2.0";
                 options.Audience = config["AzureAd:ClientId"];
                 options.TokenValidationParameters.ValidIssuer =
                     $"https://login.microsoftonline.com/{config["AzureAd:TenantId"]}/v2.0";
+            })
+            .AddJwtBearer("Local", options =>
+            {
+                options.MapInboundClaims = false;
+                var signingKey = config["LocalAuth:JwtSigningKey"] ?? "";
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidIssuer = LocalAuthConstants.Issuer,
+                    ValidAudience = LocalAuthConstants.Audience,
+                    IssuerSigningKey = new SymmetricSecurityKey(LocalAuthConstants.DeriveSigningKey(
+                        string.IsNullOrEmpty(signingKey) ? Guid.NewGuid().ToString() : signingKey)),
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                };
+            })
+            .AddPolicyScheme("EntraOrLocal", "EntraOrLocal", options =>
+            {
+                // Route each request to whichever scheme actually issued its
+                // token, by peeking at the (unvalidated) `iss` claim — the
+                // real signature/expiry validation happens in the scheme it's
+                // forwarded to, not here.
+                options.ForwardDefaultSelector = httpContext =>
+                {
+                    var header = httpContext.Request.Headers.Authorization.ToString();
+                    if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var issuer = JwtIssuerReader.TryReadIssuer(header["Bearer ".Length..]);
+                        if (issuer == LocalAuthConstants.Issuer) return "Local";
+                    }
+                    return "EntraId";
+                };
             });
 
         services.AddAuthorization();
