@@ -8,6 +8,12 @@
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
+# Optional short git SHA, passed by docker-compose.yml from the host — the build
+# context (src/backend/) has no .git dir, so the SDK's own git auto-detection
+# can't find one; this is how a Docker build still stamps a commit into the
+# version shown in the UI. Empty is fine (falls back to a bare semver).
+ARG GIT_SHA=""
+
 # Some networks resolve NuGet's hosts to an IPv6 address that silently
 # blackholes (connects nowhere, times out ~20-75s) instead of falling back to
 # IPv4 quickly — skipping IPv6 entirely sidesteps that regardless of cause.
@@ -27,7 +33,8 @@ COPY . .
 # files from the global cache on disk — needs the same mount as restore above,
 # since a cache mount is only attached to the RUN instruction that declares it.
 RUN --mount=type=cache,target=/root/.nuget/packages \
-    dotnet publish CloudRavel.Api/CloudRavel.Api.csproj -c Release -o /app/publish --no-restore
+    dotnet publish CloudRavel.Api/CloudRavel.Api.csproj -c Release -o /app/publish --no-restore \
+    ${GIT_SHA:+-p:SourceRevisionId=$GIT_SHA}
 
 # The official Azure Functions dotnet-isolated image only ships amd64 (no
 # arm64 manifest as of this writing) — force it so this also builds on

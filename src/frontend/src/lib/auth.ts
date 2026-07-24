@@ -37,7 +37,7 @@ export const msalConfig: Configuration = {
 
 /** Scopes required for API access */
 export const apiScopes = {
-  default: [process.env.NEXT_PUBLIC_API_SCOPE || 'api://aim-api/.default'],
+  default: [process.env.NEXT_PUBLIC_API_SCOPE || 'api://cloudravel-api/.default'],
 };
 
 /** Login request */

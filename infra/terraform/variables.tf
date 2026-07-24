@@ -1,5 +1,5 @@
 # ============================================================================
-# Azure Inventory Monitor — Input Variables
+# CloudRavel — Input Variables
 # ============================================================================
 
 variable "subscription_id" {
@@ -27,13 +27,13 @@ variable "location" {
 variable "base_name" {
   description = "Base name prefix for resources"
   type        = string
-  default     = "aim"
+  default     = "cloudravel"
 }
 
 variable "sql_admin_username" {
   description = "SQL Server administrator login"
   type        = string
-  default     = "aimadmin"
+  default     = "cloudraveladmin"
 }
 
 variable "sql_admin_password" {
@@ -95,7 +95,7 @@ variable "tags" {
     "ServiceLevel" = "",
     "environment"  = "dev",
     "managed_by"   = "terraform",
-    "project"      = "azure-inventory-monitor",
+    "project"      = "cloudravel",
     "team"         = "cbts-ps"
   }
 }

@@ -1,5 +1,5 @@
 -- ============================================================================
--- Azure Inventory Monitor — AIOps + Multi-Cloud Extension (migration 003)
+-- CloudRavel — AIOps + Multi-Cloud Extension (migration 003)
 -- Adds: cloud accounts (AWS/GCP), anomalies + metric baselines, incidents +
 --       timeline, remediation playbook catalog + gated remediation actions.
 -- Run after 001-schema.sql and 002-fix-rls-bypass.sql.

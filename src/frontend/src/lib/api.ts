@@ -581,14 +581,18 @@ export async function getCloudOrgs(tenantId: string): Promise<{ orgs: CloudOrg[]
   return apiCall(`/cloud-orgs`, tenantId);
 }
 
-/** Instance environment (Development/Production) from the anonymous health endpoint. */
-export async function getPlatformInfo(): Promise<{ environment: string }> {
+/** Instance environment, app version, and commit SHA from the anonymous health endpoint. */
+export async function getPlatformInfo(): Promise<{ environment: string; version: string; commit: string | null }> {
   try {
     const res = await fetch(`${API_BASE}/health`);
     const data = await res.json();
-    return { environment: data.environment ?? 'Development' };
+    return {
+      environment: data.environment ?? 'Development',
+      version: data.version ?? '1.0.0',
+      commit: data.commit ?? null,
+    };
   } catch {
-    return { environment: 'Development' };
+    return { environment: 'Development', version: '1.0.0', commit: null };
   }
 }
 

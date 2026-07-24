@@ -26,7 +26,42 @@ export default function AdminPage() {
       </div>
       <SystemSettingsCard showToast={showToast} />
       <UsersCard showToast={showToast} />
+      <AboutCard />
     </div>
+  );
+}
+
+function AboutCard() {
+  const { userName, systemRole } = useAuth();
+  const [info, setInfo] = useState<{ environment: string; version: string; commit: string | null } | null>(null);
+
+  useEffect(() => {
+    api.getPlatformInfo().then(setInfo).catch(() => {});
+  }, []);
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-1">About</h2>
+      <p className="text-sm text-gray-500 mb-4">Build and instance information.</p>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+        <div>
+          <dt className="text-gray-500">Version</dt>
+          <dd className="font-mono text-gray-900">{info ? `v${info.version}` : '—'}</dd>
+        </div>
+        <div>
+          <dt className="text-gray-500">Commit</dt>
+          <dd className="font-mono text-gray-900">{info?.commit ? info.commit.slice(0, 7) : '—'}</dd>
+        </div>
+        <div>
+          <dt className="text-gray-500">Environment</dt>
+          <dd className="text-gray-900">{info?.environment ?? '—'}</dd>
+        </div>
+        <div>
+          <dt className="text-gray-500">Signed in as</dt>
+          <dd className="text-gray-900">{userName} <span className="text-gray-400">({systemRole ?? '—'})</span></dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 

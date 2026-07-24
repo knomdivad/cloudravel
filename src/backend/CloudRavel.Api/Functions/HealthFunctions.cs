@@ -82,7 +82,8 @@ public sealed class HealthFunctions
             status = overallHealthy ? "healthy" : "unhealthy",
             environment = _platform.Environment,
             timestamp = DateTime.UtcNow,
-            version = typeof(HealthFunctions).Assembly.GetName().Version?.ToString() ?? "1.0.0",
+            version = _platform.Version,
+            commit = _platform.Commit,
             checks
         });
         return response;

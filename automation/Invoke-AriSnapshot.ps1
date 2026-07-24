@@ -13,7 +13,7 @@
     SnapshotIngestionWorker Azure Function triggered by the Service Bus message.
 
 .PARAMETER TenantId
-    The AIM internal tenant ID (GUID).
+    The CloudRavel internal tenant ID (GUID).
 
 .PARAMETER AzureTenantId
     The customer's Entra ID tenant ID.
@@ -185,7 +185,7 @@ try {
     } | ConvertTo-Json -Depth 3
 
     # Send to Service Bus queue
-    $sbConnection = Get-AzServiceBusNamespace -ResourceGroupName "rg-aim-platform" -NamespaceName $ServiceBusNamespace
+    $sbConnection = Get-AzServiceBusNamespace -ResourceGroupName "rg-cloudravel-platform" -NamespaceName $ServiceBusNamespace
     
     # Using REST API to send Service Bus message (Managed Identity auth)
     $token = (Get-AzAccessToken -ResourceUrl "https://servicebus.azure.net").Token

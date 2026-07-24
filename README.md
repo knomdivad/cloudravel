@@ -133,6 +133,17 @@ consumes it (`SnapshotIngestionQueueTimer`, fed by the ARI Automation runbook)
 falls back to a SQL-table-backed queue when no Service Bus connection is
 configured, so the Functions host never depends on it just to start.
 
+> **Renaming the repo folder?** Docker Compose derives its project name from
+> the directory name by default, which prefixes every volume it manages
+> (`mssql-data`, `azurite-data`, etc). Renaming the checked-out folder — e.g.
+> from `azureinventorymanager` to `cloudravel` — therefore creates a *new*,
+> empty set of volumes on next `docker compose up`, orphaning any local data
+> you've already collected. To rename the folder without losing data, either
+> set `COMPOSE_PROJECT_NAME` to the old project name before renaming (`export
+> COMPOSE_PROJECT_NAME=azureinventorymanager` in `.env` or your shell), or
+> migrate the volumes manually (`docker volume ls`, then copy their contents
+> to the new project's auto-generated volume names).
+
 ### Manual setup (without Docker)
 
 #### Prerequisites

@@ -82,6 +82,12 @@ services:
     build:
       context: ./src/backend
       dockerfile: Dockerfile
+      args:
+        # The build context has no .git dir, so this is how the version shown
+        # in the UI gets a commit SHA for local/OrbStack builds too. Set
+        # GIT_SHA in your shell/.env (e.g. `export GIT_SHA=$(git rev-parse --short HEAD)`)
+        # before `docker compose build`; omitted is fine (bare semver, no commit).
+        GIT_SHA: ${GIT_SHA:-}
     depends_on:
       mssql:
         condition: service_started

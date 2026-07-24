@@ -31,3 +31,12 @@ Thumbs.db
 
 # Docker / local stack
 .env
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+tfplan
+tfplan.json
+tfplan.txt
+*.tfplan

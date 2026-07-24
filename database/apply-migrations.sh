@@ -28,6 +28,7 @@ MIGRATIONS=(
   008-organizations
   009-azure-multi-tenant
   010-admin-rbac
+  011-ensure-bootstrap-admin
   seed-demo-data
 )
 

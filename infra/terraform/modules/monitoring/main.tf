@@ -128,11 +128,11 @@ resource "azurerm_monitor_action_group" "main" {
   count               = var.alert_email != "" ? 1 : 0
   name                = "ag-${var.suffix}"
   resource_group_name = var.resource_group_name
-  short_name          = "aim-alerts"
+  short_name          = "cr-alerts"
   tags                = var.tags
 
   email_receiver {
-    name                    = "AIM-Admin"
+    name                    = "CR-Admin"
     email_address           = var.alert_email
     use_common_alert_schema = true
   }

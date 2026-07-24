@@ -199,7 +199,7 @@ const navItems: NavItem[] = [
 ];
 
 function AppShell({ children }: { children: React.ReactNode }) {
-  const { userName, logout, isSystemAdmin } = useAuth();
+  const { userName, logout, isSystemAdmin, systemRole } = useAuth();
   const { organizations, currentOrg, currentTenant, selectTenant, refreshOrganizations, isOrgAdmin } = useTenantContext();
 
   const visibleNav = navItems.filter((i) =>
@@ -208,10 +208,16 @@ function AppShell({ children }: { children: React.ReactNode }) {
     (i.require === 'org_admin' && (isOrgAdmin || isSystemAdmin)));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [environment, setEnvironment] = useState<string>('');
+  const [version, setVersion] = useState<string>('');
+  const [commit, setCommit] = useState<string | null>(null);
   const [showCreateOrg, setShowCreateOrg] = useState(false);
 
   useEffect(() => {
-    api.getPlatformInfo().then((p) => setEnvironment(p.environment)).catch(() => {});
+    api.getPlatformInfo().then((p) => {
+      setEnvironment(p.environment);
+      setVersion(p.version);
+      setCommit(p.commit);
+    }).catch(() => {});
   }, []);
 
   const isDev = environment !== '' && environment.toLowerCase() !== 'production';
@@ -308,6 +314,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{userName}</p>
+                {systemRole && <p className="text-xs text-gray-400 truncate">{systemRole}</p>}
               </div>
             </div>
           )}
@@ -320,6 +327,16 @@ function AppShell({ children }: { children: React.ReactNode }) {
             Sign out
           </button>
         </div>
+
+        {/* Version */}
+        {version && (
+          <div
+            className="border-t border-gray-700 px-3 py-2 text-xs text-gray-500 truncate"
+            title={commit ? `Commit ${commit}` : undefined}
+          >
+            {!sidebarCollapsed ? `v${version}` : 'v'}
+          </div>
+        )}
 
         {/* Collapse toggle */}
         <button
