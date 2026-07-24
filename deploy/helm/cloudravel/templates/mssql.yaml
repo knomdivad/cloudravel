@@ -1,0 +1,95 @@
+{{- if .Values.mssql.enabled }}
+{{- if .Values.mssql.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cloudravel.mssql.fullname" . }}-data
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mssql
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.mssql.persistence.size }}
+  {{- with .Values.mssql.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cloudravel.mssql.fullname" . }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mssql
+spec:
+  replicas: 1
+  # RWO volume: never run two pods against the same data dir during a rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "mssql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "mssql") | nindent 8 }}
+    spec:
+      containers:
+        - name: mssql
+          image: {{ .Values.mssql.image }}
+          ports:
+            - name: mssql
+              containerPort: 1433
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+            - name: MSSQL_PID
+              value: Developer
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudravel.secretName" . }}
+                  key: mssql-sa-password
+          readinessProbe:
+            tcpSocket:
+              port: mssql
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: mssql
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /var/opt/mssql
+          resources:
+            {{- toYaml .Values.mssql.resources | nindent 12 }}
+      volumes:
+        - name: data
+        {{- if .Values.mssql.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "cloudravel.mssql.fullname" . }}-data
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cloudravel.mssql.fullname" . }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mssql
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "mssql") | nindent 4 }}
+  ports:
+    - name: mssql
+      port: {{ .Values.mssql.service.port }}
+      targetPort: mssql
+{{- end }}

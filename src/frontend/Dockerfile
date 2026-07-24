@@ -43,5 +43,9 @@ RUN npm run build   # produces the static site in ./out
 
 # ----------------------------------------------------------------------------
 FROM docker.io/library/nginx:alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# The nginx image runs envsubst over /etc/nginx/templates/*.template at startup
+# and writes the result to /etc/nginx/conf.d/. API_UPSTREAM defaults to the
+# compose service `api:80`; Kubernetes overrides it with the api Service name.
+ENV API_UPSTREAM=api:80
+COPY default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/out /usr/share/nginx/html

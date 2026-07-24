@@ -9,9 +9,16 @@ server {
     # API reverse proxy → Azure Functions host (same-origin, no CORS).
     # The Functions runtime serves under /api/*, so the original URI is
     # forwarded unchanged (proxy_pass has no path component).
+    #
+    # The upstream is ${API_UPSTREAM} rather than a hardcoded host so the
+    # same image works whatever the API service is called (compose service
+    # `api`, or a Helm-templated Kubernetes Service name). The nginx image's
+    # envsubst step fills it in at container start from the API_UPSTREAM env
+    # var (default api:80, set in the Dockerfile); nginx's own $uri/$host/
+    # $scheme are left untouched because they're not defined env vars.
     # ------------------------------------------------------------------
     location /api/ {
-        proxy_pass http://api:80;
+        proxy_pass http://${API_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

@@ -1,0 +1,97 @@
+{{- if .Values.azurite.enabled }}
+{{- if .Values.azurite.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cloudravel.azurite.fullname" . }}-data
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: azurite
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.azurite.persistence.size }}
+  {{- with .Values.azurite.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cloudravel.azurite.fullname" . }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: azurite
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "azurite") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "azurite") | nindent 8 }}
+    spec:
+      containers:
+        - name: azurite
+          image: {{ .Values.azurite.image }}
+          args:
+            - azurite
+            - --blobHost
+            - 0.0.0.0
+            - --queueHost
+            - 0.0.0.0
+            - --tableHost
+            - 0.0.0.0
+          ports:
+            - name: blob
+              containerPort: 10000
+            - name: queue
+              containerPort: 10001
+            - name: table
+              containerPort: 10002
+          readinessProbe:
+            tcpSocket:
+              port: blob
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.azurite.resources | nindent 12 }}
+      volumes:
+        - name: data
+        {{- if .Values.azurite.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "cloudravel.azurite.fullname" . }}-data
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cloudravel.azurite.fullname" . }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: azurite
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "azurite") | nindent 4 }}
+  ports:
+    - name: blob
+      port: 10000
+      targetPort: blob
+    - name: queue
+      port: 10001
+      targetPort: queue
+    - name: table
+      port: 10002
+      targetPort: table
+{{- end }}

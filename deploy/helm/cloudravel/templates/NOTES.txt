@@ -1,0 +1,33 @@
+CloudRavel {{ .Chart.AppVersion }} has been deployed as release "{{ .Release.Name }}".
+
+A one-time migration Job ({{ include "cloudravel.migrator.fullname" . }}-{{ .Release.Revision }})
+creates/updates the schema. The API pods stay NotReady until it completes:
+
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "cloudravel.migrator.fullname" . }}-{{ .Release.Revision }}
+
+Reach the web UI:
+{{- if .Values.ingress.enabled }}
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/
+  (ensure {{ .Values.ingress.host }} resolves to your ingress controller)
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cloudravel.web.fullname" . }} 8080:{{ .Values.web.service.port }}
+  then open http://localhost:8080/
+{{- end }}
+
+Default login (seeded): username "admin", password "ChangeMe123!"
+Change it immediately — the hash is public (it ships in source control).
+
+{{- if .Values.openbao.enabled }}
+
+NOTE: the bundled OpenBao runs in dev mode (in-memory) — stored cloud
+credentials are LOST on restart. For production set openbao.enabled=false and
+point externalOpenBao.address at a real Vault/OpenBao.
+{{- end }}
+{{- if not .Values.secrets.localAuthJwtSigningKey }}
+{{- if not .Values.secrets.existingSecret }}
+
+WARNING: secrets.localAuthJwtSigningKey is empty. Local login tokens won't
+survive an API restart or work across replicas. Set it before real use.
+{{- end }}
+{{- end }}

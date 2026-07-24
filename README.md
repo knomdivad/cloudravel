@@ -489,6 +489,50 @@ terraform apply tfplan
 
 ---
 
+## Deploy to Kubernetes
+
+CloudRavel ships a Helm chart (`deploy/helm/cloudravel`) that runs the whole stack on any
+cluster — no Azure required. CI publishes the container images and the chart to GHCR
+(`ghcr.io/<owner>/cloudravel-{api,web,migrator}` and `oci://ghcr.io/<owner>/charts`); you
+run `helm install` against your own cluster.
+
+```bash
+helm install cloudravel oci://ghcr.io/<owner>/charts/cloudravel \
+  --set secrets.mssqlSaPassword='Your_Strong_Passw0rd!' \
+  --set secrets.localAuthJwtSigningKey="$(openssl rand -hex 32)" \
+  --set ingress.host=cloudravel.example.com
+```
+
+Out of the box this brings up bundled `mssql` (Azure SQL Edge), `azurite`, and `openbao`
+plus the `api` and `web` deployments; a one-time migration Job creates the schema and the
+API becomes Ready once it completes. Reach the UI at the ingress host (or
+`kubectl port-forward svc/cloudravel-web 8080:80`). Default login: **`admin` /
+`ChangeMe123!`** — change it immediately.
+
+**Use external managed services** instead of a bundled dependency by disabling it and
+pointing at your own:
+
+```bash
+  --set mssql.enabled=false \
+  --set externalMssql.host=sql.example.com --set externalMssql.user=cloudraveladmin \
+  --set openbao.enabled=false --set externalOpenBao.address=https://vault.example.com:8200 \
+  --set azurite.enabled=false --set externalStorage.connectionString='<AzureWebJobsStorage>'
+```
+
+Provide your own Kubernetes Secret (instead of the chart creating one) with
+`--set secrets.existingSecret=my-secret` (keys: `mssql-sa-password`,
+`local-auth-jwt-signing-key`, `openbao-token`, `openai-api-key`, `azure-webjobs-storage`).
+See `deploy/helm/cloudravel/values.yaml` for the full surface (image tags, ingress TLS,
+replica counts, resources, OpenAI/Entra settings).
+
+> **Notes.** The `api` image uses the amd64-only Azure Functions base image, so schedule it
+> on amd64 nodes. The bundled OpenBao runs in dev mode (in-memory) — its secrets do not
+> survive a restart; use an external Vault/OpenBao for production. Enabling Entra SSO
+> requires rebuilding the `web` image with the `NEXT_PUBLIC_*` build args (they are baked at
+> build time); local username/password login works with the published image as-is.
+
+---
+
 ## Database Schema
 
 22 tables across 8 domains:
@@ -515,16 +559,23 @@ Key features:
 
 ### Build (`build.yml`)
 
-- Triggers on push/PR to `main`
-- Backend: `dotnet restore` → `dotnet build` → `dotnet test` → `dotnet publish`
+- Triggers on `workflow_dispatch` and on push to `main`/`orbstack-integration` and `v*` tags
+- Backend: `dotnet restore` → `dotnet build` → `dotnet publish`
 - Frontend: `npm ci` → `npm run lint` → `npm run build`
 - Terraform: `terraform fmt -check` → `terraform init -backend=false` → `terraform validate`
+- **Images**: builds & pushes `cloudravel-{api,web,migrator}` to GHCR (amd64), tagged with
+  the commit SHA, branch, and — on a `v*` tag — the semver + `latest`
+- **Chart**: `helm lint` → `helm package` → `helm push` the chart to `oci://ghcr.io/<owner>/charts`
 
-### Deploy (`deploy.yml`)
+### Deploy to Azure (`deploy.yml`)
 
-- Triggers on push to `main` (after build passes)
-- 4 stages: Infrastructure → Backend → Frontend → Database
+- Triggers on `workflow_dispatch`
+- 4 stages: Infrastructure (Terraform) → Backend (Functions) → Frontend (Static Web App) → Database
 - Uses OIDC federation (no stored secrets)
+
+> The **Kubernetes** path is deliberately "publish only" — CI builds/pushes images and the
+> Helm chart; you deploy them to your own cluster with `helm install` (see *Deploy to
+> Kubernetes* above). No cluster credentials are stored in CI.
 
 ---
 
@@ -538,7 +589,7 @@ Key features:
 | Auth | MSAL.js (Entra ID SSO) + PBKDF2/JWT (local username/password) |
 | Data Fetching | SWR |
 | Charts | Recharts |
-| IaC | Terraform (azurerm ~> 4.0), Docker Compose (local/self-hosted) |
+| IaC / Deploy | Terraform (azurerm ~> 4.0, Azure), Helm chart (any Kubernetes), Docker Compose (local/self-hosted) |
 | CI/CD | GitHub Actions |
 | AI | Any OpenAI-compatible endpoint (configurable base URL + API key) with function calling |
 

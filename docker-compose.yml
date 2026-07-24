@@ -148,6 +148,11 @@ services:
     depends_on:
       api:
         condition: service_started
+    environment:
+      # nginx reverse-proxy upstream (envsubst'd into the config at startup).
+      # Same var Kubernetes sets to the api Service name; here it's the compose
+      # service. Matches the image default, set explicitly for clarity.
+      API_UPSTREAM: api:80
     ports:
       - "3000:80"
 

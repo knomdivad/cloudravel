@@ -13,7 +13,12 @@
 set -euo pipefail
 
 SQLCMD=/opt/mssql-tools/bin/sqlcmd
-SERVER=mssql
+# Host of the SQL Server to migrate. Defaults to the compose service name;
+# Kubernetes sets DB_HOST to the mssql Service name (or an external server).
+SERVER=${DB_HOST:-mssql}
+# Admin login. Defaults to sa (bundled SQL Edge); override DB_USER for an
+# external managed server whose admin isn't named sa.
+DB_USER=${DB_USER:-sa}
 DB=cloudraveldb
 LEGACY_DB=aimdb
 # Applied in order; the demo seed runs last (once) so a fresh stack has data.
@@ -32,7 +37,7 @@ MIGRATIONS=(
   seed-demo-data
 )
 
-run() { "$SQLCMD" -S "$SERVER" -U sa -P "$MSSQL_SA_PASSWORD" "$@"; }
+run() { "$SQLCMD" -S "$SERVER" -U "$DB_USER" -P "$MSSQL_SA_PASSWORD" "$@"; }
 
 echo "Waiting for SQL Server at $SERVER..."
 for i in $(seq 1 60); do
