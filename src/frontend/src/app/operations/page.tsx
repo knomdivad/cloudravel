@@ -37,7 +37,6 @@ export default function OperationsPage() {
     status: 'Open',
     limit: 100,
   });
-
   if (!tenantId) {
     return <div className="text-center py-20 text-gray-500">Select a tenant to view operations.</div>;
   }
@@ -151,9 +150,14 @@ export default function OperationsPage() {
           </section>
 
           <section>
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
-              Cloud Accounts
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                Cloud Accounts
+              </h2>
+              <a href="/tenants" className="text-xs font-medium text-azure-600 hover:text-azure-700">
+                Manage in Clouds →
+              </a>
+            </div>
             <div className="space-y-2">
               <div className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -165,6 +169,14 @@ export default function OperationsPage() {
               {summary.cloudAccounts.map((a) => (
                 <CloudAccountRow key={a.accountId} account={a} />
               ))}
+              {summary.cloudAccounts.length === 0 && (
+                <a
+                  href="/tenants"
+                  className="block w-full bg-white rounded-xl border border-dashed border-gray-300 p-3 text-sm text-gray-500 hover:border-azure-300 hover:text-azure-600 transition-colors text-center"
+                >
+                  Connect an AWS or GCP organization on the Clouds page to extend monitoring.
+                </a>
+              )}
             </div>
           </section>
         </div>

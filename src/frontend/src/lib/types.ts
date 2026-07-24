@@ -1,7 +1,66 @@
 /**
- * Type definitions for the AIM API responses.
+ * Type definitions for the CloudRavel API responses.
  * These mirror the backend DTOs for type-safe frontend usage.
  */
+
+// --- Admin / RBAC ---
+
+export type SystemRole = 'system_admin' | 'member';
+export type OrgRoleName = 'org_admin' | 'cloud_admin' | 'read_only';
+
+export interface Me {
+  userId: string;
+  displayName: string;
+  email: string;
+  systemRole: SystemRole;
+}
+
+export interface SystemSettings {
+  openAiBaseUrl?: string | null;
+  openAiModel?: string | null;
+  apiKeyConfigured: boolean;
+}
+
+export interface AdminUser {
+  userId: string;
+  displayName: string;
+  email: string;
+  globalRole: string;
+  isActive: boolean;
+  authProvider: string;
+  username?: string | null;
+  lastLoginAt?: string | null;
+  /** Only populated in the per-organization member listing. */
+  orgRole?: string | null;
+}
+
+export interface OrgSso {
+  provider: 'none' | 'entra' | 'oidc';
+  idpTenantId?: string | null;
+  idpClientId?: string | null;
+  domain?: string | null;
+  enabled: boolean;
+  clientSecretConfigured: boolean;
+}
+
+// --- Organization (the in-app workspace above clouds) ---
+
+export interface Organization {
+  orgId: string;
+  name: string;
+  environment: 'Development' | 'Production';
+  status: 'active' | 'suspended';
+  createdAt: string;
+  azureConnected: boolean;
+  azureTenantName?: string;
+  /** Number of Azure tenant connections (an org can hold more than one). */
+  azureOrgCount: number;
+  /** The signed-in user's role in this organization. */
+  callerRole: 'org_admin' | 'cloud_admin' | 'read_only';
+  awsOrgCount: number;
+  gcpOrgCount: number;
+  cloudCount: number;
+}
 
 // --- Tenant ---
 
@@ -251,6 +310,7 @@ export interface Playbook {
 
 export interface CloudAccount {
   accountId: string;
+  orgId: string;
   provider: 'Azure' | 'Aws' | 'Gcp';
   externalId: string;
   displayName: string;
@@ -258,7 +318,23 @@ export interface CloudAccount {
   regions?: string[];
   lastInventoryAt?: string;
   lastError?: string;
+  resourceCount?: number;
   createdAt: string;
+}
+
+export interface CloudOrg {
+  orgId: string;
+  provider: 'Azure' | 'Aws' | 'Gcp';
+  name: string;
+  externalId?: string;
+  status: 'Active' | 'Degraded' | 'Disconnected' | 'Connected';
+  createdAt: string;
+  accountCount?: number;
+  resourceCount?: number;
+  lastInventoryAt?: string;
+  accounts: CloudAccount[];
+  /** Azure connections only: "all" | "specific". */
+  subscriptionScope?: 'all' | 'specific';
 }
 
 export interface OpsSummary {

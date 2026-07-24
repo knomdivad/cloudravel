@@ -9,6 +9,7 @@ import {
   getDefenderFindings,
   getPolicyCompliance,
   getTenants,
+  getOrganizations,
   getDashboard,
   getOpsSummary,
   getAnomalies,
@@ -17,7 +18,7 @@ import {
   getPlaybooks,
   getCloudAccounts,
 } from './api';
-import type { TenantSummary, InventoryResource, TenantDashboard, OpsSummary } from './types';
+import type { TenantSummary, Organization, InventoryResource, TenantDashboard, OpsSummary } from './types';
 
 /**
  * SWR hooks for data fetching with caching, revalidation, and error handling.
@@ -31,6 +32,15 @@ export const swrConfig = {
   errorRetryCount: 3,
   dedupingInterval: 5000,
 };
+
+// ---- Organization hooks ----
+
+export function useOrganizations() {
+  return useSWR<Organization[]>('organizations', () => getOrganizations(), {
+    revalidateOnFocus: true,
+    refreshInterval: 60_000,
+  });
+}
 
 // ---- Tenant hooks ----
 

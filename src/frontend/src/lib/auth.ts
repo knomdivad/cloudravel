@@ -4,7 +4,7 @@ import { Configuration, LogLevel } from '@azure/msal-browser';
  * MSAL configuration for Entra ID authentication.
  * 
  * The frontend authenticates users against the MSP's Entra ID tenant.
- * Tokens are scoped to the AIM API (not directly to Azure resources).
+ * Tokens are scoped to the CloudRavel API (not directly to Azure resources).
  * Tenant-level access control is handled by the API using RBAC tables.
  */
 export const msalConfig: Configuration = {
@@ -37,7 +37,7 @@ export const msalConfig: Configuration = {
 
 /** Scopes required for API access */
 export const apiScopes = {
-  default: [process.env.NEXT_PUBLIC_API_SCOPE || 'api://aim-api/.default'],
+  default: [process.env.NEXT_PUBLIC_API_SCOPE || 'api://cloudravel-api/.default'],
 };
 
 /** Login request */

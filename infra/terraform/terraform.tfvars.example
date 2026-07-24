@@ -5,9 +5,9 @@
 subscription_id = "00000000-0000-0000-0000-000000000000"
 environment     = "dev"
 location        = "eastus2"
-base_name       = "aim"
+base_name       = "cloudravel"
 
-sql_admin_username      = "aimadmin"
+sql_admin_username      = "cloudraveladmin"
 sql_admin_password      = "CHANGE_ME_use_strong_password"
 
 # AI model is auto-provisioned via AI Foundry; override model ID or region if needed:

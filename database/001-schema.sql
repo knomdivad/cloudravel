@@ -1,5 +1,5 @@
 -- ============================================================================
--- Azure Inventory Monitor — Database Schema
+-- CloudRavel — Database Schema
 -- Engine: Azure SQL Database (or PostgreSQL with minor syntax changes)
 -- Isolation: Row-Level Security on tenant_id
 -- ============================================================================

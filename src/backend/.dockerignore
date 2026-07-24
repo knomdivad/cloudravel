@@ -1,0 +1,13 @@
+# Build artifacts — always rebuilt inside the image
+**/bin/
+**/obj/
+**/out/
+
+# Local dev config (never bake secrets into the image)
+**/local.settings.json
+**/*.user
+
+# VCS / editor
+.git/
+.vs/
+.vscode/

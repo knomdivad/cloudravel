@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Revision-suffixed so `helm upgrade` creates a fresh Job (Job spec is
+  # immutable) and re-applies any new migrations. Not a post-wait Helm hook, so
+  # `helm install --wait` won't deadlock against the API's migration-gated
+  # readiness probe: the Job and the API roll out concurrently, the Job's own
+  # retry loop waits for the DB, and the API becomes Ready once migration lands.
+  name: {{ include "cloudravel.migrator.fullname" . }}-{{ .Release.Revision }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrator
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "migrator") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrator
+          image: {{ include "cloudravel.image" (dict "ctx" . "component" "migrator") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: DB_HOST
+              value: {{ include "cloudravel.dbHost" . | quote }}
+            - name: DB_USER
+              value: {{ include "cloudravel.dbUser" . | quote }}
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudravel.secretName" . }}
+                  key: mssql-sa-password
+          resources:
+            {{- toYaml .Values.migrator.resources | nindent 12 }}

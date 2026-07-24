@@ -1,6 +1,7 @@
 import { InteractionRequiredAuthError } from '@azure/msal-browser';
 import { apiScopes } from './auth';
 import { msalInstance } from './msalInstance';
+import { getStoredLocalToken } from './localAuth';
 import type {
   TenantSummary,
   TenantDashboard,
@@ -18,16 +19,28 @@ import type {
   RemediationAction,
   Playbook,
   CloudAccount,
+  CloudOrg,
+  Organization,
   OpsSummary,
+  Me,
+  SystemSettings,
+  AdminUser,
+  OrgSso,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/api';
 
 /**
  * Acquires a fresh access token for API calls.
- * Uses silent token acquisition (cached token) first, falls back to interactive.
+ * Checks for a local (username/password) session first; falls back to MSAL
+ * (silent acquisition, then interactive) for Entra ID SSO sessions.
  */
 async function getAccessToken(): Promise<string> {
+  const local = getStoredLocalToken();
+  if (local) {
+    return local.token;
+  }
+
   const accounts = msalInstance.getAllAccounts();
 
   if (accounts.length === 0) {
@@ -83,6 +96,162 @@ async function apiCall<T>(
   }
 
   return response.json();
+}
+
+// A sentinel used for workspace-registry endpoints (list/create) that aren't
+// scoped to any one workspace. A global admin passes the access check for it.
+const NO_WORKSPACE = '00000000-0000-0000-0000-000000000000';
+
+// ============================================================================
+// Organization API — the in-app workspace above clouds
+// ============================================================================
+
+export async function getOrganizations(): Promise<Organization[]> {
+  const token = await getAccessToken();
+  const response = await fetch(`${API_BASE}/organizations`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Tenant-Id': NO_WORKSPACE,
+    },
+  });
+  const data = await response.json();
+  return data.organizations ?? data.Organizations ?? [];
+}
+
+export async function createOrganization(request: {
+  name: string;
+  environment?: string;
+}): Promise<Organization> {
+  return apiCall<Organization>('/organizations', NO_WORKSPACE, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+/** Connect the Azure tenant for an organization (never creates a new org). */
+export async function connectAzureTenant(
+  orgId: string,
+  request: {
+    displayName: string;
+    azureTenantId: string;
+    onboardingMethod: string;
+    clientId?: string;
+    clientSecret?: string;
+    lighthouseDelegationId?: string;
+    subscriptionIds?: string[];
+  }
+): Promise<Organization> {
+  return apiCall<Organization>(`/organizations/${orgId}/azure`, orgId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// ============================================================================
+// Auth / identity
+// ============================================================================
+
+/** The signed-in user's identity + system role — works for local and Entra sessions. */
+export async function getMe(): Promise<Me> {
+  return apiCall<Me>('/auth/me', NO_WORKSPACE);
+}
+
+// ============================================================================
+// System admin API (system_admin only)
+// ============================================================================
+
+export async function getSystemSettings(): Promise<SystemSettings> {
+  return apiCall<SystemSettings>('/admin/settings', NO_WORKSPACE);
+}
+
+export async function updateSystemSettings(request: {
+  openAiBaseUrl?: string;
+  openAiModel?: string;
+  openAiApiKey?: string;
+}): Promise<SystemSettings> {
+  return apiCall<SystemSettings>('/admin/settings', NO_WORKSPACE, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function getAllUsers(): Promise<AdminUser[]> {
+  const res = await apiCall<{ users: AdminUser[] }>('/admin/users', NO_WORKSPACE);
+  return res.users ?? [];
+}
+
+export async function createUser(request: {
+  displayName: string;
+  email: string;
+  username: string;
+  password: string;
+  globalRole?: string;
+}): Promise<AdminUser> {
+  return apiCall<AdminUser>('/admin/users', NO_WORKSPACE, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function updateUser(
+  userId: string,
+  request: { globalRole?: string; isActive?: boolean; password?: string }
+): Promise<AdminUser> {
+  return apiCall<AdminUser>(`/admin/users/${userId}`, NO_WORKSPACE, {
+    method: 'PATCH',
+    body: JSON.stringify(request),
+  });
+}
+
+// ============================================================================
+// Organization admin API (org_admin only) — users + SSO
+// ============================================================================
+
+export async function getOrgUsers(orgId: string): Promise<AdminUser[]> {
+  const res = await apiCall<{ users: AdminUser[] }>(`/organizations/${orgId}/users`, orgId);
+  return res.users ?? [];
+}
+
+export async function addOrgUser(
+  orgId: string,
+  request: { username?: string; email?: string; displayName?: string; password?: string; role: string }
+): Promise<AdminUser> {
+  return apiCall<AdminUser>(`/organizations/${orgId}/users`, orgId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function updateOrgUserRole(orgId: string, userId: string, role: string): Promise<void> {
+  await apiCall(`/organizations/${orgId}/users/${userId}`, orgId, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeOrgUser(orgId: string, userId: string): Promise<void> {
+  await apiCall(`/organizations/${orgId}/users/${userId}`, orgId, { method: 'DELETE' });
+}
+
+export async function getOrgSso(orgId: string): Promise<OrgSso> {
+  return apiCall<OrgSso>(`/organizations/${orgId}/sso`, orgId);
+}
+
+export async function updateOrgSso(
+  orgId: string,
+  request: {
+    provider: string;
+    idpTenantId?: string;
+    idpClientId?: string;
+    domain?: string;
+    enabled: boolean;
+    clientSecret?: string;
+  }
+): Promise<OrgSso> {
+  return apiCall<OrgSso>(`/organizations/${orgId}/sso`, orgId, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
 }
 
 // ============================================================================
@@ -408,10 +577,56 @@ export async function getCloudAccounts(tenantId: string): Promise<{ accounts: Cl
   return apiCall(`/cloud-accounts`, tenantId);
 }
 
+export async function getCloudOrgs(tenantId: string): Promise<{ orgs: CloudOrg[] }> {
+  return apiCall(`/cloud-orgs`, tenantId);
+}
+
+/** Instance environment, app version, and commit SHA from the anonymous health endpoint. */
+export async function getPlatformInfo(): Promise<{ environment: string; version: string; commit: string | null }> {
+  try {
+    const res = await fetch(`${API_BASE}/health`);
+    const data = await res.json();
+    return {
+      environment: data.environment ?? 'Development',
+      version: data.version ?? '1.0.0',
+      commit: data.commit ?? null,
+    };
+  } catch {
+    return { environment: 'Development', version: '1.0.0', commit: null };
+  }
+}
+
+/** On-demand inventory collection for one AWS account / GCP project. */
+export async function collectCloudAccount(tenantId: string, accountId: string): Promise<{ resourcesCollected: number }> {
+  return apiCall(`/cloud-accounts/${accountId}/collect`, tenantId, { method: 'POST' });
+}
+
+export async function createCloudOrg(
+  tenantId: string,
+  request: { provider: string; name: string; externalId?: string }
+): Promise<CloudOrg> {
+  return apiCall<CloudOrg>('/cloud-orgs', tenantId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+/** Suspend / reactivate an AWS or GCP organization (parity with Azure tenant status). */
+export async function updateCloudOrgStatus(
+  tenantId: string,
+  orgId: string,
+  status: string
+): Promise<{ orgId: string; status: string }> {
+  return apiCall(`/cloud-orgs/${orgId}/status`, tenantId, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
 export async function linkCloudAccount(
   tenantId: string,
   request: {
-    provider: string;
+    orgId: string;
     externalId: string;
     displayName: string;
     credentialJson?: string;
@@ -429,6 +644,9 @@ export async function linkCloudAccount(
 // ============================================================================
 
 export const api = {
+  getOrganizations,
+  createOrganization,
+  connectAzureTenant,
   getTenants,
   onboardTenant,
   updateTenantStatus,
@@ -455,5 +673,22 @@ export const api = {
   rejectRemediation,
   getPlaybooks,
   getCloudAccounts,
+  getCloudOrgs,
+  createCloudOrg,
+  updateCloudOrgStatus,
   linkCloudAccount,
+  collectCloudAccount,
+  getPlatformInfo,
+  getMe,
+  getSystemSettings,
+  updateSystemSettings,
+  getAllUsers,
+  createUser,
+  updateUser,
+  getOrgUsers,
+  addOrgUser,
+  updateOrgUserRole,
+  removeOrgUser,
+  getOrgSso,
+  updateOrgSso,
 };

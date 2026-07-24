@@ -1,4 +1,4 @@
-name: AIM — Deploy to Azure
+name: CloudRavel — Deploy to Azure
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ permissions:
   actions: read
 
 env:
-  AZURE_RESOURCE_GROUP: rg-aim-${{ inputs.environment || 'dev' }}
+  AZURE_RESOURCE_GROUP: rg-cloudravel-${{ inputs.environment || 'dev' }}
   ENVIRONMENT: ${{ inputs.environment || 'dev' }}
 
 jobs:
@@ -108,8 +108,8 @@ jobs:
             exit 0
           fi
 
-          SUFFIX="aim-${TF_VAR_environment}"
-          UNIQUE="aim${HEX}"
+          SUFFIX="cloudravel-${TF_VAR_environment}"
+          UNIQUE="cloudravel${HEX}"
           SUB="${ARM_SUBSCRIPTION_ID}"
           RG="rg-${SUFFIX}"
 
@@ -136,7 +136,7 @@ jobs:
             "module.monitoring.azurerm_monitor_diagnostic_setting.servicebus" \
             "${SB_RID}|diag-sb-${SUFFIX}"
 
-          SQL_RID="/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Sql/servers/sql-${UNIQUE}/databases/aimdb"
+          SQL_RID="/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Sql/servers/sql-${UNIQUE}/databases/cloudraveldb"
           import_if_missing \
             "module.monitoring.azurerm_monitor_diagnostic_setting.sql_database" \
             "${SQL_RID}|diag-sql-${SUFFIX}"
@@ -303,7 +303,7 @@ jobs:
         run: |
           TOKEN=$(az staticwebapp secrets list \
             --name "${{ needs.deploy-infra.outputs.staticWebAppName }}" \
-            --resource-group "rg-aim-${{ inputs.environment || 'dev' }}" \
+            --resource-group "rg-cloudravel-${{ inputs.environment || 'dev' }}" \
             --query "properties.apiKey" -o tsv)
           echo "::add-mask::${TOKEN}"
           echo "token=${TOKEN}" >> "$GITHUB_OUTPUT"
@@ -337,11 +337,11 @@ jobs:
       - name: Run SQL migrations
         uses: azure/sql-action@v2
         with:
-          connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=aimdb;User ID=aimadmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
+          connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=cloudraveldb;User ID=cloudraveladmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
           path: database/001-schema.sql
 
       - name: Run AIOps + multi-cloud migration
         uses: azure/sql-action@v2
         with:
-          connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=aimdb;User ID=aimadmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
+          connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=cloudraveldb;User ID=cloudraveladmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
           path: database/003-aiops-multicloud.sql

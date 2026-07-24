@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cloudravel.api.fullname" . }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "api") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: {{ include "cloudravel.image" (dict "ctx" . "component" "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          envFrom:
+            - configMapRef:
+                name: {{ include "cloudravel.fullname" . }}-config
+          env:
+            # Defined first so the $(MSSQL_SA_PASSWORD) reference below expands.
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudravel.secretName" . }}
+                  key: mssql-sa-password
+            - name: SqlConnectionString
+              value: "Server={{ include "cloudravel.dbHost" . }},{{ include "cloudravel.dbPort" . }};Database={{ include "cloudravel.dbName" . }};User ID={{ include "cloudravel.dbUser" . }};Password=$(MSSQL_SA_PASSWORD);Encrypt=True;TrustServerCertificate=True;"
+            - name: LocalAuth__JwtSigningKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudravel.secretName" . }}
+                  key: local-auth-jwt-signing-key
+            - name: OpenBao__Token
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudravel.secretName" . }}
+                  key: openbao-token
+            - name: OpenAI__ApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudravel.secretName" . }}
+                  key: openai-api-key
+            - name: AzureWebJobsStorage
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudravel.secretName" . }}
+                  key: azure-webjobs-storage
+          # /api/health checks DB connectivity (SELECT 1) — passes as soon as the
+          # DB is reachable, so the pod doesn't crashloop during migration.
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # /api/health/ready runs SELECT COUNT(*) FROM tenants — 200 only once
+          # the migration Job has created the schema, gating traffic on migration.
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cloudravel.api.fullname" . }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port }}
+      targetPort: http

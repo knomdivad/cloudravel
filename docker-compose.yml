@@ -1,0 +1,161 @@
+# ============================================================================
+# CloudRavel — local / OrbStack stack (runs anywhere: no Azure-only services)
+#
+#   cp .env.example .env      # set MSSQL_SA_PASSWORD; the rest have working defaults
+#   make up                   # build + start DETACHED (safe to close the shell)
+#
+#   Plain Compose stays attached unless you detach yourself:
+#     docker compose up -d --build      # same thing without make
+#     docker compose logs -f            # follow logs; Ctrl-C leaves the stack up
+#     docker compose down               # stop everything
+#
+#   Web UI  → http://localhost:3000   (log in with the seeded local admin:
+#                                       username 'admin', password 'ChangeMe123!')
+#   API     → http://localhost:7071/api/health
+#   OpenBao → http://localhost:8200   (dev mode, root token 'root')
+#
+# Cloud-agnostic by design:
+#   secrets  → OpenBao (self-hosted, Vault-API-compatible) instead of Key Vault
+#   auth     → local username/password (Entra ID optional, not required)
+#   job queue→ DatabaseJobQueue (SQL table) instead of Service Bus
+# ============================================================================
+
+services:
+  # Azure SQL Edge — arm64-native (no emulation on Apple Silicon) and the same
+  # engine the schema targets (RLS, SESSION_CONTEXT). Readiness is handled by the
+  # migrator's own connection-retry loop, so there's no in-image sqlcmd healthcheck.
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+
+  # Cloud-agnostic secret store (Vault-API-compatible). Dev mode keeps secrets
+  # in memory with a fixed root token — fine for local; use a real OpenBao/Vault
+  # with persistent storage and proper auth in production.
+  openbao:
+    image: docker.io/openbao/openbao:latest
+    command: server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: root
+      BAO_ADDR: http://0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+
+  # Azure Storage emulator — the Functions host requires AzureWebJobsStorage for
+  # timer-trigger scheduling (used by the AIOps timers), even with no real Azure.
+  # No host ports: only the api container reaches it, over the internal network.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    volumes:
+      - azurite-data:/data
+
+  # Applies database/001–006 + demo seed once each (dbo.__migrations ledger),
+  # so `docker compose up` is safe to re-run and picks up new migrations.
+  migrator:
+    image: mcr.microsoft.com/mssql-tools:latest
+    platform: linux/amd64
+    depends_on:
+      mssql:
+        condition: service_started
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+    volumes:
+      - ./database:/database:ro
+    # Strip any CR (a CRLF checkout on the host would otherwise make bash reject
+    # the script) before executing. Belt-and-suspenders with .gitattributes.
+    command: ["bash", "-c", "tr -d '\\015' < /database/apply-migrations.sh | bash"]
+    restart: "no"
+
+  api:
+    # src/backend/Dockerfile builds natively (fast) and pins only the runtime
+    # stage to amd64 (the Functions base image is amd64-only), so no service-
+    # level platform override is needed here.
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile
+      args:
+        # The build context has no .git dir, so this is how the version shown
+        # in the UI gets a commit SHA for local/OrbStack builds too. Set
+        # GIT_SHA in your shell/.env (e.g. `export GIT_SHA=$(git rev-parse --short HEAD)`)
+        # before `docker compose build`; omitted is fine (bare semver, no commit).
+        GIT_SHA: ${GIT_SHA:-}
+    depends_on:
+      mssql:
+        condition: service_started
+      azurite:
+        condition: service_started
+      openbao:
+        condition: service_started
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      # --- Functions runtime ---
+      AzureWebJobsStorage: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1"
+      FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
+      # --- Instance environment: Development disables all inventory collection
+      #     (scheduled AND on-demand) so the fake seed clouds are never contacted.
+      #     Set to Production when onboarding real clouds. ---
+      Platform__Environment: ${PLATFORM_ENVIRONMENT:-Development}
+      # --- Database (also backs the DatabaseJobQueue — no Service Bus needed) ---
+      SqlConnectionString: "Server=mssql,1433;Database=cloudraveldb;User ID=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;"
+      # --- Secret store: OpenBao (cloud-agnostic) ---
+      OpenBao__Address: "http://openbao:8200"
+      OpenBao__Token: ${OPENBAO_TOKEN:-root}
+      # --- Local auth signing key (required for the non-Entra login path) ---
+      LocalAuth__JwtSigningKey: ${LOCAL_AUTH_JWT_SIGNING_KEY:-dev-only-change-me-in-production}
+      # --- AI model: any OpenAI-compatible endpoint (optional). These are the
+      #     ENV-VAR FALLBACK; a system admin can override them at runtime under
+      #     Admin → System Settings (stored in system_settings + secret store).
+      #     Keys match what the code reads (OpenAI:BaseUrl/ApiKey/Model). ---
+      OpenAI__BaseUrl: ${OPENAI_BASE_URL:-}
+      OpenAI__ApiKey: ${OPENAI_API_KEY:-}
+      OpenAI__Model: ${OPENAI_MODEL:-gpt-5.5}
+      # --- Entra ID SSO (optional — local login works without it) ---
+      AzureAd__TenantId: ${AZURE_AD_TENANT_ID:-}
+      AzureAd__ClientId: ${AZURE_AD_CLIENT_ID:-}
+      # --- Change-polling / recommendation-sync timers hit live cloud APIs and
+      #     need real credentials, so keep them off locally. The inventory timers
+      #     (CollectInventoryTimer, MultiCloudInventoryTimer) stay ENABLED — they
+      #     are the internal scheduler and self-skip in Development. AnomalyScan,
+      #     RemediationQueue and SnapshotIngestionQueue (DB-driven) also stay on. ---
+      AzureWebJobs.PollChangesTimer.Disabled: "true"
+      AzureWebJobs.SyncAdvisorTimer.Disabled: "true"
+      AzureWebJobs.SyncPolicyTimer.Disabled: "true"
+      AzureWebJobs.SyncDefenderTimer.Disabled: "true"
+    ports:
+      - "7071:80"
+
+  web:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api
+        # Entra values are optional — provide them only to enable Entra SSO
+        # alongside local login.
+        NEXT_PUBLIC_AZURE_AD_CLIENT_ID: ${NEXT_PUBLIC_AZURE_AD_CLIENT_ID:-}
+        NEXT_PUBLIC_AZURE_AD_TENANT_ID: ${NEXT_PUBLIC_AZURE_AD_TENANT_ID:-}
+        NEXT_PUBLIC_API_SCOPE: ${NEXT_PUBLIC_API_SCOPE:-}
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      # nginx reverse-proxy upstream (envsubst'd into the config at startup).
+      # Same var Kubernetes sets to the api Service name; here it's the compose
+      # service. Matches the image default, set explicitly for clarity.
+      API_UPSTREAM: api:80
+    ports:
+      - "3000:80"
+
+volumes:
+  mssql-data:
+  azurite-data:

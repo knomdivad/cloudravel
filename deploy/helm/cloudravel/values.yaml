@@ -1,0 +1,151 @@
+# ============================================================================
+# CloudRavel Helm chart values
+#
+# Out of the box (all bundled deps enabled) this stands the full stack up on a
+# bare cluster. For production, disable a bundled dep and point at an external
+# managed service via the matching `external*` block.
+#
+# REQUIRED before install: set `secrets.mssqlSaPassword` and
+# `secrets.localAuthJwtSigningKey` (or supply `secrets.existingSecret`).
+# ============================================================================
+
+# Prefix for all resource names. Defaults to the release name; override to pin.
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Images. Tags default to the chart's appVersion when left blank. --
+image:
+  registry: ghcr.io/knomdivad
+  pullPolicy: IfNotPresent
+  # Overrides applied per component below; blank tag => chart appVersion.
+  api:
+    repository: cloudravel-api
+    tag: ""
+  web:
+    repository: cloudravel-web
+    tag: ""
+  migrator:
+    repository: cloudravel-migrator
+    tag: ""
+
+# Image pull secrets for private registries (GHCR packages, etc.).
+imagePullSecrets: []
+# - name: ghcr-pull
+
+# ---------------------------------------------------------------------------
+# Secrets — the chart creates a Secret from these values. To use your own
+# Secret instead, set `existingSecret` to its name; it must contain keys:
+#   mssql-sa-password, local-auth-jwt-signing-key, openbao-token, openai-api-key
+# ---------------------------------------------------------------------------
+secrets:
+  existingSecret: ""
+  mssqlSaPassword: ""              # REQUIRED (unless using existingSecret / external SQL)
+  localAuthJwtSigningKey: ""       # REQUIRED for local login to survive restarts
+  openBaoToken: "root"             # dev default; change for a real OpenBao/Vault
+  openAiApiKey: ""                 # optional (AI Insights)
+
+# ---------------------------------------------------------------------------
+# API (.NET Functions isolated worker). amd64-only image.
+# ---------------------------------------------------------------------------
+api:
+  replicaCount: 1
+  service:
+    port: 80
+  # Instance environment: Development disables live cloud collection.
+  platformEnvironment: Development
+  openAi:
+    baseUrl: ""
+    model: gpt-5.5
+  entra:
+    tenantId: ""
+    clientId: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Web (Next.js static export served by nginx; reverse-proxies /api).
+# ---------------------------------------------------------------------------
+web:
+  replicaCount: 1
+  service:
+    port: 80
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+ingress:
+  enabled: true
+  className: ""
+  host: cloudravel.local
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: ""
+
+# ---------------------------------------------------------------------------
+# Bundled dependencies. Disable one and fill its `external*` block to use a
+# managed service instead.
+# ---------------------------------------------------------------------------
+mssql:
+  enabled: true
+  image: mcr.microsoft.com/azure-sql-edge:latest
+  service:
+    port: 1433
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits: { memory: 2Gi }
+
+# Used only when mssql.enabled=false. The chart builds the api connection
+# string and the migrator DB_HOST from these.
+externalMssql:
+  host: ""                         # e.g. sql.example.com
+  port: 1433
+  database: cloudraveldb
+  user: sa                         # migrator/app login (uses secrets.mssqlSaPassword)
+
+azurite:
+  enabled: true
+  image: mcr.microsoft.com/azure-storage/azurite
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# Used only when azurite.enabled=false. Full AzureWebJobsStorage connection
+# string for the Functions host (real Azure Storage or another emulator).
+externalStorage:
+  connectionString: ""
+
+openbao:
+  enabled: true
+  image: docker.io/openbao/openbao:latest
+  service:
+    port: 8200
+  # Dev mode is EPHEMERAL (in-memory). For production, disable and use external.
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# Used only when openbao.enabled=false.
+externalOpenBao:
+  address: ""                      # e.g. https://vault.example.com:8200
+
+# Migration Job (runs as a Helm post-install/post-upgrade hook).
+migrator:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }

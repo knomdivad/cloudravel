@@ -50,7 +50,7 @@ Timer-triggered Function
 User → Frontend → API (POST /api/ai/query)
   → Validate tenant scope (RBAC)
   → Construct system prompt with tenant context
-  → Send to Azure OpenAI with tool definitions
+  → Send to the configured OpenAI-compatible endpoint with tool definitions
   → OpenAI calls tools (get_inventory_snapshot, get_resource_changes, etc.)
   → API executes tools against Azure SQL (tenant-scoped)
   → Returns tool results to OpenAI
@@ -96,7 +96,7 @@ Proposal (anomaly engine | AI propose_remediation tool | operator via API)
 
 ```
 Timer-triggered Function
-  → For each connected AWS/GCP account (credentials from Key Vault):
+  → For each connected AWS/GCP account (credentials from the secret store):
     → AWS: Resource Groups Tagging API GetResources per region (SigV4-signed)
     → GCP: Cloud Asset API asset listing (service-account JWT → OAuth token)
     → Normalize into shared inventory model (provider column: aws | gcp)
@@ -108,11 +108,12 @@ Timer-triggered Function
 
 ```
 User → Next.js Frontend
-  → MSAL redirect to Entra ID
-  → Obtains access token (audience: AIM API)
-  → Token contains: oid, tid, roles, groups
+  → Either: MSAL redirect to Entra ID (SSO)
+     Or:    POST /api/auth/login with username/password (local auth)
+  → Obtains an access token either way (Entra JWT, or a platform-signed JWT)
   → Frontend sends token to API
-  → API validates JWT via Entra ID
+  → API's policy scheme detects which one issued it and validates against the
+    matching JwtBearer scheme (EntraId or Local) — both are accepted uniformly
   → Resolves user → tenant permissions from RBAC table
   → Returns authorized tenant list
   → User selects tenant (or sees default)
@@ -144,7 +145,7 @@ User → Next.js Frontend
                              │
                     ┌────────┴────────┐
                     │   AI Agent      │ ← Reads freely; its ONLY write path
-                    │   (GPT-5.5,     │    is propose_remediation, which lands
+                    │  (OpenAI-compat,│    is propose_remediation, which lands
                     │    Tool Use)    │    in the gated approval queue
                     └─────────────────┘
 ```
@@ -177,7 +178,7 @@ because the tools themselves enforce the RLS boundary.
 | Component | Scaling Model |
 |---|---|
 | Azure Functions (API) | Consumption or Premium plan, auto-scale on HTTP triggers |
-| Azure Functions (Workers) | Premium plan, scale on Service Bus queue depth |
+| Azure Functions (Workers) | Premium plan; snapshot ingestion polls the active job queue (Service Bus or the SQL-backed default) every minute |
 | Azure SQL | DTU/vCore scaling; read replicas for dashboards |
 | Blob Storage | Unlimited, lifecycle tiering (hot → cool → archive) |
 | Azure Automation | Parallel runbook jobs (max 10 concurrent per account) |

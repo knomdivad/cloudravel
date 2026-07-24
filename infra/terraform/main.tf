@@ -1,5 +1,5 @@
 # ============================================================================
-# Azure Inventory Monitor — Main Terraform Configuration
+# CloudRavel — Main Terraform Configuration
 # ============================================================================
 
 locals {
@@ -7,7 +7,7 @@ locals {
   is_production = var.environment == "prod"
 
   default_tags = merge(var.tags, {
-    project     = "azure-inventory-monitor"
+    project     = "cloudravel"
     environment = var.environment
     managed_by  = "terraform"
   })
@@ -156,7 +156,7 @@ resource "azurerm_mssql_server" "main" {
   tags                          = local.default_tags
 
   azuread_administrator {
-    login_username = "aim-platform-admin"
+    login_username = "cloudravel-platform-admin"
     object_id      = azurerm_linux_function_app.main.identity[0].principal_id
     tenant_id      = data.azurerm_client_config.current.tenant_id
   }
@@ -174,7 +174,7 @@ resource "azurerm_mssql_firewall_rule" "allow_azure" {
 }
 
 resource "azurerm_mssql_database" "main" {
-  name           = "aimdb"
+  name           = "cloudraveldb"
   server_id      = azurerm_mssql_server.main.id
   sku_name       = local.is_production ? "S3" : "S1"
   collation      = "SQL_Latin1_General_CP1_CI_AS"
@@ -191,21 +191,21 @@ resource "azurerm_mssql_database" "main" {
 # ============================================================================
 
 resource "azuread_application" "api" {
-  display_name = "Azure Inventory Monitor API (${var.environment})"
+  display_name = "CloudRavel API (${var.environment})"
 
   sign_in_audience = "AzureADMyOrg"
-  identifier_uris  = ["api://aim-api"]
+  identifier_uris  = ["api://cloudravel-api"]
 
   api {
     requested_access_token_version = 2
 
     oauth2_permission_scope {
-      admin_consent_description  = "Access the AIM API as a signed-in user"
-      admin_consent_display_name = "Access AIM API"
+      admin_consent_description  = "Access the CloudRavel API as a signed-in user"
+      admin_consent_display_name = "Access CloudRavel API"
       id                         = random_uuid.api_scope.result
       type                       = "User"
-      user_consent_description   = "Access the AIM API on your behalf"
-      user_consent_display_name  = "Access AIM API"
+      user_consent_description   = "Access the CloudRavel API on your behalf"
+      user_consent_display_name  = "Access CloudRavel API"
       value                      = "access_as_user"
       enabled                    = true
     }
@@ -227,7 +227,7 @@ resource "azuread_application" "api" {
     }
   }
 
-  tags = ["azure-inventory-monitor", var.environment]
+  tags = ["cloudravel", var.environment]
 }
 
 resource "random_uuid" "api_scope" {}
@@ -290,7 +290,7 @@ resource "azurerm_linux_function_app" "main" {
 
   app_settings = {
     "KeyVault__VaultUri"                            = azurerm_key_vault.main.vault_uri
-    "SqlConnectionString"                           = "Server=tcp:sql-${local.unique_suffix}.database.windows.net,1433;Database=aimdb;Authentication=Active Directory Managed Identity;Encrypt=True;"
+    "SqlConnectionString"                           = "Server=tcp:sql-${local.unique_suffix}.database.windows.net,1433;Database=cloudraveldb;Authentication=Active Directory Managed Identity;Encrypt=True;"
     "ServiceBusConnection__fullyQualifiedNamespace" = "${azurerm_servicebus_namespace.main.name}.servicebus.windows.net"
     "BlobStorageUrl"                                = azurerm_storage_account.main.primary_blob_endpoint
     "AiFoundry__Endpoint"                           = local.ai_inference_uri
@@ -349,7 +349,7 @@ resource "azurerm_resource_group_template_deployment" "ai_foundry" {
         sku        = { name = "Basic", tier = "Basic" }
         identity   = { type = "SystemAssigned" }
         properties = {
-          friendlyName        = "AIM AI Hub (${var.environment})"
+          friendlyName        = "CloudRavel AI Hub (${var.environment})"
           storageAccount      = azurerm_storage_account.main.id
           keyVault            = azurerm_key_vault.main.id
           applicationInsights = azurerm_application_insights.main.id
@@ -366,7 +366,7 @@ resource "azurerm_resource_group_template_deployment" "ai_foundry" {
         sku        = { name = "Basic", tier = "Basic" }
         identity   = { type = "SystemAssigned" }
         properties = {
-          friendlyName  = "AIM AI Project (${var.environment})"
+          friendlyName  = "CloudRavel AI Project (${var.environment})"
           hubResourceId = "[resourceId('Microsoft.MachineLearningServices/workspaces', 'aihub-${local.suffix}')]"
         }
         dependsOn = [

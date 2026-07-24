@@ -26,7 +26,7 @@ terraform {
     resource_group_name  = "rg-cbts-automation-shared-services"
     storage_account_name = "cbts"
     container_name       = "terraform-state"
-    key                  = "aim/infra.tfstate"
+    key                  = "cloudravel/infra.tfstate"
     subscription_id      = "c7c5469f-b7ec-4a91-ae0d-2607354009a9"
     use_oidc             = true
     use_azuread_auth     = true
