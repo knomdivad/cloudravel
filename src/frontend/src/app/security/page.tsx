@@ -44,7 +44,8 @@ export default function SecurityPage() {
       <div>
         <h1 className="text-xl font-bold">Security Posture</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Azure Defender findings plus multi-cloud inventory posture (AWS/GCP public exposure, open firewalls, and related checks).
+          Azure Defender for Cloud, AWS Security Hub + open security groups / S3 public access, and
+          Google Security Command Center — plus inventory posture checks after multi-cloud collect.
         </p>
       </div>
 

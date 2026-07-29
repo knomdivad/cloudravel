@@ -13,6 +13,7 @@ public sealed class AiOpsWorkerFunctions
     private readonly IAnomalyDetectionService _anomalyDetection;
     private readonly IRemediationService _remediationService;
     private readonly IMultiCloudInventoryService _multiCloudInventory;
+    private readonly IMultiCloudGovernanceSyncService _multiCloudGovernance;
     private readonly ITenantRepository _tenantRepo;
     private readonly IPlatformInfo _platform;
     private readonly ILogger<AiOpsWorkerFunctions> _logger;
@@ -21,6 +22,7 @@ public sealed class AiOpsWorkerFunctions
         IAnomalyDetectionService anomalyDetection,
         IRemediationService remediationService,
         IMultiCloudInventoryService multiCloudInventory,
+        IMultiCloudGovernanceSyncService multiCloudGovernance,
         ITenantRepository tenantRepo,
         IPlatformInfo platform,
         ILogger<AiOpsWorkerFunctions> logger)
@@ -28,6 +30,7 @@ public sealed class AiOpsWorkerFunctions
         _anomalyDetection = anomalyDetection;
         _remediationService = remediationService;
         _multiCloudInventory = multiCloudInventory;
+        _multiCloudGovernance = multiCloudGovernance;
         _tenantRepo = tenantRepo;
         _platform = platform;
         _logger = logger;
@@ -98,5 +101,23 @@ public sealed class AiOpsWorkerFunctions
         _logger.LogInformation("Multi-cloud inventory sync started at {Time}", DateTime.UtcNow);
         await _multiCloudInventory.SyncAllAsync();
         _logger.LogInformation("Multi-cloud inventory sync completed");
+    }
+
+    /// <summary>
+    /// AWS/GCP Security Hub · Config · Trusted Advisor · SCC · Recommender · Org Policy
+    /// sync — hourly, offset from Azure Advisor/Policy/Defender timers.
+    /// </summary>
+    [Function("MultiCloudGovernanceTimer")]
+    public async Task SyncMultiCloudGovernance([TimerTrigger("0 20 * * * *")] TimerInfo timer)
+    {
+        if (!_platform.IsProduction)
+        {
+            _logger.LogInformation("Skipping multi-cloud governance sync — instance environment is {Env}.", _platform.Environment);
+            return;
+        }
+
+        _logger.LogInformation("Multi-cloud governance sync started at {Time}", DateTime.UtcNow);
+        await _multiCloudGovernance.SyncAllAsync();
+        _logger.LogInformation("Multi-cloud governance sync completed");
     }
 }

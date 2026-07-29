@@ -20,7 +20,7 @@ namespace CloudRavel.Infrastructure.MultiCloud;
 ///   azure.resource.apply_tags            — PATCH tags (merge) via Tags API
 ///   azure.nsg.remove_rule                — DELETE a named NSG security rule
 /// </summary>
-public sealed class AzureProviderAdapter : ICloudProviderAdapter
+public sealed partial class AzureProviderAdapter : ICloudProviderAdapter
 {
     private const string ArmBase = "https://management.azure.com";
     private const string ComputeApiVersion = "2024-07-01";
@@ -69,6 +69,14 @@ public sealed class AzureProviderAdapter : ICloudProviderAdapter
         await _inventoryCollection.CollectInventoryAsync(account.TenantId, "multicloud-worker");
         return [];
     }
+
+    /// <summary>Azure governance uses <see cref="IRecommendationSyncService"/> (Advisor/Policy/Defender).</summary>
+    public Task<CloudGovernanceSnapshot> CollectGovernanceAsync(
+        CloudAccount account, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new CloudGovernanceSnapshot
+        {
+            SourceNotes = ["Azure governance is synced via Advisor/Policy/Defender timers, not this adapter."]
+        });
 
     public async Task<RemediationExecutionResult> ExecuteRemediationAsync(
         Guid tenantId, RemediationPlaybook playbook, RemediationAction action, CancellationToken cancellationToken = default)

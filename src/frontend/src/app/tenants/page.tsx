@@ -139,6 +139,23 @@ export default function CloudsPage() {
     }
   };
 
+  const [syncingGovernance, setSyncingGovernance] = useState(false);
+  const handleSyncGovernance = async () => {
+    if (!tenantId) return;
+    setSyncingGovernance(true);
+    try {
+      const res = await api.syncMultiCloudGovernance(tenantId);
+      showToast(
+        `Governance sync: ${res.securityFindings} security · ${res.recommendations} recommendations · ${res.policyRecords} policy.`,
+        'success'
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Governance sync failed.', 'error');
+    } finally {
+      setSyncingGovernance(false);
+    }
+  };
+
   const handleCollectAccount = async (acct: CloudAccount) => {
     setCollectingAccount(acct.accountId);
     try {
@@ -266,11 +283,24 @@ export default function CloudsPage() {
             {' '}&middot; <a href="/help/clouds" className="text-azure-600 hover:underline">How to add clouds</a>
           </p>
         </div>
-        {canManageClouds && (
-          <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
-            + Add Cloud
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {canManageClouds && (
+            <button
+              onClick={handleSyncGovernance}
+              disabled={isDev || syncingGovernance}
+              title={isDev ? 'Disabled in Development — set PLATFORM_ENVIRONMENT=Production' : 'Sync AWS/GCP Security Hub, Config, SCC, Recommender, etc.'}
+              className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {syncingGovernance && <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-gray-600" />}
+              {syncingGovernance ? 'Syncing…' : 'Sync security & governance'}
+            </button>
+          )}
+          {canManageClouds && (
+            <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+              + Add Cloud
+            </button>
+          )}
+        </div>
       </div>
 
       {showAdd && (

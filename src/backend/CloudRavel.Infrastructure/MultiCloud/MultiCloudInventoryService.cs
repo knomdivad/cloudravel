@@ -27,7 +27,7 @@ public sealed class MultiCloudInventoryService : IMultiCloudInventoryService
     private readonly IInventoryRepository _inventoryRepo;
     private readonly IChangeRepository _changeRepo;
     private readonly ICloudProviderAdapterFactory _adapterFactory;
-    private readonly IMultiCloudPostureService _posture;
+    private readonly IMultiCloudGovernanceSyncService _governance;
     private readonly ILogger<MultiCloudInventoryService> _logger;
 
     // Property-name keywords that indicate a security-impacting change. Matched
@@ -52,14 +52,14 @@ public sealed class MultiCloudInventoryService : IMultiCloudInventoryService
         IInventoryRepository inventoryRepo,
         IChangeRepository changeRepo,
         ICloudProviderAdapterFactory adapterFactory,
-        IMultiCloudPostureService posture,
+        IMultiCloudGovernanceSyncService governance,
         ILogger<MultiCloudInventoryService> logger)
     {
         _accountRepo = accountRepo;
         _inventoryRepo = inventoryRepo;
         _changeRepo = changeRepo;
         _adapterFactory = adapterFactory;
-        _posture = posture;
+        _governance = governance;
         _logger = logger;
     }
 
@@ -115,14 +115,14 @@ public sealed class MultiCloudInventoryService : IMultiCloudInventoryService
             if (account.Status != CloudAccountStatus.Connected)
                 await _accountRepo.UpdateStatusAsync(account.AccountId, CloudAccountStatus.Connected, null);
 
-            // Derive Security / Governance / Approvals signals from inventory.
+            // Security / Governance / Policy + Approvals (inventory rules + native APIs).
             try
             {
-                await _posture.EvaluateTenantAsync(account.TenantId, cancellationToken);
+                await _governance.SyncTenantAsync(account.TenantId, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Multi-cloud posture evaluation failed for tenant {TenantId}", account.TenantId);
+                _logger.LogWarning(ex, "Multi-cloud governance sync failed for tenant {TenantId}", account.TenantId);
             }
 
             _logger.LogInformation("Multi-cloud sync: {Count} {Provider} resources merged into snapshot {SnapshotId} for tenant {TenantId}",

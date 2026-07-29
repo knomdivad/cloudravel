@@ -99,6 +99,41 @@ public interface ICloudProviderAdapter
         RemediationPlaybook playbook,
         RemediationAction action,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Provider-native Security / Governance / Policy signals (Security Hub, SCC,
+    /// Config, Recommender, Trusted Advisor, …). Azure returns empty — it uses
+    /// <c>IRecommendationSyncService</c> instead. Best-effort: missing APIs/permissions
+    /// yield partial results, never throw for a single source.
+    /// </summary>
+    Task<CloudGovernanceSnapshot> CollectGovernanceAsync(
+        CloudAccount account, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Normalized multi-cloud governance payload — maps into the same SQL tables as
+/// Azure Advisor / Policy / Defender so the existing UI works for AWS/GCP.
+/// </summary>
+public sealed class CloudGovernanceSnapshot
+{
+    public IReadOnlyList<DefenderFinding> SecurityFindings { get; set; } = [];
+    public IReadOnlyList<AdvisorRecommendation> Recommendations { get; set; } = [];
+    public IReadOnlyList<PolicyComplianceRecord> PolicyRecords { get; set; } = [];
+    /// <summary>Human-readable notes when a source was skipped (e.g. API not enabled).</summary>
+    public IReadOnlyList<string> SourceNotes { get; set; } = [];
+}
+
+/// <summary>
+/// Syncs AWS/GCP provider-native security, recommendations, and policy into the
+/// shared recommendation tables (parity with Azure Advisor/Policy/Defender timers).
+/// </summary>
+public interface IMultiCloudGovernanceSyncService
+{
+    /// <summary>Sync all linked AWS/GCP accounts for one workspace.</summary>
+    Task<CloudGovernanceSnapshot> SyncTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Sync every workspace that has active multi-cloud accounts.</summary>
+    Task SyncAllAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>Resolves the adapter for a provider.</summary>

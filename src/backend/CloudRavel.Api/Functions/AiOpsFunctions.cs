@@ -25,6 +25,7 @@ public sealed class AiOpsFunctions
     private readonly ICloudAccountRepository _cloudAccountRepo;
     private readonly ICloudProviderAdapterFactory _adapterFactory;
     private readonly IMultiCloudInventoryService _multiCloudInventory;
+    private readonly IMultiCloudGovernanceSyncService _multiCloudGovernance;
     private readonly ITenantRepository _tenantRepo;
     private readonly IInventoryRepository _inventoryRepo;
     private readonly IPlatformInfo _platform;
@@ -40,6 +41,7 @@ public sealed class AiOpsFunctions
         ICloudAccountRepository cloudAccountRepo,
         ICloudProviderAdapterFactory adapterFactory,
         IMultiCloudInventoryService multiCloudInventory,
+        IMultiCloudGovernanceSyncService multiCloudGovernance,
         ITenantRepository tenantRepo,
         IInventoryRepository inventoryRepo,
         IPlatformInfo platform,
@@ -54,6 +56,7 @@ public sealed class AiOpsFunctions
         _cloudAccountRepo = cloudAccountRepo;
         _adapterFactory = adapterFactory;
         _multiCloudInventory = multiCloudInventory;
+        _multiCloudGovernance = multiCloudGovernance;
         _tenantRepo = tenantRepo;
         _inventoryRepo = inventoryRepo;
         _platform = platform;
@@ -704,6 +707,46 @@ public sealed class AiOpsFunctions
         {
             _logger.LogError(ex, "On-demand collection failed for cloud account {AccountId}", id);
             return await BadRequest(req, "COLLECTION_FAILED", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// POST /api/cloud-orgs/governance/sync — on-demand AWS/GCP Security · Governance · Policy
+    /// sync for the current workspace (parity with Azure Advisor/Policy/Defender timers).
+    /// Also runs after each multi-cloud Collect.
+    /// </summary>
+    [Function("SyncMultiCloudGovernance")]
+    public async Task<HttpResponseData> SyncMultiCloudGovernance(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "cloud-orgs/governance/sync")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+        var tenantId = context.GetTenantId();
+
+        if (!_platform.IsProduction)
+            return await BadRequest(req, "DEVELOPMENT_MODE",
+                $"Governance sync is disabled while the instance environment is {_platform.Environment}. " +
+                "Set Platform:Environment=Production to sync against real clouds.");
+
+        try
+        {
+            var snap = await _multiCloudGovernance.SyncTenantAsync(tenantId);
+            var response = req.CreateCorsResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(new
+            {
+                tenantId,
+                securityFindings = snap.SecurityFindings.Count,
+                recommendations = snap.Recommendations.Count,
+                policyRecords = snap.PolicyRecords.Count,
+                notes = snap.SourceNotes
+            });
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "On-demand multi-cloud governance sync failed for tenant {TenantId}", tenantId);
+            return await BadRequest(req, "GOVERNANCE_SYNC_FAILED", ex.Message);
         }
     }
 

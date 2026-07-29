@@ -38,7 +38,8 @@ export default function GovernancePage() {
       <div>
         <h1 className="text-xl font-bold">Governance & Compliance</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Azure Advisor and Policy, plus multi-cloud recommendations derived from AWS/GCP inventory (tagging, security hygiene).
+          Azure Advisor &amp; Policy · AWS Trusted Advisor &amp; Config · GCP Recommender &amp; Organization Policy —
+          plus inventory-derived recommendations after multi-cloud collect.
         </p>
       </div>
 
