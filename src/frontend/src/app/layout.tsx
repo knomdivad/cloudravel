@@ -139,11 +139,20 @@ function LoginPage() {
           </>
         )}
 
-        <form onSubmit={handleLocalLogin} className="text-left space-y-3">
+        <form onSubmit={handleLocalLogin} className="text-left space-y-3" noValidate>
           <div>
             <label className="text-xs text-gray-500 block mb-1">Email</label>
+            {/*
+              type="text" (not type="email"): HTML5 email validation rejects
+              bootstrap identities like admin@local (single-label domain).
+              Login identity is still the email string stored in the users table.
+            */}
             <input
-              type="email"
+              type="text"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
@@ -151,6 +160,9 @@ function LoginPage() {
               required
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-azure-500 focus:outline-none"
             />
+            <p className="text-[11px] text-gray-400 mt-1">
+              Use your login email (e.g. <span className="font-mono">admin@local</span>).
+            </p>
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">Password</label>
