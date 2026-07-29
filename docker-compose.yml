@@ -10,7 +10,7 @@
 #     docker compose down               # stop everything
 #
 #   Web UI  → http://localhost:3000   (log in with the seeded local admin:
-#                                       username 'admin', password 'ChangeMe123!')
+#                                       email 'admin@local', password 'ChangeMe123!')
 #   API     → http://localhost:7071/api/health
 #   OpenBao → http://localhost:8200   (dev mode, root token 'root')
 #
@@ -59,7 +59,7 @@ services:
       - azurite-data:/data
 
   # Applies schema migrations once each (dbo.__migrations ledger). Leaves a
-  # blank estate plus the bootstrap local admin (admin / ChangeMe123!) —
+  # blank estate plus the bootstrap local admin (admin@local / ChangeMe123!) —
   # no Contoso demo seed. Optional: sqlcmd seed-demo-data.sql by hand.
   migrator:
     image: mcr.microsoft.com/mssql-tools:latest

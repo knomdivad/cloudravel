@@ -16,7 +16,7 @@ Reach the web UI:
 {{- end }}
 
 SECURITY — change these before any non-local use:
-  • Default login (seeded): username "admin", password "ChangeMe123!"
+  • Default login (seeded): email "admin@local", password "ChangeMe123!"
     The password hash is public (it ships in source control). Change it immediately.
   • secrets.localAuthJwtSigningKey must be a long random value (required to boot).
   • Do not use OpenBao token "root" outside local/dev.

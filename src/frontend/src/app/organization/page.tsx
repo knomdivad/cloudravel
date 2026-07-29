@@ -101,7 +101,6 @@ function MembersCard({ orgId, showToast }: { orgId: string; showToast: (m: strin
 
 function AddMemberModal({ orgId, onClose, onAdded }: { orgId: string; onClose: () => void; onAdded: () => void }) {
   const [mode, setMode] = useState<'existing' | 'new'>('existing');
-  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
@@ -113,9 +112,10 @@ function AddMemberModal({ orgId, onClose, onAdded }: { orgId: string; onClose: (
     e.preventDefault();
     setBusy(true); setError(null);
     try {
+      const eaddr = email.trim().toLowerCase();
       await api.addOrgUser(orgId, mode === 'new'
-        ? { username: username.trim(), email: email.trim(), displayName: displayName.trim(), password, role }
-        : { username: username.trim() || undefined, email: email.trim() || undefined, role });
+        ? { email: eaddr, username: eaddr, displayName: displayName.trim(), password, role }
+        : { email: eaddr, role });
       onAdded();
     } catch (err: any) { setError(err?.message ?? 'Failed to add member.'); }
     finally { setBusy(false); }
@@ -135,15 +135,14 @@ function AddMemberModal({ orgId, onClose, onAdded }: { orgId: string; onClose: (
       <form onSubmit={submit} className="space-y-4">
         {mode === 'existing' ? (
           <>
-            <p className="text-xs text-gray-500">Grant an existing user access by username or email.</p>
-            <Field label="Username" mono value={username} onChange={setUsername} placeholder="jane" />
-            <Field label="or Email" value={email} onChange={setEmail} placeholder="jane@example.com" />
+            <p className="text-xs text-gray-500">Grant access by email (login identity).</p>
+            <Field label="Email" required mono type="email" value={email} onChange={setEmail} placeholder="jane@example.com" />
           </>
         ) : (
           <>
             <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Jane Operator" />
-            <Field label="Email" value={email} onChange={setEmail} placeholder="jane@example.com" />
-            <Field label="Username" required mono value={username} onChange={setUsername} placeholder="jane" />
+            <Field label="Email (login)" required mono type="email" value={email} onChange={setEmail} placeholder="jane@example.com" />
+            <p className="text-xs text-gray-500 -mt-2">Email is the unique login identity (same as SSO). No separate username.</p>
             <Field label="Temporary Password" required type="password" value={password} onChange={setPassword} placeholder="Communicate out-of-band" />
           </>
         )}

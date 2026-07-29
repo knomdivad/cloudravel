@@ -85,37 +85,73 @@ public sealed class OrgAdminFunctions
         if (!ValidOrgRoles.Contains(body.Role))
             return await BadRequest(req, "INVALID_ROLE", $"role must be one of: {string.Join(", ", ValidOrgRoles)}");
 
-        // Resolve an existing user by username or email, else create a new local user.
-        User? user = null;
-        if (!string.IsNullOrWhiteSpace(body.Username))
-            user = await _userRepo.GetByUsernameAsync(body.Username.Trim());
-        if (user == null && !string.IsNullOrWhiteSpace(body.Email))
-            user = await _userRepo.GetByEmailAsync(body.Email.Trim());
+        // Password present ⇒ create a new local user. Otherwise attach an existing one by email.
+        var isCreate = !string.IsNullOrWhiteSpace(body.Password);
+        User? user;
 
-        if (user == null)
+        if (isCreate)
         {
-            if (string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrWhiteSpace(body.Password)
-                || string.IsNullOrWhiteSpace(body.DisplayName))
-                return await BadRequest(req, "USER_NOT_FOUND",
-                    "No existing user matched. To create a new local user, provide displayName, username, and password.");
-            if (await _userRepo.GetByUsernameAsync(body.Username.Trim()) != null)
-                return await Conflict(req, "USERNAME_TAKEN", "That username is already in use.");
+            if (string.IsNullOrWhiteSpace(body.DisplayName) || string.IsNullOrWhiteSpace(body.Email))
+                return await BadRequest(req, "INVALID_REQUEST",
+                    "displayName, email, and password are required to create a new local user.");
 
-            user = await _userRepo.CreateLocalUserAsync(new User
+            var email = body.Email.Trim().ToLowerInvariant();
+            if (!email.Contains('@', StringComparison.Ordinal))
+                return await BadRequest(req, "INVALID_EMAIL",
+                    "email must be a valid email address (also used as login username).");
+
+            if (await _userRepo.GetByEmailAsync(email) != null
+                || await _userRepo.GetByUsernameAsync(email) != null)
+                return await Conflict(req, "EMAIL_TAKEN", "That email is already in use.");
+
+            try
             {
-                UserId = Guid.NewGuid(),
-                DisplayName = body.DisplayName.Trim(),
-                Email = (body.Email ?? string.Empty).Trim(),
-                Username = body.Username.Trim(),
-                GlobalRole = SystemRole.Member
-            }, PasswordHasher.Hash(body.Password));
+                user = await _userRepo.CreateLocalUserAsync(new User
+                {
+                    UserId = Guid.NewGuid(),
+                    DisplayName = body.DisplayName.Trim(),
+                    Email = email,
+                    Username = email,
+                    GlobalRole = SystemRole.Member
+                }, PasswordHasher.Hash(body.Password!));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create local user '{Email}'", email);
+                return await BadRequest(req, "USER_CREATE_FAILED",
+                    $"Could not create user. Detail: {ex.Message}");
+            }
+        }
+        else
+        {
+            // Attach existing user by email (login identity). Username field is treated as email alias.
+            var identity = !string.IsNullOrWhiteSpace(body.Email)
+                ? body.Email.Trim()
+                : body.Username?.Trim();
+            if (string.IsNullOrWhiteSpace(identity))
+                return await BadRequest(req, "INVALID_REQUEST", "email is required to attach an existing user.");
+
+            user = await _userRepo.GetByEmailAsync(identity)
+                ?? await _userRepo.GetByUsernameAsync(identity);
+            if (user == null)
+                return await BadRequest(req, "USER_NOT_FOUND",
+                    "No existing user matched that email. To create a new local user, include a password.");
         }
 
         var grantedBy = context.GetUserId() ?? Guid.Empty;
-        // user_tenant_access FK → tenants; orgs created before the workspace-shell
-        // fix may lack a tenants row — repair on demand.
-        await EnsureWorkspaceTenantShellAsync(orgId, grantedBy);
-        await _userRepo.GrantTenantAccessAsync(user.UserId, orgId, body.Role, grantedBy);
+        try
+        {
+            // user_tenant_access FK → tenants; materialize shell if missing.
+            await EnsureWorkspaceTenantShellAsync(orgId, grantedBy);
+            await _userRepo.GrantTenantAccessAsync(user.UserId, orgId, body.Role, grantedBy);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to grant {Role} on org {OrgId} to user {UserId}", body.Role, orgId, user.UserId);
+            return await BadRequest(req, "GRANT_FAILED",
+                "Could not grant org access. Run database/repair-org-workspace-shell.sql if this org " +
+                $"is missing a tenants workspace row. Detail: {ex.Message}");
+        }
 
         var dto = AdminFunctions.ToDto(user);
         dto.OrgRole = body.Role;

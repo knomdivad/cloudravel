@@ -29,10 +29,19 @@ public sealed class LocalAuthService : ILocalAuthService
 
     public async Task<LocalAuthResult?> LoginAsync(string username, string password)
     {
-        var user = await _userRepo.GetByUsernameAsync(username);
+        // Login identity is email (username column equals email for local users).
+        // Accept either field for a short transition after older seeds used "admin".
+        var login = username.Trim();
+        var user = await _userRepo.GetByUsernameAsync(login)
+            ?? await _userRepo.GetByEmailAsync(login);
+        // Legacy bootstrap username before 013-email-as-username
+        if (user == null && login.Equals("admin", StringComparison.OrdinalIgnoreCase))
+            user = await _userRepo.GetByEmailAsync("admin@local")
+                ?? await _userRepo.GetByUsernameAsync("admin@local");
+
         if (user == null || !user.IsActive || !PasswordHasher.Verify(password, user.PasswordHash))
         {
-            _logger.LogWarning("Local login failed for username '{Username}'", username);
+            _logger.LogWarning("Local login failed for '{Login}'", login);
             return null;
         }
 

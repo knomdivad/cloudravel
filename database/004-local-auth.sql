@@ -38,7 +38,8 @@ GO
 --                                of local/dev use; this hash is public (it's
 --                                in source control).
 -- ============================================================================
-IF NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin')
+-- Login identity is email (username = email). Seed: admin@local / ChangeMe123!
+IF NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin@local' OR email = 'admin@local')
 BEGIN
     INSERT INTO users (user_id, display_name, email, global_role, is_active, auth_provider, username, password_hash)
     VALUES (
@@ -48,7 +49,7 @@ BEGIN
         'admin',
         1,
         'local',
-        'admin',
+        'admin@local',
         'pbkdf2$sha256$210000$2gNPz+6njzR/uNEO1g3o9A==$zaisf4nCNps9iP/VJ++Io6KzgyPXL2FEzg4Ux22FYpE='
     );
 END

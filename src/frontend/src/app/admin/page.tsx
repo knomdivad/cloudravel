@@ -204,7 +204,6 @@ function UsersCard({ showToast }: { showToast: (m: string, t: ToastType) => void
 function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [globalRole, setGlobalRole] = useState('member');
   const [busy, setBusy] = useState(false);
@@ -214,7 +213,9 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      await api.createUser({ displayName: displayName.trim(), email: email.trim(), username: username.trim(), password, globalRole });
+      const eaddr = email.trim().toLowerCase();
+      // Email is the unique login identity (username = email server-side).
+      await api.createUser({ displayName: displayName.trim(), email: eaddr, username: eaddr, password, globalRole });
       onCreated();
     } catch (err: any) { setError(err?.message ?? 'Failed to create user.'); }
     finally { setBusy(false); }
@@ -225,8 +226,8 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
       {error && <ErrorBox>{error}</ErrorBox>}
       <form onSubmit={submit} className="space-y-4">
         <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Jane Operator" />
-        <Field label="Email" required value={email} onChange={setEmail} placeholder="jane@example.com" />
-        <Field label="Username" required mono value={username} onChange={setUsername} placeholder="jane" />
+        <Field label="Email (login)" required mono type="email" value={email} onChange={setEmail} placeholder="jane@example.com" />
+        <p className="text-xs text-gray-500 -mt-2">Email is the unique login identity (same as SSO). No separate username.</p>
         <Field label="Temporary Password" required type="password" value={password} onChange={setPassword} placeholder="Communicate out-of-band" />
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">System role</label>
