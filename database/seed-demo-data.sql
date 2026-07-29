@@ -1,12 +1,14 @@
 -- ============================================================================
--- Demo seed data — NOT a migration, run manually against a local/dev database
--- when you want something to look at. Populates one tenant ("Contoso Corp")
--- with a realistic mix of Azure, AWS, and GCP inventory, changes,
--- recommendations, security findings, and a few AIOps anomalies/incidents/
--- remediation actions so every page in the UI has something to show.
+-- Demo seed data — OPTIONAL, not part of apply-migrations.sh
+--
+-- The migrator intentionally does NOT run this file. Fresh deploys get only
+-- the schema + bootstrap local admin (004/011). Use this script when you want
+-- Contoso sample inventory/AIOps rows for UI demos.
 --
 -- Safe to re-run: skips entirely if "Contoso Corp" already exists.
--- Run after 001-008: sqlcmd -S localhost -d cloudraveldb -i seed-demo-data.sql
+-- After migrations (001–012), e.g.:
+--   sqlcmd -S localhost -d cloudraveldb -U sa -P "$MSSQL_SA_PASSWORD" -I \
+--     -i database/seed-demo-data.sql
 -- ============================================================================
 
 EXEC sp_set_session_context @key = N'bypass_rls', @value = 1;

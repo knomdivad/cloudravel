@@ -135,10 +135,11 @@ make up          # build + start detached (safe to close the shell)
 
 - Frontend: http://localhost:3000
 - API: http://localhost:7071/api
-- First boot applies all `database/*.sql` migrations automatically (see the
-  `db-init` service) and seeds a default local admin account:
+- First boot applies schema migrations (`001`–`012`) automatically and creates
+  a default local **system admin** only (no demo orgs/clouds):
   **username `admin`, password `ChangeMe123!`** — change this immediately
-  outside of local/dev use, since the hash is public (it's in source control).
+  outside of local/dev use; the hash is public (it's in source control).
+  Optional Contoso demo rows: run `database/seed-demo-data.sql` manually.
 
 Sign in with that account, or with Microsoft if you've set `AZURE_AD_TENANT_ID`
 / `AZURE_AD_CLIENT_ID` in `.env` — both login paths work side by side.
@@ -207,19 +208,23 @@ sqlcmd -S localhost -d cloudraveldb -i 005-job-queue.sql
 The repo ships a self-contained, **cloud-agnostic** stack — SQL Server, OpenBao
 (secret store), the Azure Storage emulator, the Functions API, and the Next.js
 UI — so `docker compose up` brings everything up with no dependency on any
-Azure-only service. Migrations and demo data are applied automatically.
+Azure-only service. Schema migrations run automatically; the only seed is the
+bootstrap `admin` user (no demo organization or inventory).
 
 ```bash
 cp .env.example .env
-# Set MSSQL_SA_PASSWORD. Everything else has a working local default —
-# no Entra ID or cloud account required.
+# Set MSSQL_SA_PASSWORD and LOCAL_AUTH_JWT_SIGNING_KEY.
+# For live cloud collection: PLATFORM_ENVIRONMENT=Production
 
 docker compose up --build
 ```
 
-Then open **http://localhost:3000** and sign in with the seeded local admin:
+Then open **http://localhost:3000** and sign in with the bootstrap local admin:
 
 > username **`admin`** · password **`ChangeMe123!`**  *(dev default — change it)*
+
+Create your organization, users, and cloud connections in the UI. Optional
+Contoso demo dataset: apply `database/seed-demo-data.sql` manually after migrate.
 
 | Service | URL / Port | Notes |
 |---|---|---|
@@ -240,17 +245,15 @@ Notes:
   Azure Functions base image is amd64-only) run under `linux/amd64` emulation,
   handled transparently by OrbStack. The API build stage and the `web` container
   are native arm64.
-- The `migrator` service applies `database/001`–`006` plus the demo seed once
-  each, tracked in a `dbo.__migrations` ledger, so `docker compose up` is safe to
-  re-run and picks up newly-added migrations.
-- Cloud-credential-dependent sync timers (change polling, Advisor/Policy/Defender
-  sync, ARI collection, multi-cloud sync) are **disabled** in the container; the
-  DB-driven AIOps timers (anomaly scan, remediation queue, snapshot-queue drain)
-  stay enabled so the Operations and Approvals pages are live against the demo
-  data. The AI Insights page needs an OpenAI-compatible endpoint — set
-  `AZURE_OPENAI_*` in `.env`.
+- The `migrator` service applies `database/001`–`012` once each (ledger
+  `dbo.__migrations`). No Contoso demo seed.
+- Live cloud timers/collection need `PLATFORM_ENVIRONMENT=Production` and real
+  credentials in OpenBao. Compose defaults to Development (safe; no live collect).
+  AI Insights needs `OPENAI_*` (or Admin → System Settings).
 - To ship an update: `git pull && docker compose up --build` (add `--force-recreate`
   if a container is caching an old image).
+- **Clean slate** (wipe DB + re-bootstrap admin only):
+  `docker compose down -v && docker compose up -d --build`
 
 #### Local Configuration
 
