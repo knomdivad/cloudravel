@@ -12,8 +12,12 @@ namespace CloudRavel.Infrastructure.MultiCloud;
 /// Credentials come from the secret store (CloudAccount.CredentialSecretName) as JSON:
 ///   { "accessKeyId": "...", "secretAccessKey": "...", "sessionToken": "...?", "defaultRegion": "us-east-1" }
 ///
-/// Inventory: Resource Groups Tagging API GetResources — one call per region
-/// enumerates every taggable resource's ARN + tags across all services.
+/// Inventory (per scanned region):
+///   1. Resource Groups Tagging API GetResources — taggable resources across services
+///   2. EC2 Describe* — VPCs, subnets, security groups, IGWs, route tables, NACLs,
+///      NAT gateways, instances, volumes (covers default/untagged networking that
+///      Tagging API often omits)
+///   Resources are merged by ARN (Tagging tags win when both sources return the same id).
 ///
 /// Supported remediation action types:
 ///   aws.ec2.stop_instance       — EC2 StopInstances (params: instanceId, region)
@@ -66,67 +70,231 @@ public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
     public async Task<IReadOnlyList<InventoryResource>> CollectInventoryAsync(CloudAccount account, CancellationToken cancellationToken = default)
     {
         var creds = await ResolveCredentialsAsync(account);
-        var regions = account.Regions is { Count: > 0 } ? account.Regions : new List<string> { creds.DefaultRegion };
-        var resources = new List<InventoryResource>();
+        var regions = account.Regions is { Count: > 0 } ? account.Regions : new List<string> { creds.DefaultRegion ?? "us-east-1" };
+        // Dedupe by ARN — EC2 Describe fills gaps Tagging API skips (untagged VPC/SG/etc.)
+        var byArn = new Dictionary<string, InventoryResource>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var region in regions)
         {
-            string? paginationToken = null;
-            do
+            cancellationToken.ThrowIfCancellationRequested();
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                await CollectTaggedResourcesAsync(account, creds, region, byArn, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Tagging inventory failed for account {Account} region {Region}", account.ExternalId, region);
+            }
 
-                var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
-                {
-                    ["ResourcesPerPage"] = 100,
-                    ["PaginationToken"] = string.IsNullOrEmpty(paginationToken) ? null : paginationToken
-                }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
-
-                var body = Encoding.UTF8.GetBytes(payload);
-                var request = new HttpRequestMessage(HttpMethod.Post, $"https://tagging.{region}.amazonaws.com/")
-                {
-                    Content = new ByteArrayContent(body)
-                };
-                request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-amz-json-1.1");
-                request.Headers.TryAddWithoutValidation("X-Amz-Target", "ResourceGroupsTaggingAPI_20170126.GetResources");
-                AwsSigV4.Sign(request, "tagging", region, creds.AccessKeyId, creds.SecretAccessKey, creds.SessionToken, body);
-
-                var response = await Http.SendAsync(request, cancellationToken);
-                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (!response.IsSuccessStatusCode)
-                    throw new InvalidOperationException($"Tagging API ({region}) returned {(int)response.StatusCode}: {responseBody}");
-
-                using var doc = JsonDocument.Parse(responseBody);
-                if (doc.RootElement.TryGetProperty("ResourceTagMappingList", out var list))
-                {
-                    foreach (var item in list.EnumerateArray())
-                    {
-                        var arn = item.TryGetProperty("ResourceARN", out var arnProp) ? arnProp.GetString() : null;
-                        if (string.IsNullOrEmpty(arn)) continue;
-
-                        Dictionary<string, string>? tags = null;
-                        if (item.TryGetProperty("Tags", out var tagsProp) && tagsProp.ValueKind == JsonValueKind.Array)
-                        {
-                            tags = new Dictionary<string, string>();
-                            foreach (var t in tagsProp.EnumerateArray())
-                            {
-                                var key = t.TryGetProperty("Key", out var k) ? k.GetString() : null;
-                                var value = t.TryGetProperty("Value", out var v) ? v.GetString() ?? "" : "";
-                                if (!string.IsNullOrEmpty(key)) tags[key] = value;
-                            }
-                        }
-
-                        resources.Add(NormalizeArn(account, arn, region, tags));
-                    }
-                }
-
-                paginationToken = doc.RootElement.TryGetProperty("PaginationToken", out var pt) ? pt.GetString() : null;
-            } while (!string.IsNullOrEmpty(paginationToken));
+            try
+            {
+                await CollectEc2NetworkAndComputeAsync(account, creds, region, byArn, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "EC2 inventory failed for account {Account} region {Region}", account.ExternalId, region);
+            }
         }
 
+        var resources = byArn.Values.ToList();
         _logger.LogInformation("Collected {Count} AWS resources for account {AccountId} ({Regions})",
             resources.Count, account.ExternalId, string.Join(",", regions));
         return resources;
+    }
+
+    private async Task CollectTaggedResourcesAsync(
+        CloudAccount account, AwsCredentials creds, string region,
+        Dictionary<string, InventoryResource> byArn, CancellationToken cancellationToken)
+    {
+        string? paginationToken = null;
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["ResourcesPerPage"] = 100,
+                ["PaginationToken"] = string.IsNullOrEmpty(paginationToken) ? null : paginationToken
+            }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+
+            var body = Encoding.UTF8.GetBytes(payload);
+            var request = new HttpRequestMessage(HttpMethod.Post, $"https://tagging.{region}.amazonaws.com/")
+            {
+                Content = new ByteArrayContent(body)
+            };
+            request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-amz-json-1.1");
+            request.Headers.TryAddWithoutValidation("X-Amz-Target", "ResourceGroupsTaggingAPI_20170126.GetResources");
+            AwsSigV4.Sign(request, "tagging", region, creds.AccessKeyId, creds.SecretAccessKey, creds.SessionToken, body);
+
+            var response = await Http.SendAsync(request, cancellationToken);
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Tagging API ({region}) returned {(int)response.StatusCode}: {responseBody}");
+
+            using var doc = JsonDocument.Parse(responseBody);
+            if (doc.RootElement.TryGetProperty("ResourceTagMappingList", out var list))
+            {
+                foreach (var item in list.EnumerateArray())
+                {
+                    var arn = item.TryGetProperty("ResourceARN", out var arnProp) ? arnProp.GetString() : null;
+                    if (string.IsNullOrEmpty(arn)) continue;
+
+                    Dictionary<string, string>? tags = null;
+                    if (item.TryGetProperty("Tags", out var tagsProp) && tagsProp.ValueKind == JsonValueKind.Array)
+                    {
+                        tags = new Dictionary<string, string>();
+                        foreach (var t in tagsProp.EnumerateArray())
+                        {
+                            var key = t.TryGetProperty("Key", out var k) ? k.GetString() : null;
+                            var value = t.TryGetProperty("Value", out var v) ? v.GetString() ?? "" : "";
+                            if (!string.IsNullOrEmpty(key)) tags[key] = value;
+                        }
+                    }
+
+                    // Tagging API is the richer source for tags — always overwrite
+                    byArn[arn] = NormalizeArn(account, arn, region, tags);
+                }
+            }
+
+            paginationToken = doc.RootElement.TryGetProperty("PaginationToken", out var pt) ? pt.GetString() : null;
+        } while (!string.IsNullOrEmpty(paginationToken));
+    }
+
+    /// <summary>
+    /// EC2 networking + compute that Tagging API often misses (default VPC, untagged SGs, etc.).
+    /// </summary>
+    private async Task CollectEc2NetworkAndComputeAsync(
+        CloudAccount account, AwsCredentials creds, string region,
+        Dictionary<string, InventoryResource> byArn, CancellationToken ct)
+    {
+        var accountId = account.ExternalId;
+
+        // action → (xml id tag, arn resource type prefix, inventory type)
+        var describes = new (string Action, string IdTag, string ArnType, string ResourceType)[]
+        {
+            ("DescribeVpcs", "vpcId", "vpc", "ec2/vpc"),
+            ("DescribeSubnets", "subnetId", "subnet", "ec2/subnet"),
+            ("DescribeSecurityGroups", "groupId", "security-group", "ec2/security-group"),
+            ("DescribeInternetGateways", "internetGatewayId", "internet-gateway", "ec2/internet-gateway"),
+            ("DescribeRouteTables", "routeTableId", "route-table", "ec2/route-table"),
+            ("DescribeNetworkAcls", "networkAclId", "network-acl", "ec2/network-acl"),
+            ("DescribeNatGateways", "natGatewayId", "natgateway", "ec2/natgateway"),
+            ("DescribeVolumes", "volumeId", "volume", "ec2/volume"),
+        };
+
+        foreach (var (action, idTag, arnType, resourceType) in describes)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var xml = await Ec2QueryAsync(creds, region, action, ct);
+                foreach (var id in ExtractXmlTags(xml, idTag).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (string.IsNullOrWhiteSpace(id)) continue;
+                    var arn = $"arn:aws:ec2:{region}:{accountId}:{arnType}/{id}";
+                    if (byArn.ContainsKey(arn)) continue; // keep tagging tags if already present
+
+                    var nameFromTags = ExtractNameFromEc2TagSetNearId(xml, id);
+                    byArn[arn] = new InventoryResource
+                    {
+                        TenantId = account.TenantId,
+                        Provider = "aws",
+                        ResourceId = arn,
+                        SubscriptionId = accountId,
+                        ResourceGroup = "ec2",
+                        ResourceType = resourceType,
+                        ResourceName = nameFromTags ?? id,
+                        Location = region
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "EC2 {Action} skipped in {Region}", action, region);
+            }
+        }
+
+        // Instances (reservation → instances → instanceId)
+        try
+        {
+            var xml = await Ec2QueryAsync(creds, region, "DescribeInstances", ct);
+            foreach (var id in ExtractXmlTags(xml, "instanceId").Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(id) || id.StartsWith("r-", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var arn = $"arn:aws:ec2:{region}:{accountId}:instance/{id}";
+                if (byArn.ContainsKey(arn)) continue;
+                var nameFromTags = ExtractNameFromEc2TagSetNearId(xml, id);
+                byArn[arn] = new InventoryResource
+                {
+                    TenantId = account.TenantId,
+                    Provider = "aws",
+                    ResourceId = arn,
+                    SubscriptionId = accountId,
+                    ResourceGroup = "ec2",
+                    ResourceType = "ec2/instance",
+                    ResourceName = nameFromTags ?? id,
+                    Location = region
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "EC2 DescribeInstances skipped in {Region}", region);
+        }
+    }
+
+    private async Task<string> Ec2QueryAsync(AwsCredentials creds, string region, string action, CancellationToken ct)
+    {
+        var body = Encoding.UTF8.GetBytes($"Action={action}&Version=2016-11-15");
+        var request = new HttpRequestMessage(HttpMethod.Post, $"https://ec2.{region}.amazonaws.com/")
+        {
+            Content = new ByteArrayContent(body)
+        };
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-www-form-urlencoded");
+        AwsSigV4.Sign(request, "ec2", region, creds.AccessKeyId, creds.SecretAccessKey, creds.SessionToken, body);
+        var response = await Http.SendAsync(request, ct);
+        var xml = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"EC2 {action} {(int)response.StatusCode}: {Truncate(xml, 300)}");
+        return xml;
+    }
+
+    /// <summary>
+    /// Best-effort Name tag near a resource id in EC2 XML (tagSet is nested under the item).
+    /// </summary>
+    private static string? ExtractNameFromEc2TagSetNearId(string xml, string resourceId)
+    {
+        var idIdx = xml.IndexOf($">{resourceId}", StringComparison.Ordinal);
+        if (idIdx < 0) return null;
+        // Search a window after the id for tagSet with Name
+        var window = xml.Substring(idIdx, Math.Min(4000, xml.Length - idIdx));
+        var nameKey = window.IndexOf("<key>Name</key>", StringComparison.OrdinalIgnoreCase);
+        if (nameKey < 0) nameKey = window.IndexOf("<key>name</key>", StringComparison.OrdinalIgnoreCase);
+        if (nameKey < 0) return null;
+        var after = window[(nameKey + 10)..];
+        var open = after.IndexOf("<value>", StringComparison.OrdinalIgnoreCase);
+        var close = after.IndexOf("</value>", StringComparison.OrdinalIgnoreCase);
+        if (open < 0 || close <= open) return null;
+        var value = after[(open + 7)..close].Trim();
+        return string.IsNullOrEmpty(value) ? null : value;
+    }
+
+    private static IEnumerable<string> ExtractXmlTags(string xml, string tag)
+    {
+        var open = $"<{tag}>";
+        var close = $"</{tag}>";
+        var idx = 0;
+        while (true)
+        {
+            var start = xml.IndexOf(open, idx, StringComparison.Ordinal);
+            if (start < 0) yield break;
+            start += open.Length;
+            var end = xml.IndexOf(close, start, StringComparison.Ordinal);
+            if (end < 0) yield break;
+            yield return xml[start..end];
+            idx = end + close.Length;
+        }
     }
 
     public async Task<RemediationExecutionResult> ExecuteRemediationAsync(
