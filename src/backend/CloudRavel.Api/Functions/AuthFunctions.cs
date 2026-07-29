@@ -1,8 +1,10 @@
 using System.Net;
+using System.Text.Json;
 using CloudRavel.Api.Auth;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.DTOs;
 using CloudRavel.Core.Interfaces;
+using CloudRavel.Core.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -38,48 +40,69 @@ public sealed class AuthFunctions
     /// POST /api/auth/login
     /// Anonymous — this is the login endpoint itself, so it can't require auth.
     /// </summary>
+    private static readonly JsonSerializerOptions LoginJson = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
     [Function("LocalLogin")]
     public async Task<HttpResponseData> Login(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "auth/login")] HttpRequestData req)
     {
-        var body = await req.ReadFromJsonAsync<LoginRequestDto>();
+        LoginRequestDto? body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync<LoginRequestDto>(req.Body, LoginJson);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse login request body");
+            body = null;
+        }
+
         if (body == null || string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrWhiteSpace(body.Password))
         {
-            var badReq = req.CreateCorsResponse(HttpStatusCode.BadRequest);
-            await badReq.WriteAsJsonAsync(new ErrorResponse { Code = "INVALID_REQUEST", Message = "Username and password are required." });
-            return badReq;
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest,
+                new ErrorResponse { Code = "INVALID_REQUEST", Message = "Username and password are required." });
         }
 
         var username = body.Username.Trim();
         var clientIp = req.Headers.TryGetValues("X-Forwarded-For", out var xff)
             ? xff.FirstOrDefault()?.Split(',')[0].Trim()
-            : req.Url.Host;
+            : null;
+        if (string.IsNullOrEmpty(clientIp))
+            clientIp = req.Headers.TryGetValues("X-Real-IP", out var xri) ? xri.FirstOrDefault() : "unknown";
         var rateKey = $"{clientIp}|{username.ToLowerInvariant()}";
 
         if (!_rateLimiter.IsAllowed(rateKey))
         {
             _logger.LogWarning("Login rate limit exceeded for {Key}", rateKey);
-            var tooMany = req.CreateCorsResponse((HttpStatusCode)429);
-            await tooMany.WriteAsJsonAsync(new ErrorResponse
-            {
-                Code = "RATE_LIMITED",
-                Message = "Too many login attempts. Try again in a minute."
-            });
-            return tooMany;
+            return await WriteJsonAsync(req, (HttpStatusCode)429,
+                new ErrorResponse { Code = "RATE_LIMITED", Message = "Too many login attempts. Try again in a minute." });
         }
 
-        var result = await _localAuth.LoginAsync(username, body.Password);
+        LocalAuthResult? result;
+        try
+        {
+            result = await _localAuth.LoginAsync(username, body.Password);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Local login threw for username '{Username}'", username);
+            return await WriteJsonAsync(req, HttpStatusCode.InternalServerError,
+                new ErrorResponse { Code = "LOGIN_FAILED", Message = "Login failed due to a server error. Check API logs." });
+        }
+
         if (result == null)
         {
-            var unauthorized = req.CreateCorsResponse(HttpStatusCode.Unauthorized);
-            await unauthorized.WriteAsJsonAsync(new ErrorResponse { Code = "INVALID_CREDENTIALS", Message = "Invalid username or password." });
-            return unauthorized;
+            return await WriteJsonAsync(req, HttpStatusCode.Unauthorized,
+                new ErrorResponse { Code = "INVALID_CREDENTIALS", Message = "Invalid username or password." });
         }
 
         _rateLimiter.Reset(rateKey);
 
-        var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new LoginResponseDto
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new LoginResponseDto
         {
             Token = result.Token,
             ExpiresAt = result.ExpiresAt,
@@ -91,6 +114,13 @@ public sealed class AuthFunctions
                 GlobalRole = result.User.GlobalRole,
             }
         });
+    }
+
+    private static async Task<HttpResponseData> WriteJsonAsync<T>(HttpRequestData req, HttpStatusCode status, T body)
+    {
+        var response = req.CreateCorsResponse(status);
+        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        await response.WriteStringAsync(JsonSerializer.Serialize(body, LoginJson));
         return response;
     }
 
