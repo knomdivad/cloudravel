@@ -304,8 +304,17 @@ public sealed class ErrorResponse
 
 public sealed class LoginRequestDto
 {
-    public string Username { get; set; } = string.Empty;
+    /// <summary>Login identity (email). Preferred field for the UI.</summary>
+    public string? Username { get; set; }
+    /// <summary>Alias for Username — browsers label the field "Email".</summary>
+    public string? Email { get; set; }
     public string Password { get; set; } = string.Empty;
+
+    /// <summary>Resolved login identity: username, else email.</summary>
+    public string LoginIdentity =>
+        !string.IsNullOrWhiteSpace(Username) ? Username.Trim()
+        : !string.IsNullOrWhiteSpace(Email) ? Email.Trim()
+        : string.Empty;
 }
 
 public sealed class LoginResponseDto

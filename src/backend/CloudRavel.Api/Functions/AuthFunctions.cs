@@ -61,13 +61,13 @@ public sealed class AuthFunctions
             body = null;
         }
 
-        if (body == null || string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrWhiteSpace(body.Password))
+        if (body == null || string.IsNullOrWhiteSpace(body.LoginIdentity) || string.IsNullOrWhiteSpace(body.Password))
         {
             return await WriteJsonAsync(req, HttpStatusCode.BadRequest,
-                new ErrorResponse { Code = "INVALID_REQUEST", Message = "Username and password are required." });
+                new ErrorResponse { Code = "INVALID_REQUEST", Message = "Email (or username) and password are required." });
         }
 
-        var username = body.Username.Trim();
+        var username = body.LoginIdentity;
         var clientIp = req.Headers.TryGetValues("X-Forwarded-For", out var xff)
             ? xff.FirstOrDefault()?.Split(',')[0].Trim()
             : null;

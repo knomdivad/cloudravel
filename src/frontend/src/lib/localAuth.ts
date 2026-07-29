@@ -73,10 +73,13 @@ export function clearStoredLocalToken(): void {
 
 /** Calls POST /api/auth/login and persists the returned session. */
 export async function loginLocal(username: string, password: string): Promise<LocalSession> {
+  // Send both username and email — login identity is the email string.
+  // (Older servers only read username; UI labels the field Email.)
+  const identity = username.trim();
   const response = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username: identity, email: identity, password }),
   });
 
   const payload = await response.json().catch(() => ({} as Record<string, unknown>));
