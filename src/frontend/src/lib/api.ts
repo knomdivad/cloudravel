@@ -323,6 +323,7 @@ export async function getInventoryResources(
     resourceType?: string;
     subscriptionId?: string;
     resourceGroup?: string;
+    provider?: string;
     offset?: number;
     limit?: number;
   }
@@ -331,6 +332,7 @@ export async function getInventoryResources(
   if (params?.resourceType) searchParams.set('resourceType', params.resourceType);
   if (params?.subscriptionId) searchParams.set('subscriptionId', params.subscriptionId);
   if (params?.resourceGroup) searchParams.set('resourceGroup', params.resourceGroup);
+  if (params?.provider) searchParams.set('provider', params.provider);
   if (params?.offset) searchParams.set('offset', params.offset.toString());
   if (params?.limit) searchParams.set('limit', params.limit.toString());
 

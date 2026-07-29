@@ -163,6 +163,7 @@ public sealed class InventoryRepository : IInventoryRepository
     public async Task<IReadOnlyList<InventoryResource>> GetResourcesAsync(
         Guid tenantId, long? snapshotId = null, string? resourceType = null,
         string? subscriptionId = null, string? resourceGroup = null,
+        string? provider = null,
         int offset = 0, int limit = 100)
     {
         await using var conn = await _connectionFactory.CreateConnectionAsync(tenantId);
@@ -186,8 +187,10 @@ public sealed class InventoryRepository : IInventoryRepository
             sql += " AND subscription_id = @SubscriptionId";
         if (!string.IsNullOrEmpty(resourceGroup))
             sql += " AND resource_group = @ResourceGroup";
+        if (!string.IsNullOrEmpty(provider))
+            sql += " AND LOWER(provider) = LOWER(@Provider)";
 
-        sql += " ORDER BY resource_type, resource_name OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY";
+        sql += " ORDER BY provider, resource_type, resource_name OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY";
 
         var results = await conn.QueryAsync<InventoryResource>(sql, new
         {
@@ -196,6 +199,7 @@ public sealed class InventoryRepository : IInventoryRepository
             ResourceType = resourceType,
             SubscriptionId = subscriptionId,
             ResourceGroup = resourceGroup,
+            Provider = provider,
             Offset = offset,
             Limit = limit
         });

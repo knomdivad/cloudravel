@@ -23,17 +23,23 @@ public sealed class InventoryFunctions
 {
     private readonly IInventoryRepository _inventoryRepo;
     private readonly IInventoryCollectionService _collectionService;
+    private readonly ICloudAccountRepository _cloudAccountRepo;
+    private readonly ICloudOrgRepository _cloudOrgRepo;
     private readonly IPlatformInfo _platform;
     private readonly ILogger<InventoryFunctions> _logger;
 
     public InventoryFunctions(
         IInventoryRepository inventoryRepo,
         IInventoryCollectionService collectionService,
+        ICloudAccountRepository cloudAccountRepo,
+        ICloudOrgRepository cloudOrgRepo,
         IPlatformInfo platform,
         ILogger<InventoryFunctions> logger)
     {
         _inventoryRepo = inventoryRepo;
         _collectionService = collectionService;
+        _cloudAccountRepo = cloudAccountRepo;
+        _cloudOrgRepo = cloudOrgRepo;
         _platform = platform;
         _logger = logger;
     }
@@ -41,7 +47,8 @@ public sealed class InventoryFunctions
     /// <summary>
     /// GET /api/inventory/resources
     /// Returns inventory resources for the current (or specified) snapshot.
-    /// Supports filtering by resource type, subscription, resource group.
+    /// Supports filtering by resource type, subscription/account/project, resource group, provider.
+    /// Each row includes multi-cloud context (cloud, scope, org).
     /// </summary>
     [Function("GetInventoryResources")]
     public async Task<HttpResponseData> GetResources(
@@ -54,14 +61,16 @@ public sealed class InventoryFunctions
         var resourceType = query["resourceType"];
         var subscriptionId = query["subscriptionId"];
         var resourceGroup = query["resourceGroup"];
+        var provider = query["provider"];
         var offset = int.TryParse(query["offset"], out var o) ? o : 0;
         var limit = int.TryParse(query["limit"], out var l) ? Math.Min(l, 500) : 100;
         long? snapshotId = long.TryParse(query["snapshotId"], out var sid) ? sid : null;
 
         var resources = await _inventoryRepo.GetResourcesAsync(
-            tenantId, snapshotId, resourceType, subscriptionId, resourceGroup, offset, limit);
+            tenantId, snapshotId, resourceType, subscriptionId, resourceGroup, provider, offset, limit);
         var total = await _inventoryRepo.GetResourceCountAsync(tenantId, snapshotId);
         var latestSnapshot = await _inventoryRepo.GetLatestSnapshotAsync(tenantId);
+        var scope = await BuildScopeLookupAsync(tenantId);
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new InventoryResponse
@@ -69,19 +78,7 @@ public sealed class InventoryFunctions
             SnapshotId = latestSnapshot?.SnapshotId ?? 0,
             SnapshotTime = latestSnapshot?.CompletedAt ?? DateTime.MinValue,
             TotalResources = total,
-            Resources = resources.Select(r => new InventoryResourceDto
-            {
-                ResourceId = r.ResourceId,
-                SubscriptionId = r.SubscriptionId,
-                ResourceGroup = r.ResourceGroup,
-                ResourceType = r.ResourceType,
-                ResourceName = r.ResourceName,
-                Location = r.Location,
-                SkuName = r.SkuName,
-                SkuTier = r.SkuTier,
-                Tags = r.Tags,
-                IdentityType = r.IdentityType
-            }).ToList(),
+            Resources = resources.Select(r => ToDto(r, scope)).ToList(),
             Pagination = new PaginationDto { Offset = offset, Limit = limit, Total = total }
         });
         return response;
@@ -89,7 +86,8 @@ public sealed class InventoryFunctions
 
     /// <summary>
     /// GET /api/inventory/resource/{resourceId}
-    /// Returns full detail for a single resource, including properties, networking, security config.
+    /// Returns full detail for a single resource, including properties, networking, security config,
+    /// plus multi-cloud context fields (provider, scope, cloud org).
     /// </summary>
     [Function("GetInventoryResourceDetail")]
     public async Task<HttpResponseData> GetResourceDetail(
@@ -101,10 +99,17 @@ public sealed class InventoryFunctions
         var decodedId = Uri.UnescapeDataString(resourceId);
         // Catch-all route strips the leading '/' from ARM resource IDs
         // (e.g., /subscriptions/... → subscriptions/...) due to HTTP path normalization
-        if (!decodedId.StartsWith("/"))
+        if (!decodedId.StartsWith("/") && !decodedId.StartsWith("arn:", StringComparison.OrdinalIgnoreCase)
+            && !decodedId.StartsWith("//", StringComparison.Ordinal))
             decodedId = "/" + decodedId;
 
         var resource = await _inventoryRepo.GetResourceByIdAsync(tenantId, decodedId);
+        // GCP/AWS ids don't use leading slash — try original if ARM-style prepend failed
+        if (resource == null && decodedId.StartsWith('/'))
+            resource = await _inventoryRepo.GetResourceByIdAsync(tenantId, decodedId.TrimStart('/'));
+        if (resource == null)
+            resource = await _inventoryRepo.GetResourceByIdAsync(tenantId, Uri.UnescapeDataString(resourceId));
+
         if (resource == null)
         {
             var notFound = req.CreateCorsResponse(HttpStatusCode.NotFound);
@@ -116,9 +121,152 @@ public sealed class InventoryFunctions
             return notFound;
         }
 
+        var scope = await BuildScopeLookupAsync(tenantId);
+        var dto = ToDto(resource, scope);
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(resource);
+        // Merge cloud-context DTO fields with full resource payload for the detail page.
+        await response.WriteAsJsonAsync(new
+        {
+            resource.ResourceId,
+            resource.SubscriptionId,
+            resource.ResourceGroup,
+            resource.ResourceType,
+            resource.ResourceName,
+            resource.Location,
+            resource.SkuName,
+            resource.SkuTier,
+            resource.SkuCapacity,
+            resource.Tags,
+            resource.IdentityType,
+            resource.IdentityPrincipalIds,
+            resource.PropertiesJson,
+            resource.NetworkingJson,
+            resource.SecurityConfigJson,
+            provider = dto.Provider,
+            cloud = dto.Cloud,
+            scopeKind = dto.ScopeKind,
+            scopeId = dto.ScopeId,
+            scopeName = dto.ScopeName,
+            cloudOrgName = dto.CloudOrgName,
+            azureTenantId = dto.AzureTenantId,
+            resourceGroupKind = dto.ResourceGroupKind
+        });
         return response;
+    }
+
+    private async Task<ScopeLookup> BuildScopeLookupAsync(Guid tenantId)
+    {
+        var accounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
+        var orgs = await _cloudOrgRepo.GetByTenantAsync(tenantId);
+        var orgsById = orgs.ToDictionary(o => o.OrgId, o => o);
+
+        var byProviderScope = new Dictionary<(string Provider, string ExternalId), (CloudAccount? Account, CloudOrg? Org)>(
+            new ProviderScopeComparer());
+
+        foreach (var a in accounts)
+        {
+            var key = (a.Provider.ToString().ToLowerInvariant(), a.ExternalId);
+            orgsById.TryGetValue(a.OrgId, out var org);
+            byProviderScope[key] = (a, org);
+        }
+
+        // Azure resources use subscription_id = Azure subscription GUID, not always a cloud_accounts row.
+        // Map Azure cloud_orgs (connections) by external_id for tenant id display.
+        var azureOrgs = orgs.Where(o => o.Provider == CloudProvider.Azure).ToList();
+
+        return new ScopeLookup(byProviderScope, azureOrgs);
+    }
+
+    private static InventoryResourceDto ToDto(InventoryResource r, ScopeLookup scope)
+    {
+        var provider = NormalizeProvider(r.Provider, r.ResourceId);
+        var (cloud, scopeKind, rgKind) = provider switch
+        {
+            "aws" => ("AWS", "account", "Service"),
+            "gcp" => ("GCP", "project", "Namespace"),
+            _ => ("Azure", "subscription", "Resource group")
+        };
+
+        string? scopeName = null;
+        string? cloudOrgName = null;
+        string? azureTenantId = null;
+
+        if (scope.ByProviderScope.TryGetValue((provider, r.SubscriptionId), out var hit))
+        {
+            scopeName = hit.Account?.DisplayName;
+            cloudOrgName = hit.Org?.Name;
+            if (provider == "azure")
+                azureTenantId = hit.Org?.ExternalId;
+        }
+
+        if (provider == "azure" && azureTenantId == null && scope.AzureOrgs.Count == 1)
+        {
+            azureTenantId = scope.AzureOrgs[0].ExternalId;
+            cloudOrgName ??= scope.AzureOrgs[0].Name;
+        }
+
+        // Infer Azure tenant from ARM id when present
+        if (provider == "azure" && string.IsNullOrEmpty(azureTenantId) && r.ResourceId.Contains("/providers/", StringComparison.OrdinalIgnoreCase))
+        {
+            // leave null — subscription is the primary scope
+        }
+
+        return new InventoryResourceDto
+        {
+            ResourceId = r.ResourceId,
+            Provider = provider,
+            Cloud = cloud,
+            ScopeKind = scopeKind,
+            ScopeId = r.SubscriptionId,
+            ScopeName = scopeName,
+            CloudOrgName = cloudOrgName,
+            AzureTenantId = azureTenantId,
+            ResourceGroup = r.ResourceGroup,
+            ResourceGroupKind = rgKind,
+            SubscriptionId = r.SubscriptionId,
+            ResourceType = r.ResourceType,
+            ResourceName = r.ResourceName,
+            Location = r.Location,
+            SkuName = r.SkuName,
+            SkuTier = r.SkuTier,
+            Tags = r.Tags,
+            IdentityType = r.IdentityType
+        };
+    }
+
+    private static string NormalizeProvider(string? provider, string resourceId)
+    {
+        if (!string.IsNullOrWhiteSpace(provider))
+        {
+            var p = provider.Trim().ToLowerInvariant();
+            if (p is "azure" or "aws" or "gcp") return p;
+            if (p == "amazon") return "aws";
+            if (p is "google" or "googlecloud") return "gcp";
+        }
+        return CloudProviderInference.FromResource(resourceId).ToString().ToLowerInvariant() switch
+        {
+            "aws" => "aws",
+            "gcp" => "gcp",
+            _ => "azure"
+        };
+    }
+
+    private sealed class ScopeLookup(
+        Dictionary<(string Provider, string ExternalId), (CloudAccount? Account, CloudOrg? Org)> byProviderScope,
+        List<CloudOrg> azureOrgs)
+    {
+        public Dictionary<(string Provider, string ExternalId), (CloudAccount? Account, CloudOrg? Org)> ByProviderScope { get; } = byProviderScope;
+        public List<CloudOrg> AzureOrgs { get; } = azureOrgs;
+    }
+
+    private sealed class ProviderScopeComparer : IEqualityComparer<(string Provider, string ExternalId)>
+    {
+        public bool Equals((string Provider, string ExternalId) x, (string Provider, string ExternalId) y) =>
+            string.Equals(x.Provider, y.Provider, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.ExternalId, y.ExternalId, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string Provider, string ExternalId) obj) =>
+            HashCode.Combine(obj.Provider.ToLowerInvariant(), obj.ExternalId.ToLowerInvariant());
     }
 
     /// <summary>

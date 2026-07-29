@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { useInventoryResources, useInventorySummary } from '../../lib/hooks';
+import { CloudScopeCell, scopeKindLabel } from '../../lib/cloud-scope';
 
 const PAGE_SIZE = 50;
 
@@ -13,6 +14,7 @@ export default function InventoryPage() {
     resourceType: '',
     subscriptionId: '',
     resourceGroup: '',
+    provider: '',
     search: '',
   });
   const [page, setPage] = useState(0);
@@ -22,14 +24,13 @@ export default function InventoryPage() {
     resourceType: filters.resourceType || undefined,
     subscriptionId: filters.subscriptionId || undefined,
     resourceGroup: filters.resourceGroup || undefined,
+    provider: filters.provider || undefined,
     offset: page * PAGE_SIZE,
     limit: PAGE_SIZE,
   });
 
-  // Extract unique resource types for filter dropdown
   const resourceTypes = summary?.resourceTypes ?? [];
 
-  // Client-side name search (supplement to server filter)
   const resources = useMemo(() => {
     if (!data?.resources) return [];
     if (!filters.search) return data.resources;
@@ -38,13 +39,33 @@ export default function InventoryPage() {
       (r) =>
         r.resourceName.toLowerCase().includes(q) ||
         r.resourceId.toLowerCase().includes(q) ||
-        r.resourceGroup.toLowerCase().includes(q)
+        r.resourceGroup.toLowerCase().includes(q) ||
+        (r.scopeName?.toLowerCase().includes(q) ?? false) ||
+        (r.cloudOrgName?.toLowerCase().includes(q) ?? false) ||
+        (r.subscriptionId?.toLowerCase().includes(q) ?? false) ||
+        (r.cloud?.toLowerCase().includes(q) ?? false)
     );
   }, [data?.resources, filters.search]);
 
   if (!tenantId) {
     return <EmptyState message="Select a tenant to view inventory." />;
   }
+
+  const scopeFilterLabel =
+    filters.provider === 'aws'
+      ? 'Account ID'
+      : filters.provider === 'gcp'
+        ? 'Project ID'
+        : filters.provider === 'azure'
+          ? 'Subscription ID'
+          : 'Subscription / Account / Project';
+
+  const rgFilterLabel =
+    filters.provider === 'aws'
+      ? 'Service'
+      : filters.provider === 'gcp'
+        ? 'Namespace'
+        : 'Resource group';
 
   return (
     <div className="space-y-5">
@@ -53,14 +74,30 @@ export default function InventoryPage() {
           <h1 className="text-xl font-bold">Inventory Explorer</h1>
           <p className="text-sm text-gray-500 mt-1">
             {summary?.totalResources?.toLocaleString() ?? '...'} resources across{' '}
-            {resourceTypes.length} types
+            {resourceTypes.length} types · Azure, AWS, and GCP in one view
           </p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Cloud</label>
+            <select
+              value={filters.provider}
+              onChange={(e) => {
+                setFilters({ ...filters, provider: e.target.value });
+                setPage(0);
+              }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-azure-500 focus:outline-none"
+            >
+              <option value="">All clouds</option>
+              <option value="azure">Azure</option>
+              <option value="aws">AWS</option>
+              <option value="gcp">GCP</option>
+            </select>
+          </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">Resource Type</label>
             <select
@@ -80,10 +117,10 @@ export default function InventoryPage() {
             </select>
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">Subscription</label>
+            <label className="text-xs text-gray-500 block mb-1">{scopeFilterLabel}</label>
             <input
               type="text"
-              placeholder="Filter by subscription ID..."
+              placeholder="Filter by id..."
               value={filters.subscriptionId}
               onChange={(e) => {
                 setFilters({ ...filters, subscriptionId: e.target.value });
@@ -93,10 +130,10 @@ export default function InventoryPage() {
             />
           </div>
           <div>
-            <label className="text-xs text-gray-500 block mb-1">Resource Group</label>
+            <label className="text-xs text-gray-500 block mb-1">{rgFilterLabel}</label>
             <input
               type="text"
-              placeholder="Filter by resource group..."
+              placeholder="Filter..."
               value={filters.resourceGroup}
               onChange={(e) => {
                 setFilters({ ...filters, resourceGroup: e.target.value });
@@ -109,7 +146,7 @@ export default function InventoryPage() {
             <label className="text-xs text-gray-500 block mb-1">Search</label>
             <input
               type="text"
-              placeholder="Search by name..."
+              placeholder="Name, id, org, project..."
               value={filters.search}
               onChange={(e) => setFilters({ ...filters, search: e.target.value })}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-azure-500 focus:outline-none"
@@ -130,9 +167,10 @@ export default function InventoryPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-gray-500">
+                    <th className="px-4 py-3 font-medium">Cloud / scope</th>
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">Type</th>
-                    <th className="px-4 py-3 font-medium">Resource Group</th>
+                    <th className="px-4 py-3 font-medium">Group / service</th>
                     <th className="px-4 py-3 font-medium">Location</th>
                     <th className="px-4 py-3 font-medium">SKU</th>
                     <th className="px-4 py-3 font-medium">Tags</th>
@@ -141,23 +179,37 @@ export default function InventoryPage() {
                 <tbody>
                   {resources.map((r) => (
                     <tr
-                      key={r.resourceId}
+                      key={`${r.provider ?? 'x'}-${r.resourceId}`}
                       className="border-t border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors"
                     >
-                      <td className="px-4 py-3">
-                        <a href={`/inventory/detail?id=${encodeURIComponent(r.resourceId)}`} className="text-azure-600 hover:underline font-medium">
+                      <td className="px-4 py-3 align-top w-52">
+                        <CloudScopeCell resource={r} />
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <a
+                          href={`/inventory/detail?id=${encodeURIComponent(r.resourceId)}`}
+                          className="text-azure-600 hover:underline font-medium"
+                        >
                           {r.resourceName}
                         </a>
+                        <p className="text-[11px] text-gray-400 font-mono truncate max-w-xs mt-0.5" title={r.resourceId}>
+                          {r.resourceId}
+                        </p>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">
+                      <td className="px-4 py-3 text-gray-600 align-top">
                         {r.resourceType.split('/').slice(-1)[0]}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{r.resourceGroup}</td>
-                      <td className="px-4 py-3 text-gray-600">{r.location}</td>
-                      <td className="px-4 py-3 text-gray-600">
+                      <td className="px-4 py-3 text-gray-600 align-top">
+                        <span className="text-[10px] uppercase tracking-wide text-gray-400 block">
+                          {scopeKindLabel(r)}
+                        </span>
+                        {r.resourceGroup || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 align-top">{r.location}</td>
+                      <td className="px-4 py-3 text-gray-600 align-top">
                         {r.skuName ? `${r.skuName}${r.skuTier ? ` / ${r.skuTier}` : ''}` : '—'}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 align-top">
                         {r.tags && Object.keys(r.tags).length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {Object.entries(r.tags)
@@ -181,7 +233,7 @@ export default function InventoryPage() {
                   ))}
                   {resources.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-400">
+                      <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
                         No resources found matching filters.
                       </td>
                     </tr>
@@ -190,7 +242,6 @@ export default function InventoryPage() {
               </table>
             </div>
 
-            {/* Pagination */}
             {data && (data.pagination?.total ?? 0) > PAGE_SIZE && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
                 <p className="text-sm text-gray-500">

@@ -55,6 +55,7 @@ public interface IInventoryRepository
         string? resourceType = null,
         string? subscriptionId = null,
         string? resourceGroup = null,
+        string? provider = null,
         int offset = 0,
         int limit = 100);
     Task<InventoryResource?> GetResourceByIdAsync(Guid tenantId, string resourceId, long? snapshotId = null);
