@@ -126,12 +126,14 @@ export default function CloudsPage() {
     }
   };
 
-  const handleCollectInventory = async (tenant: TenantSummary) => {
-    setCollectingTenant(tenant.tenantId);
+  const handleCollectInventory = async (label?: string) => {
+    if (!tenantId) return;
+    setCollectingTenant(tenantId);
     try {
-      await api.triggerSnapshot(tenant.tenantId);
-      showToast(`Inventory collected for "${tenant.displayName}".`, 'success');
+      await api.triggerSnapshot(tenantId);
+      showToast(`Azure inventory collected${label ? ` for "${label}"` : ''}.`, 'success');
       fetchAzureTenant();
+      fetchOrgs();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to collect inventory.', 'error');
     } finally {
@@ -432,35 +434,52 @@ export default function CloudsPage() {
         </div>
       )}
 
-      {/* Azure — an organization can hold multiple Azure tenants as peers, exactly
-          like multiple AWS/GCP organizations. `azureTenant` (the legacy workspace
-          policy row) still drives workspace-wide suspend/offboard + the single
-          Collect Inventory action, since every Azure connection in a workspace
-          collects together in one merged snapshot. Each connection below shows
-          its own status and can be individually suspended. */}
+      {/* Azure tenants as peer cards (same shape as AWS/GCP orgs). Collection is
+          workspace-scoped (one Resource Graph snapshot for all Azure connections). */}
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Azure</h2>
-          {canManageClouds && azureTenant && azureOrgs.length > 0 && (
-            <button onClick={() => handleCollectInventory(azureTenant)} disabled={isDev || collectingTenant === azureTenant.tenantId}
-              title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory for every connected Azure tenant'}
-              className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
-              {collectingTenant === azureTenant.tenantId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
-              {collectingTenant === azureTenant.tenantId ? 'Collecting...' : 'Collect Inventory'}
+          {canManageClouds && azureOrgs.length > 0 && (
+            <button
+              onClick={() => handleCollectInventory()}
+              disabled={isDev || collectingTenant === tenantId}
+              title={isDev ? 'Inventory collection is disabled in Development — set PLATFORM_ENVIRONMENT=Production' : 'Collect Azure inventory (all connected Azure tenants in this workspace)'}
+              className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+            >
+              {collectingTenant === tenantId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+              {collectingTenant === tenantId ? 'Collecting...' : 'Collect Inventory'}
             </button>
           )}
         </div>
+
+        {isDev && azureOrgs.length > 0 && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3">
+            Live Azure collection is disabled while the instance is in Development.
+            Set <code className="font-mono">PLATFORM_ENVIRONMENT=Production</code> and recreate the API, then use Collect.
+          </p>
+        )}
 
         {azureTenant && azureOrgs.length > 0 && (
           <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4 flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-900">Azure monitoring</p>
               <p className="text-xs text-gray-400">
-                {azureOrgs.length} Azure tenant{azureOrgs.length === 1 ? '' : 's'} connected to this organization
+                {azureOrgs.length} Azure tenant{azureOrgs.length === 1 ? '' : 's'} connected · one shared inventory snapshot for this workspace
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(azureTenant.status)}`}>{azureTenant.status}</span>
+              {canManageClouds && (
+                <button
+                  onClick={() => handleCollectInventory('Azure')}
+                  disabled={isDev || collectingTenant === tenantId}
+                  title={isDev ? 'Disabled in Development' : 'Collect Azure inventory now'}
+                  className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {collectingTenant === tenantId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+                  {collectingTenant === tenantId ? 'Collecting...' : 'Collect'}
+                </button>
+              )}
               {canManageClouds && getStatusActions(azureTenant.status).map(action => (
                 <button key={action.value} onClick={() => setStatusAction({ tenant: azureTenant, newStatus: action.value })}
                   className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${action.destructive ? 'text-red-600 border border-red-200 hover:bg-red-50' : 'text-green-600 border border-green-200 hover:bg-green-50'}`}>
@@ -484,25 +503,28 @@ export default function CloudsPage() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-4">
             {azureOrgs.map(org => {
               const actions = getOrgStatusActions(org.status);
               const scope = org.subscriptionScope ?? 'all';
+              const busy = collectingTenant === tenantId;
               return (
-                <div key={org.orgId} className="bg-white rounded-lg border border-gray-200 p-5 hover:shadow-md transition-shadow">
-                  <div className="flex items-start justify-between mb-1">
+                <div key={org.orgId} className="bg-white rounded-lg border border-gray-200 p-5">
+                  <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES.azure}`}>Azure</span>
-                      <h3 className="font-semibold text-gray-900 truncate">{org.name}</h3>
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-gray-900 truncate">{org.name}</h3>
+                        {org.externalId && <p className="text-xs text-gray-400 font-mono truncate">Tenant ID: {org.externalId}</p>}
+                      </div>
                     </div>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadge(org.status)}`}>{org.status}</span>
                   </div>
-                  <p className="text-xs text-gray-500 font-mono mb-1 truncate">{org.externalId}</p>
                   <p className="text-xs text-gray-400 mb-3">{scope === 'specific' ? 'Specific subscriptions' : 'All subscriptions'}</p>
                   <div className="grid grid-cols-3 gap-2 text-center mb-4">
                     <div><p className="text-lg font-bold text-gray-900">{org.accountCount ?? 0}</p><p className="text-xs text-gray-500">Subscriptions</p></div>
                     <div><p className="text-lg font-bold text-gray-900">{org.resourceCount ?? '—'}</p><p className="text-xs text-gray-500">Resources</p></div>
-                    <div><p className="text-xs text-gray-500 mt-1">{org.lastInventoryAt ? new Date(org.lastInventoryAt).toLocaleDateString() : 'No snapshot'}</p><p className="text-xs text-gray-500">Last Snapshot</p></div>
+                    <div><p className="text-xs text-gray-500 mt-1">{org.lastInventoryAt ? new Date(org.lastInventoryAt).toLocaleDateString() : 'never'}</p><p className="text-xs text-gray-500">Last Collection</p></div>
                   </div>
                   {canManageClouds && (
                     <div className="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
@@ -512,10 +534,19 @@ export default function CloudsPage() {
                           {action.label}
                         </button>
                       ))}
+                      <button
+                        onClick={() => handleCollectInventory(org.name)}
+                        disabled={isDev || busy}
+                        title={isDev ? 'Disabled in Development — set PLATFORM_ENVIRONMENT=Production' : 'Collect Azure inventory for this workspace'}
+                        className="flex-1 px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {busy && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+                        {busy ? 'Collecting...' : 'Collect'}
+                      </button>
                       {(org.hasCredentials || org.onboardingMethod === 'app_registration') && (
                         <button onClick={() => setCredsOrg(org)}
                           className="flex-1 px-3 py-1.5 rounded text-xs font-medium text-gray-700 border border-gray-200 hover:bg-gray-50">
-                          Update credentials
+                          Credentials
                         </button>
                       )}
                       <button onClick={() => setDeleteOrgTarget(org)}
@@ -734,7 +765,11 @@ function AddCloudModal({ tenantId, azureConnected, onClose, onAdded }: {
           clientSecret: onboardingMethod === 'app_registration' ? clientSecret || undefined : undefined,
           subscriptionIds,
         });
-        onAdded(`Azure tenant "${displayName}" connected to this organization.`);
+        onAdded(
+          `Azure tenant "${displayName}" connected. ` +
+          'In Production, inventory starts automatically; otherwise use Collect on the Azure card ' +
+          '(requires PLATFORM_ENVIRONMENT=Production).'
+        );
       } else {
         await api.createCloudOrg(tenantId, { provider, name: orgName, externalId: orgExternalId || undefined });
         onAdded(`${provider.toUpperCase()} organization "${orgName}" added. Add ${provider === 'aws' ? 'accounts' : 'projects'} to it next.`);

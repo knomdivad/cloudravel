@@ -28,6 +28,8 @@ public sealed class OrganizationFunctions
     private readonly ICloudOrgRepository _cloudOrgRepo;
     private readonly ICloudAccountRepository _cloudAccountRepo;
     private readonly IUserRepository _userRepo;
+    private readonly IInventoryCollectionService _inventoryCollection;
+    private readonly IPlatformInfo _platform;
     private readonly ISecretStore? _secretStore;
     private readonly ILogger<OrganizationFunctions> _logger;
 
@@ -37,6 +39,8 @@ public sealed class OrganizationFunctions
         ICloudOrgRepository cloudOrgRepo,
         ICloudAccountRepository cloudAccountRepo,
         IUserRepository userRepo,
+        IInventoryCollectionService inventoryCollection,
+        IPlatformInfo platform,
         ILogger<OrganizationFunctions> logger,
         ISecretStore? secretStore = null)
     {
@@ -45,6 +49,8 @@ public sealed class OrganizationFunctions
         _cloudOrgRepo = cloudOrgRepo;
         _cloudAccountRepo = cloudAccountRepo;
         _userRepo = userRepo;
+        _inventoryCollection = inventoryCollection;
+        _platform = platform;
         _secretStore = secretStore;
         _logger = logger;
     }
@@ -315,6 +321,34 @@ public sealed class OrganizationFunctions
 
         _logger.LogInformation("Connected Azure tenant {AzureTenantId} ({OnboardingMethod}) to organization {OrgId}",
             azureTenantId, method, orgId);
+
+        // Parity with legacy POST /tenants onboarding: kick off inventory when Production.
+        // ConnectAzure is the path the Clouds UI uses — it previously never collected.
+        if (_platform.IsProduction)
+        {
+            var workspaceId = orgId;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _logger.LogInformation("Starting inventory after Azure connect for workspace {OrgId}", workspaceId);
+                    var (snapshotId, resourceCount) = await _inventoryCollection.CollectInventoryAsync(workspaceId, "azure-connect");
+                    _logger.LogInformation(
+                        "Azure-connect inventory completed for {OrgId}: {Count} resources in snapshot {SnapshotId}",
+                        workspaceId, resourceCount, snapshotId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Azure-connect inventory failed for workspace {OrgId}", workspaceId);
+                }
+            });
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Skipping inventory after Azure connect — instance environment is {Env} (set Platform:Environment=Production).",
+                _platform.Environment);
+        }
 
         var response = req.CreateCorsResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(await BuildDto(org));
