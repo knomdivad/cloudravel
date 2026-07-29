@@ -133,7 +133,7 @@ export default function AiPage() {
         <div>
           <h1 className="text-xl font-bold">AI Insights</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Ask questions about {currentTenant?.displayName}'s multi-cloud environment.
+            Ask questions about {currentTenant?.displayName}&apos;s multi-cloud environment.
             Answers are grounded in real inventory data — never fabricated.
           </p>
         </div>
