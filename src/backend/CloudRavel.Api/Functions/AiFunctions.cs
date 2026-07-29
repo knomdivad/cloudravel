@@ -125,6 +125,10 @@ public sealed class AiFunctions
             return notConfigured;
         }
 
+        // Official OpenAI + most gateways expect a .../v1 base. Normalize trailing slash.
+        if (!string.IsNullOrEmpty(baseUrl))
+            baseUrl = baseUrl.TrimEnd('/');
+
         var clientOptions = string.IsNullOrEmpty(baseUrl)
             ? new OpenAIClientOptions()
             : new OpenAIClientOptions { Endpoint = new Uri(baseUrl) };
@@ -146,66 +150,176 @@ public sealed class AiFunctions
         foreach (var tool in toolDefinitions)
             options.Tools.Add(tool);
 
-        // Tool-calling loop: the model may invoke multiple tools iteratively
-        const int maxIterations = 10;
-
-        for (var i = 0; i < maxIterations; i++)
+        try
         {
-            var result = await chatClient.CompleteChatAsync(messages, options);
-            var completion = result.Value;
+            // Tool-calling loop: the model may invoke multiple tools iteratively
+            const int maxIterations = 10;
 
-            if (completion.FinishReason == ChatFinishReason.ToolCalls)
+            for (var i = 0; i < maxIterations; i++)
             {
-                // Add the assistant message with tool calls to the conversation
-                messages.Add(new AssistantChatMessage(completion));
+                var result = await chatClient.CompleteChatAsync(messages, options);
+                var completion = result.Value;
 
-                // Execute each tool call
-                foreach (var toolCall in completion.ToolCalls)
+                if (completion.FinishReason == ChatFinishReason.ToolCalls)
                 {
-                    var sw = System.Diagnostics.Stopwatch.StartNew();
-                    _logger.LogDebug("AI tool call: {Tool}({Args})", toolCall.FunctionName, toolCall.FunctionArguments);
+                    // Add the assistant message with tool calls to the conversation
+                    messages.Add(new AssistantChatMessage(completion));
 
-                    var toolResult = await ExecuteToolAsync(tenantId, toolCall.FunctionName, toolCall.FunctionArguments.ToString());
-                    sw.Stop();
-
-                    toolInvocations.Add(new AiToolInvocationDto
+                    // Execute each tool call
+                    foreach (var toolCall in completion.ToolCalls)
                     {
-                        ToolName = toolCall.FunctionName,
-                        Arguments = toolCall.FunctionArguments.ToString(),
-                        DurationMs = (int)sw.ElapsedMilliseconds
-                    });
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                        _logger.LogDebug("AI tool call: {Tool}({Args})", toolCall.FunctionName, toolCall.FunctionArguments);
 
-                    messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
+                        var toolResult = await ExecuteToolAsync(tenantId, toolCall.FunctionName, toolCall.FunctionArguments.ToString());
+                        sw.Stop();
+
+                        toolInvocations.Add(new AiToolInvocationDto
+                        {
+                            ToolName = toolCall.FunctionName,
+                            Arguments = toolCall.FunctionArguments.ToString(),
+                            DurationMs = (int)sw.ElapsedMilliseconds
+                        });
+
+                        messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
+                    }
+                    continue;
                 }
-                continue;
+
+                // No tool call — this is the final answer
+                var text = completion.Content.Count > 0 ? completion.Content[0].Text : string.Empty;
+                var response = req.CreateCorsResponse(HttpStatusCode.OK);
+                await response.WriteAsJsonAsync(new AiQueryResponse
+                {
+                    Response = text,
+                    ToolsUsed = toolInvocations,
+                    Usage = new AiUsageDto
+                    {
+                        PromptTokens = completion.Usage?.InputTokenCount ?? 0,
+                        CompletionTokens = completion.Usage?.OutputTokenCount ?? 0,
+                        TotalTokens = completion.Usage?.TotalTokenCount ?? 0
+                    }
+                });
+                return response;
             }
 
-            // No tool call — this is the final answer
-            var response = req.CreateCorsResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(new AiQueryResponse
+            // If we reached max iterations, return what we have
+            var fallback = req.CreateCorsResponse(HttpStatusCode.OK);
+            await fallback.WriteAsJsonAsync(new AiQueryResponse
             {
-                Response = completion.Content[0].Text,
+                Response = "I was unable to complete the analysis within the allowed number of tool calls. Please try a more specific question.",
                 ToolsUsed = toolInvocations,
-                Usage = new AiUsageDto
-                {
-                    PromptTokens = completion.Usage.InputTokenCount,
-                    CompletionTokens = completion.Usage.OutputTokenCount,
-                    TotalTokens = completion.Usage.TotalTokenCount
-                }
+                Usage = new AiUsageDto()
             });
-            return response;
+            return fallback;
+        }
+        catch (ClientResultException ex)
+        {
+            // Surface OpenAI / compatible-provider errors (quota, auth, model, rate limit)
+            // instead of an opaque Functions 500 with an empty body.
+            _logger.LogWarning(ex, "AI provider error for tenant {TenantId} model {Model}: {Status} {Message}",
+                tenantId, model, (int)ex.Status, ex.Message);
+            var (status, code, message) = MapProviderError(ex, model, baseUrl);
+            var err = req.CreateCorsResponse(status);
+            await err.WriteAsJsonAsync(new ErrorResponse { Code = code, Message = message });
+            return err;
+        }
+        catch (UriFormatException ex)
+        {
+            _logger.LogWarning(ex, "Invalid AI base URL: {BaseUrl}", baseUrl);
+            var err = req.CreateCorsResponse(HttpStatusCode.BadRequest);
+            await err.WriteAsJsonAsync(new ErrorResponse
+            {
+                Code = "AI_INVALID_BASE_URL",
+                Message = $"The configured AI base URL is invalid: {baseUrl}"
+            });
+            return err;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled AI query failure for tenant {TenantId}", tenantId);
+            var err = req.CreateCorsResponse(HttpStatusCode.InternalServerError);
+            await err.WriteAsJsonAsync(new ErrorResponse
+            {
+                Code = "AI_QUERY_FAILED",
+                Message = "The AI query failed unexpectedly. Check API logs for details."
+            });
+            return err;
+        }
+    }
+
+    /// <summary>Map provider HTTP errors into actionable admin-facing messages.</summary>
+    private static (HttpStatusCode Status, string Code, string Message) MapProviderError(
+        ClientResultException ex, string model, string? baseUrl)
+    {
+        var status = ex.Status;
+        var raw = ex.Message ?? string.Empty;
+        var body = raw;
+
+        // Prefer structured body when present (OpenAI returns JSON with error.message / error.code).
+        try
+        {
+            // ClientResultException.Message often includes the body; also try Response content.
+            var jsonStart = raw.IndexOf('{');
+            if (jsonStart >= 0)
+            {
+                using var doc = JsonDocument.Parse(raw[jsonStart..]);
+                if (doc.RootElement.TryGetProperty("error", out var errEl))
+                {
+                    var msg = errEl.TryGetProperty("message", out var m) ? m.GetString() : null;
+                    var code = errEl.TryGetProperty("code", out var c) ? c.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(msg))
+                        body = msg!;
+                    if (string.Equals(code, "insufficient_quota", StringComparison.OrdinalIgnoreCase)
+                        || body.Contains("exceeded your current quota", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return (HttpStatusCode.PaymentRequired, "AI_QUOTA_EXCEEDED",
+                            "The OpenAI API key has no remaining quota (billing). Add credits or use a key with available usage at platform.openai.com, then retry.");
+                    }
+                    if (string.Equals(code, "invalid_api_key", StringComparison.OrdinalIgnoreCase)
+                        || body.Contains("Incorrect API key", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return (HttpStatusCode.Unauthorized, "AI_INVALID_API_KEY",
+                            "The configured OpenAI API key was rejected. Update it under Admin → System Settings.");
+                    }
+                    if (string.Equals(code, "model_not_found", StringComparison.OrdinalIgnoreCase)
+                        || body.Contains("model", StringComparison.OrdinalIgnoreCase)
+                           && body.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return (HttpStatusCode.BadRequest, "AI_MODEL_NOT_FOUND",
+                            $"Model '{model}' is not available for this key/endpoint. Choose a model your account can use (e.g. gpt-4o-mini, gpt-5.5).");
+                    }
+                    if (status == 429)
+                    {
+                        return (HttpStatusCode.TooManyRequests, "AI_RATE_LIMITED",
+                            "The AI provider rate-limited this request. Wait a moment and try again.");
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // fall through to generic mapping
         }
 
-        // If we reached max iterations, return what we have
-        var fallback = req.CreateCorsResponse(HttpStatusCode.OK);
-        await fallback.WriteAsJsonAsync(new AiQueryResponse
-        {
-            Response = "I was unable to complete the analysis within the allowed number of tool calls. Please try a more specific question.",
-            ToolsUsed = toolInvocations,
-            Usage = new AiUsageDto()
-        });
-        return fallback;
+        if (status == 401 || status == 403)
+            return (HttpStatusCode.Unauthorized, "AI_PROVIDER_AUTH",
+                "The AI provider rejected authentication. Check the API key under Admin → System Settings.");
+        if (status == 404)
+            return (HttpStatusCode.BadRequest, "AI_PROVIDER_NOT_FOUND",
+                $"The AI endpoint or model was not found (model '{model}', base '{baseUrl ?? "default"}'). Check Base URL and Model.");
+        if (status == 429)
+            return (HttpStatusCode.TooManyRequests, "AI_RATE_LIMITED",
+                "The AI provider rate-limited this request. Wait a moment and try again.");
+
+        return (HttpStatusCode.BadGateway, "AI_PROVIDER_ERROR",
+            string.IsNullOrWhiteSpace(body)
+                ? $"The AI provider returned HTTP {(int)status}."
+                : $"The AI provider returned an error: {Truncate(body, 400)}");
     }
+
+    private static string Truncate(string value, int max) =>
+        value.Length <= max ? value : value[..max] + "…";
 
     /// <summary>
     /// Builds ChatTool definitions from our AiToolDefinitions for the OpenAI SDK.

@@ -38,6 +38,7 @@ MIGRATIONS=(
   011-ensure-bootstrap-admin
   012-rls-hardening
   013-email-as-username
+  014-ensure-system-settings
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;
