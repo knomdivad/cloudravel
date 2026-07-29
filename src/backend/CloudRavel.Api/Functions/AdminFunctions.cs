@@ -122,12 +122,20 @@ public sealed class AdminFunctions
         FunctionContext context) =>
         await CreateUserCoreAsync(req, context);
 
-    /// <summary>POST /api/system/users — alternate create path (hard to miss in routing).</summary>
-    [Function("CreateSystemUser")]
-    public async Task<HttpResponseData> CreateSystemUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "system/users")] HttpRequestData req,
-        FunctionContext context) =>
-        await CreateUserCoreAsync(req, context);
+    /// <summary>
+    /// GET  /api/system/users — list all users.
+    /// POST /api/system/users — create user.
+    /// Dedicated path used by the SPA (avoids shared-route GET/POST issues).
+    /// </summary>
+    [Function("SystemUsers")]
+    public async Task<HttpResponseData> SystemUsers(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = "system/users")] HttpRequestData req,
+        FunctionContext context)
+    {
+        if (req.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            return await ListAllUsersCoreAsync(req, context);
+        return await CreateUserCoreAsync(req, context);
+    }
 
     private async Task<HttpResponseData> ListAllUsersCoreAsync(HttpRequestData req, FunctionContext context)
     {

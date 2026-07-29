@@ -134,9 +134,16 @@ function SystemSettingsCard({ showToast }: { showToast: (m: string, t: ToastType
 function UsersCard({ showToast }: { showToast: (m: string, t: ToastType) => void }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setUsers(await api.getAllUsers()); } catch { /* non-fatal */ }
+    try {
+      setLoadError(null);
+      setUsers(await api.getAllUsers());
+    } catch (err: any) {
+      setLoadError(err?.message ?? 'Failed to load users.');
+      setUsers([]);
+    }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -151,7 +158,15 @@ function UsersCard({ showToast }: { showToast: (m: string, t: ToastType) => void
 
   return (
     <section className="bg-white rounded-lg border border-gray-200 p-6">
-      {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); showToast('User created.', 'success'); }} />}
+      {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} onCreated={(created) => {
+        setShowCreate(false);
+        if (created) setUsers((prev) => {
+          const rest = prev.filter((u) => u.userId !== created.userId && u.email !== created.email);
+          return [...rest, created].sort((a, b) => a.displayName.localeCompare(b.displayName));
+        });
+        load();
+        showToast('User created.', 'success');
+      }} />}
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Users</h2>
@@ -159,24 +174,27 @@ function UsersCard({ showToast }: { showToast: (m: string, t: ToastType) => void
         </div>
         <button onClick={() => setShowCreate(true)} className="px-4 py-2 bg-azure-600 text-white rounded-lg text-sm hover:bg-azure-700">+ Add User</button>
       </div>
+      {loadError && <ErrorBox>{loadError}</ErrorBox>}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 border-b border-gray-100">
               <th className="py-2 pr-4 font-medium">Name</th>
-              <th className="py-2 pr-4 font-medium">Username / Email</th>
+              <th className="py-2 pr-4 font-medium">Email (login)</th>
               <th className="py-2 pr-4 font-medium">System role</th>
               <th className="py-2 pr-4 font-medium">Status</th>
               <th className="py-2 pr-4 font-medium">Last login</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
+            {users.length === 0 && !loadError && (
+              <tr><td colSpan={5} className="py-6 text-center text-gray-400 text-sm">No users loaded.</td></tr>
+            )}
             {users.map((u) => (
-              <tr key={u.userId}>
+              <tr key={u.userId || u.email}>
                 <td className="py-2.5 pr-4 font-medium text-gray-900">{u.displayName}</td>
                 <td className="py-2.5 pr-4 text-gray-500">
-                  <div className="font-mono text-xs">{u.username ?? u.email}</div>
-                  {u.username && <div className="text-xs text-gray-400">{u.email}</div>}
+                  <div className="font-mono text-xs">{u.email || u.username}</div>
                 </td>
                 <td className="py-2.5 pr-4">
                   <select value={u.globalRole} onChange={(e) => setRole(u, e.target.value)}
@@ -201,7 +219,7 @@ function UsersCard({ showToast }: { showToast: (m: string, t: ToastType) => void
   );
 }
 
-function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: (created?: AdminUser) => void }) {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -215,8 +233,8 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
     try {
       const eaddr = email.trim().toLowerCase();
       // Email is the unique login identity (username = email server-side).
-      await api.createUser({ displayName: displayName.trim(), email: eaddr, username: eaddr, password, globalRole });
-      onCreated();
+      const created = await api.createUser({ displayName: displayName.trim(), email: eaddr, username: eaddr, password, globalRole });
+      onCreated(created);
     } catch (err: any) { setError(err?.message ?? 'Failed to create user.'); }
     finally { setBusy(false); }
   };

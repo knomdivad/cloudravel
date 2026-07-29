@@ -182,9 +182,30 @@ export async function updateSystemSettings(request: {
   });
 }
 
+function normalizeAdminUser(raw: Record<string, unknown>): AdminUser {
+  return {
+    userId: String(raw.userId ?? raw.UserId ?? ''),
+    displayName: String(raw.displayName ?? raw.DisplayName ?? ''),
+    email: String(raw.email ?? raw.Email ?? ''),
+    globalRole: String(raw.globalRole ?? raw.GlobalRole ?? 'member'),
+    isActive: Boolean(raw.isActive ?? raw.IsActive ?? true),
+    authProvider: String(raw.authProvider ?? raw.AuthProvider ?? 'local'),
+    username: (raw.username ?? raw.Username ?? null) as string | null,
+    lastLoginAt: (raw.lastLoginAt ?? raw.LastLoginAt ?? null) as string | null,
+    orgRole: (raw.orgRole ?? raw.OrgRole ?? null) as string | null,
+  };
+}
+
 export async function getAllUsers(): Promise<AdminUser[]> {
-  const res = await apiCall<{ users?: AdminUser[]; Users?: AdminUser[] }>('/admin/users', NO_WORKSPACE);
-  return res.users ?? res.Users ?? [];
+  // Prefer dedicated list route; fall back to multi-method admin/users.
+  let res: { users?: unknown[]; Users?: unknown[] };
+  try {
+    res = await apiCall('/system/users', NO_WORKSPACE);
+  } catch {
+    res = await apiCall('/admin/users', NO_WORKSPACE);
+  }
+  const list = res.users ?? res.Users ?? [];
+  return list.map((u) => normalizeAdminUser(u as Record<string, unknown>));
 }
 
 export async function createUser(request: {
@@ -196,7 +217,7 @@ export async function createUser(request: {
 }): Promise<AdminUser> {
   const email = request.email.trim().toLowerCase();
   // Prefer unambiguous route (also available as POST /admin/users and /system/users).
-  return apiCall<AdminUser>('/system/users', NO_WORKSPACE, {
+  const raw = await apiCall<Record<string, unknown>>('/system/users', NO_WORKSPACE, {
     method: 'POST',
     body: JSON.stringify({
       displayName: request.displayName,
@@ -206,6 +227,7 @@ export async function createUser(request: {
       globalRole: request.globalRole,
     }),
   });
+  return normalizeAdminUser(raw);
 }
 
 export async function updateUser(
@@ -223,8 +245,9 @@ export async function updateUser(
 // ============================================================================
 
 export async function getOrgUsers(orgId: string): Promise<AdminUser[]> {
-  const res = await apiCall<{ users: AdminUser[] }>(`/organizations/${orgId}/users`, orgId);
-  return res.users ?? [];
+  const res = await apiCall<{ users?: unknown[]; Users?: unknown[] }>(`/organizations/${orgId}/users`, orgId);
+  const list = res.users ?? res.Users ?? [];
+  return list.map((u) => normalizeAdminUser(u as Record<string, unknown>));
 }
 
 export async function addOrgUser(
