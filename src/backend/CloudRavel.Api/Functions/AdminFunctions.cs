@@ -38,37 +38,57 @@ public sealed class AdminFunctions
     // ========================================================================
     // System settings
     // ========================================================================
+    // NOTE: Use /api/system/* — not /api/admin/*. Azure Functions reserves /admin
+    // for host management, and /api/admin/* routes 404 in the container host.
 
-    /// <summary>GET /api/admin/settings — current AI settings (never returns the key value).</summary>
-    [Function("GetSystemSettings")]
-    public async Task<HttpResponseData> GetSystemSettings(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/settings")] HttpRequestData req,
+    /// <summary>
+    /// GET  /api/system/settings — current AI settings (never returns the key value).
+    /// PUT  /api/system/settings — update AI settings; the key goes to the secret store.
+    /// </summary>
+    [Function("SystemSettings")]
+    public async Task<HttpResponseData> SystemSettings(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "put", Route = "system/settings")] HttpRequestData req,
         FunctionContext context)
+    {
+        if (req.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            return await GetSystemSettingsCoreAsync(req, context);
+        return await UpdateSystemSettingsCoreAsync(req, context);
+    }
+
+    private async Task<HttpResponseData> GetSystemSettingsCoreAsync(HttpRequestData req, FunctionContext context)
     {
         var forbid = await context.RequireSystemAdminAsync(req);
         if (forbid != null) return forbid;
 
         var all = await _settings.GetAllAsync();
-        var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new SystemSettingsDto
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new SystemSettingsDto
         {
             OpenAiBaseUrl = all.GetValueOrDefault(SystemSettingKeys.OpenAiBaseUrl),
             OpenAiModel = all.GetValueOrDefault(SystemSettingKeys.OpenAiModel),
             ApiKeyConfigured = !string.IsNullOrWhiteSpace(all.GetValueOrDefault(SystemSettingKeys.OpenAiApiKeySecretName))
         });
-        return response;
     }
 
-    /// <summary>PUT /api/admin/settings — update AI settings; the key goes to the secret store.</summary>
-    [Function("UpdateSystemSettings")]
-    public async Task<HttpResponseData> UpdateSystemSettings(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "admin/settings")] HttpRequestData req,
-        FunctionContext context)
+    private async Task<HttpResponseData> UpdateSystemSettingsCoreAsync(HttpRequestData req, FunctionContext context)
     {
         var forbid = await context.RequireSystemAdminAsync(req);
         if (forbid != null) return forbid;
 
-        var body = await req.ReadFromJsonAsync<UpdateSystemSettingsRequest>();
+        UpdateSystemSettingsRequest? body;
+        try
+        {
+            using var reader = new StreamReader(req.Body);
+            var raw = await reader.ReadToEndAsync();
+            body = string.IsNullOrWhiteSpace(raw)
+                ? null
+                : JsonSerializer.Deserialize<UpdateSystemSettingsRequest>(raw, AdminJson);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse UpdateSystemSettings body");
+            body = null;
+        }
+
         if (body == null) return await BadRequest(req, "INVALID_REQUEST", "A settings body is required.");
 
         var actor = context.GetUserId()?.ToString() ?? "system";
@@ -87,7 +107,7 @@ public sealed class AdminFunctions
             _logger.LogInformation("OpenAI API key updated by {Actor}", actor);
         }
 
-        return await GetSystemSettings(req, context);
+        return await GetSystemSettingsCoreAsync(req, context);
     }
 
     // ========================================================================
@@ -218,10 +238,10 @@ public sealed class AdminFunctions
         return response;
     }
 
-    /// <summary>PATCH /api/admin/users/{id} — set global role / active / reset password.</summary>
+    /// <summary>PATCH /api/system/users/{id} — set global role / active / reset password.</summary>
     [Function("UpdateUser")]
     public async Task<HttpResponseData> UpdateUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "admin/users/{userId:guid}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "system/users/{userId:guid}")] HttpRequestData req,
         Guid userId,
         FunctionContext context)
     {
@@ -231,7 +251,21 @@ public sealed class AdminFunctions
         var user = await _userRepo.GetByIdAsync(userId);
         if (user == null) return await NotFound(req, $"User {userId} not found.");
 
-        var body = await req.ReadFromJsonAsync<UpdateUserRequest>();
+        UpdateUserRequest? body;
+        try
+        {
+            using var reader = new StreamReader(req.Body);
+            var raw = await reader.ReadToEndAsync();
+            body = string.IsNullOrWhiteSpace(raw)
+                ? null
+                : JsonSerializer.Deserialize<UpdateUserRequest>(raw, AdminJson);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse UpdateUser body");
+            body = null;
+        }
+
         if (body == null) return await BadRequest(req, "INVALID_REQUEST", "An update body is required.");
 
         if (!string.IsNullOrWhiteSpace(body.GlobalRole))
@@ -246,9 +280,7 @@ public sealed class AdminFunctions
             await _userRepo.SetPasswordAsync(userId, PasswordHasher.Hash(body.Password));
 
         var updated = await _userRepo.GetByIdAsync(userId);
-        var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(ToDto(updated!));
-        return response;
+        return await WriteJsonAsync(req, HttpStatusCode.OK, ToDto(updated!));
     }
 
     // ---- helpers ----
