@@ -280,22 +280,7 @@ public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
         return string.IsNullOrEmpty(value) ? null : value;
     }
 
-    private static IEnumerable<string> ExtractXmlTags(string xml, string tag)
-    {
-        var open = $"<{tag}>";
-        var close = $"</{tag}>";
-        var idx = 0;
-        while (true)
-        {
-            var start = xml.IndexOf(open, idx, StringComparison.Ordinal);
-            if (start < 0) yield break;
-            start += open.Length;
-            var end = xml.IndexOf(close, start, StringComparison.Ordinal);
-            if (end < 0) yield break;
-            yield return xml[start..end];
-            idx = end + close.Length;
-        }
-    }
+    // ExtractXmlTags lives on the Governance partial (shared by inventory + governance).
 
     public async Task<RemediationExecutionResult> ExecuteRemediationAsync(
         Guid tenantId, RemediationPlaybook playbook, RemediationAction action, CancellationToken cancellationToken = default)
