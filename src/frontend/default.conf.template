@@ -20,10 +20,11 @@ server {
     # DNS re-resolve: a bare `proxy_pass http://api:80` caches the IP at
     # nginx start. After `docker compose up --force-recreate api`, that IP
     # is dead and the UI 502s on /api/* (including login). Using a variable
-    # + resolver forces a fresh lookup (valid=10s) after the API moves.
-    # ${DNS_RESOLVER} is set from /etc/resolv.conf by docker-entrypoint.d.
+    # + resolver forces a fresh lookup. NGINX_LOCAL_RESOLVERS comes from
+    # the official nginx entrypoint when NGINX_ENTRYPOINT_LOCAL_RESOLVERS
+    # is set (reads /etc/resolv.conf — works on Docker, Podman, and k8s).
     # ------------------------------------------------------------------
-    resolver ${DNS_RESOLVER} valid=10s ipv6=off;
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
     set $api_upstream ${API_UPSTREAM};
 
     location /api/ {
