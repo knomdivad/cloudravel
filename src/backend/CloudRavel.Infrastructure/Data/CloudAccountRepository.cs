@@ -123,6 +123,32 @@ public sealed class CloudAccountRepository : ICloudAccountRepository
             new { AccountId = accountId, At = inventoryAt });
     }
 
+    public async Task DeleteAsync(Guid tenantId, Guid accountId)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var affected = await conn.ExecuteAsync(
+            "DELETE FROM cloud_accounts WHERE tenant_id = @TenantId AND account_id = @AccountId",
+            new { TenantId = tenantId, AccountId = accountId });
+
+        if (affected == 0)
+            throw new KeyNotFoundException($"Cloud account {accountId} not found.");
+
+        _logger.LogInformation("Deleted cloud account {AccountId} from workspace {TenantId}", accountId, tenantId);
+    }
+
+    public async Task UpdateCredentialSecretNameAsync(Guid tenantId, Guid accountId, string? credentialSecretName)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var affected = await conn.ExecuteAsync(@"
+            UPDATE cloud_accounts
+            SET credential_secret_name = @SecretName, last_error = NULL, status = 'Connected'
+            WHERE tenant_id = @TenantId AND account_id = @AccountId",
+            new { TenantId = tenantId, AccountId = accountId, SecretName = credentialSecretName });
+
+        if (affected == 0)
+            throw new KeyNotFoundException($"Cloud account {accountId} not found.");
+    }
+
     /// <summary>Row type: regions stored as a JSON array string.</summary>
     private sealed class CloudAccountRow
     {

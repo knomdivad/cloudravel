@@ -37,4 +37,17 @@ public sealed class OpenBaoSecretStore : ISecretStore
             path: name,
             data: new Dictionary<string, object> { ["value"] = value },
             mountPoint: MountPoint);
+
+    public async Task DeleteSecretAsync(string name)
+    {
+        try
+        {
+            // Metadata delete removes all versions for the path.
+            await _client.V1.Secrets.KeyValue.V2.DeleteMetadataAsync(path: name, mountPoint: MountPoint);
+        }
+        catch (VaultApiException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // Already gone — success for cleanup paths.
+        }
+    }
 }

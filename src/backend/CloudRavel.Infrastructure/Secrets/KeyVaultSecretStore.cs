@@ -40,6 +40,18 @@ public sealed class KeyVaultSecretStore : ISecretStore
         await _client.SetSecretAsync(Sanitize(name), value);
     }
 
+    public async Task DeleteSecretAsync(string name)
+    {
+        try
+        {
+            await _client.StartDeleteSecretAsync(Sanitize(name));
+        }
+        catch (global::Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            // Already gone — success for cleanup paths.
+        }
+    }
+
     /// <summary>
     /// Key Vault secret names: only alphanumeric and hyphens. Paths like
     /// org/{id}/sso-secret become org-{id}-sso-secret.

@@ -64,4 +64,18 @@ public sealed class OrganizationRepository : IOrganizationRepository
 
         return (await GetByIdAsync(org.OrgId))!;
     }
+
+    public async Task SoftDeleteAsync(Guid orgId)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        // organizations.status CHECK allows active | suspended — soft-delete = suspended.
+        var affected = await conn.ExecuteAsync(
+            "UPDATE organizations SET status = 'suspended' WHERE org_id = @OrgId AND status = 'active'",
+            new { OrgId = orgId });
+
+        if (affected == 0)
+            throw new KeyNotFoundException($"Organization {orgId} not found or already deleted.");
+
+        _logger.LogInformation("Soft-deleted organization {OrgId} (status → suspended)", orgId);
+    }
 }

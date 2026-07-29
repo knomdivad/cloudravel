@@ -469,7 +469,10 @@ public sealed class AiOpsFunctions
                     ResourceCount = azureAccountDtos.Sum(a => a.ResourceCount),
                     LastInventoryAt = latestAzureSnapshotAt,
                     Accounts = azureAccountDtos,
-                    SubscriptionScope = o.SubscriptionScope
+                    SubscriptionScope = o.SubscriptionScope,
+                    OnboardingMethod = o.OnboardingMethod,
+                    HasCredentials = string.Equals(o.OnboardingMethod, "app_registration", StringComparison.OrdinalIgnoreCase)
+                                     && !string.IsNullOrWhiteSpace(o.CredentialSecretName)
                 });
                 continue;
             }
@@ -494,7 +497,8 @@ public sealed class AiOpsFunctions
                     .Select(a => a.LastInventoryAt!.Value)
                     .DefaultIfEmpty()
                     .Max() is var max && max != default ? max : (DateTime?)null,
-                Accounts = memberDtos
+                Accounts = memberDtos,
+                HasCredentials = false
             });
         }
 
@@ -700,6 +704,196 @@ public sealed class AiOpsFunctions
         {
             _logger.LogError(ex, "On-demand collection failed for cloud account {AccountId}", id);
             return await BadRequest(req, "COLLECTION_FAILED", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// DELETE /api/cloud-accounts/{id} — unlink an AWS account / GCP project.
+    /// Removes the SQL row and best-effort deletes the secret-store credential.
+    /// </summary>
+    [Function("DeleteCloudAccount")]
+    public async Task<HttpResponseData> DeleteCloudAccount(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "cloud-accounts/{id:guid}")] HttpRequestData req,
+        Guid id,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+        var tenantId = context.GetTenantId();
+
+        var account = await _cloudAccountRepo.GetByIdAsync(tenantId, id);
+        if (account == null)
+            return await NotFound(req, $"Cloud account {id} not found.");
+
+        await _cloudAccountRepo.DeleteAsync(tenantId, id);
+        await TryDeleteSecretAsync(account.CredentialSecretName);
+
+        _logger.LogInformation("Deleted {Provider} account {ExternalId} ({AccountId}) from workspace {TenantId}",
+            account.Provider, account.ExternalId, id, tenantId);
+
+        return req.CreateCorsResponse(HttpStatusCode.NoContent);
+    }
+
+    /// <summary>
+    /// PUT /api/cloud-accounts/{id}/credentials — rotate AWS/GCP credentials in the secret store.
+    /// </summary>
+    [Function("UpdateCloudAccountCredentials")]
+    public async Task<HttpResponseData> UpdateCloudAccountCredentials(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "cloud-accounts/{id:guid}/credentials")] HttpRequestData req,
+        Guid id,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+        var tenantId = context.GetTenantId();
+
+        var body = await req.ReadFromJsonAsync<UpdateCloudAccountCredentialsRequest>();
+        if (body == null || string.IsNullOrWhiteSpace(body.CredentialJson))
+            return await BadRequest(req, "INVALID_REQUEST", "credentialJson is required.");
+        if (_secretStore == null)
+            return await BadRequest(req, "SECRET_STORE_REQUIRED",
+                "A secret store is not configured; cannot store cloud credentials.");
+
+        var account = await _cloudAccountRepo.GetByIdAsync(tenantId, id);
+        if (account == null)
+            return await NotFound(req, $"Cloud account {id} not found.");
+
+        var secretName = string.IsNullOrWhiteSpace(account.CredentialSecretName)
+            ? $"cloudaccount-{account.AccountId}"
+            : account.CredentialSecretName;
+
+        await _secretStore.SetSecretAsync(secretName, body.CredentialJson);
+        if (!string.Equals(account.CredentialSecretName, secretName, StringComparison.Ordinal))
+            await _cloudAccountRepo.UpdateCredentialSecretNameAsync(tenantId, id, secretName);
+        else
+            // Clear last_error / restore Connected so a rotated key can recover a Degraded account.
+            await _cloudAccountRepo.UpdateCredentialSecretNameAsync(tenantId, id, secretName);
+
+        account.CredentialSecretName = secretName;
+        try
+        {
+            var adapter = _adapterFactory.GetAdapter(account.Provider);
+            var (healthy, error) = await adapter.TestConnectivityAsync(account);
+            await _cloudAccountRepo.UpdateStatusAsync(account.AccountId,
+                healthy ? CloudAccountStatus.Connected : CloudAccountStatus.Degraded, error);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Connectivity test failed after credential rotation for account {AccountId}", id);
+            await _cloudAccountRepo.UpdateStatusAsync(account.AccountId, CloudAccountStatus.Degraded, ex.Message);
+        }
+
+        var refreshed = await _cloudAccountRepo.GetByIdAsync(tenantId, id);
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(ToDto(refreshed ?? account));
+        return response;
+    }
+
+    /// <summary>
+    /// DELETE /api/cloud-orgs/{orgId} — remove an Azure tenant connection or AWS/GCP organization.
+    /// Cascades: member accounts (and their secrets), azure_org_subscriptions, then the org row.
+    /// </summary>
+    [Function("DeleteCloudOrg")]
+    public async Task<HttpResponseData> DeleteCloudOrg(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "cloud-orgs/{orgId:guid}")] HttpRequestData req,
+        Guid orgId,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+        var tenantId = context.GetTenantId();
+
+        var org = await _cloudOrgRepo.GetByIdAsync(tenantId, orgId);
+        if (org == null)
+            return await NotFound(req, $"Cloud org {orgId} not found.");
+
+        var members = await _cloudAccountRepo.GetByOrgAsync(tenantId, orgId);
+        foreach (var account in members)
+        {
+            await _cloudAccountRepo.DeleteAsync(tenantId, account.AccountId);
+            await TryDeleteSecretAsync(account.CredentialSecretName);
+        }
+
+        await _cloudOrgRepo.DeleteAsync(tenantId, orgId);
+        await TryDeleteSecretAsync(org.CredentialSecretName);
+
+        _logger.LogInformation("Deleted {Provider} cloud org '{Name}' ({OrgId}) and {Count} member account(s) from workspace {TenantId}",
+            org.Provider, org.Name, orgId, members.Count, tenantId);
+
+        return req.CreateCorsResponse(HttpStatusCode.NoContent);
+    }
+
+    /// <summary>
+    /// PUT /api/cloud-orgs/{orgId}/credentials — rotate Azure app-registration credentials
+    /// for a cloud_orgs connection. Lighthouse connections have no secret to rotate.
+    /// </summary>
+    [Function("UpdateCloudOrgCredentials")]
+    public async Task<HttpResponseData> UpdateCloudOrgCredentials(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "cloud-orgs/{orgId:guid}/credentials")] HttpRequestData req,
+        Guid orgId,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+        var tenantId = context.GetTenantId();
+
+        var body = await req.ReadFromJsonAsync<UpdateCloudOrgCredentialsRequest>();
+        if (body == null || string.IsNullOrWhiteSpace(body.ClientId) || string.IsNullOrWhiteSpace(body.ClientSecret))
+            return await BadRequest(req, "INVALID_REQUEST", "clientId and clientSecret are required.");
+        if (_secretStore == null)
+            return await BadRequest(req, "SECRET_STORE_REQUIRED",
+                "A secret store is not configured; cannot store cloud credentials.");
+
+        var org = await _cloudOrgRepo.GetByIdAsync(tenantId, orgId);
+        if (org == null)
+            return await NotFound(req, $"Cloud org {orgId} not found.");
+        if (org.Provider != CloudProvider.Azure)
+            return await BadRequest(req, "INVALID_PROVIDER",
+                "Credential rotation on cloud-orgs is for Azure app registrations. Use PUT /cloud-accounts/{id}/credentials for AWS/GCP.");
+        if (!string.Equals(org.OnboardingMethod, "app_registration", StringComparison.OrdinalIgnoreCase))
+            return await BadRequest(req, "INVALID_METHOD",
+                "Only app_registration Azure connections store client credentials. Lighthouse uses delegated access.");
+
+        var secretName = string.IsNullOrWhiteSpace(org.CredentialSecretName)
+            ? $"cloudorg-{org.OrgId}-creds"
+            : org.CredentialSecretName;
+
+        await _secretStore.SetSecretAsync(secretName, JsonSerializer.Serialize(new
+        {
+            clientId = body.ClientId.Trim(),
+            clientSecret = body.ClientSecret
+        }));
+        await _cloudOrgRepo.UpdateCredentialSecretNameAsync(tenantId, orgId, secretName);
+
+        // Keep workspace shell secret in sync when this connection was the primary fill.
+        var workspace = await _tenantRepo.GetByIdAsync(tenantId);
+        if (workspace != null &&
+            (string.IsNullOrWhiteSpace(workspace.SecretName)
+             || string.Equals(workspace.SecretName, org.CredentialSecretName, StringComparison.Ordinal)
+             || string.Equals(workspace.AzureTenantId, org.ExternalId, StringComparison.OrdinalIgnoreCase)))
+        {
+            workspace.SecretName = secretName;
+            await _tenantRepo.UpdateAsync(workspace);
+        }
+
+        _logger.LogInformation("Rotated credentials for Azure cloud org {OrgId} in workspace {TenantId}", orgId, tenantId);
+
+        var response = req.CreateCorsResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { orgId, updated = true });
+        return response;
+    }
+
+    private async Task TryDeleteSecretAsync(string? secretName)
+    {
+        if (string.IsNullOrWhiteSpace(secretName) || _secretStore == null) return;
+        try
+        {
+            await _secretStore.DeleteSecretAsync(secretName);
+        }
+        catch (Exception ex)
+        {
+            // Don't fail the delete path if secret cleanup fails (already rotated / store down).
+            _logger.LogWarning(ex, "Failed to delete secret {SecretName} during cloud cleanup", secretName);
         }
     }
 
