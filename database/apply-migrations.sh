@@ -34,6 +34,7 @@ MIGRATIONS=(
   009-azure-multi-tenant
   010-admin-rbac
   011-ensure-bootstrap-admin
+  012-rls-hardening
   seed-demo-data
 )
 

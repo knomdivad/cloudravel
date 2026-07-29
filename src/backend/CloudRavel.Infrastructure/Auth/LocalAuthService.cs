@@ -40,7 +40,10 @@ public sealed class LocalAuthService : ILocalAuthService
         if (string.IsNullOrEmpty(signingKey))
             throw new InvalidOperationException("LocalAuth:JwtSigningKey is not configured.");
 
-        var expiresAt = DateTime.UtcNow.AddHours(12);
+        // Shorter-lived access tokens reduce the window for stolen JWTs (no refresh flow yet).
+        var hours = int.TryParse(_config["LocalAuth:TokenLifetimeHours"], out var h) && h is > 0 and <= 24
+            ? h : 4;
+        var expiresAt = DateTime.UtcNow.AddHours(hours);
         var key = new SymmetricSecurityKey(LocalAuthConstants.DeriveSigningKey(signingKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 

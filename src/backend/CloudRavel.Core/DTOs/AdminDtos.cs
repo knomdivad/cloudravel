@@ -85,6 +85,11 @@ public sealed class OrgSsoDto
     public string? Domain { get; set; }
     public bool Enabled { get; set; }
     public bool ClientSecretConfigured { get; set; }
+    /// <summary>
+    /// Per-org token federation is stored but not enforced yet.
+    /// Always "not_implemented" until multi-issuer validation ships.
+    /// </summary>
+    public string EnforcementStatus { get; set; } = "not_implemented";
 }
 
 public sealed class UpdateOrgSsoRequest

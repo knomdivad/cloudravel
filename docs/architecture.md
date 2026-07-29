@@ -109,16 +109,19 @@ Timer-triggered Function
 ```
 User → Next.js Frontend
   → Either: MSAL redirect to Entra ID (SSO)
-     Or:    POST /api/auth/login with username/password (local auth)
+     Or:    POST /api/auth/login with username/password (local auth; rate-limited)
   → Obtains an access token either way (Entra JWT, or a platform-signed JWT)
   → Frontend sends token to API
   → API's policy scheme detects which one issued it and validates against the
     matching JwtBearer scheme (EntraId or Local) — both are accepted uniformly
+  → TenantContextMiddleware: rejects inactive users; JIT-provisions Entra users
+     as global_role=member (no org grants until an admin assigns them)
   → Resolves user → tenant permissions from RBAC table
-  → Returns authorized tenant list
-  → User selects tenant (or sees default)
+  → List endpoints return only workspaces the caller can access
+     (system_admin sees all)
+  → User selects workspace
   → All subsequent API calls include X-Tenant-Id header
-  → API enforces tenant access on every request
+  → Path org/tenant ids must match X-Tenant-Id; mutators require org roles
 ```
 
 ## Source-of-Truth Data Model

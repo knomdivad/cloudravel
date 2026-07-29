@@ -154,6 +154,9 @@ public sealed class RecommendationFunctions
         string recommendationId,
         FunctionContext context)
     {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<LifecycleUpdateRequest>();
         if (body == null || !Enum.TryParse<RecommendationLifecycle>(body.Status, true, out var newStatus))

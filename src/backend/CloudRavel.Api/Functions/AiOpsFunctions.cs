@@ -109,7 +109,7 @@ public sealed class AiOpsFunctions
 
         try
         {
-            await _anomalyRepo.UpdateStatusAsync(tenantId, id, status, GetActor(req));
+            await _anomalyRepo.UpdateStatusAsync(tenantId, id, status, context.GetActor());
         }
         catch (KeyNotFoundException)
         {
@@ -187,7 +187,7 @@ public sealed class AiOpsFunctions
         if (incident == null)
             return await NotFound(req, $"Incident {id} not found.");
 
-        var actor = GetActor(req);
+        var actor = context.GetActor();
 
         if (!string.IsNullOrEmpty(body.Status))
         {
@@ -287,9 +287,9 @@ public sealed class AiOpsFunctions
             var action = await _remediationService.ProposeAsync(
                 tenantId, body.PlaybookKey, body.ResourceId,
                 body.Title ?? string.Empty,
-                string.IsNullOrWhiteSpace(body.Reason) ? $"Manually proposed by {GetActor(req)}" : body.Reason,
+                string.IsNullOrWhiteSpace(body.Reason) ? $"Manually proposed by {context.GetActor()}" : body.Reason,
                 body.ParametersJson,
-                requestedBy: $"user:{GetActor(req)}");
+                requestedBy: $"user:{context.GetActor()}");
 
             var response = req.CreateCorsResponse(HttpStatusCode.Created);
             await response.WriteAsJsonAsync(ToDto(action));
@@ -317,7 +317,7 @@ public sealed class AiOpsFunctions
         var tenantId = context.GetTenantId();
         try
         {
-            await _remediationService.ApproveAsync(tenantId, id, GetActor(req));
+            await _remediationService.ApproveAsync(tenantId, id, context.GetActor());
             // Execute immediately so the approver sees the outcome; the timer
             // worker is the safety net for anything that slips through.
             var executed = await _remediationService.ExecuteAsync(tenantId, id);
@@ -350,7 +350,7 @@ public sealed class AiOpsFunctions
 
         try
         {
-            var action = await _remediationService.RejectAsync(tenantId, id, GetActor(req), body?.Reason);
+            var action = await _remediationService.RejectAsync(tenantId, id, context.GetActor(), body?.Reason);
             var response = req.CreateCorsResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(ToDto(action));
             return response;
@@ -533,7 +533,7 @@ public sealed class AiOpsFunctions
             Provider = provider,
             Name = body.Name.Trim(),
             ExternalId = string.IsNullOrWhiteSpace(body.ExternalId) ? null : body.ExternalId.Trim(),
-            CreatedBy = GetActor(req)
+            CreatedBy = context.GetActor()
         });
 
         var response = req.CreateCorsResponse(HttpStatusCode.Created);
@@ -629,18 +629,18 @@ public sealed class AiOpsFunctions
             ExternalId = body.ExternalId,
             DisplayName = body.DisplayName,
             Regions = body.Regions,
-            CreatedBy = GetActor(req)
+            CreatedBy = context.GetActor()
         };
 
-        if (!string.IsNullOrEmpty(body.CredentialJson))
-        {
-            if (_secretStore == null)
-                return await BadRequest(req, "SECRETSTORE_UNAVAILABLE",
-                    "Secret store is not configured; cannot store cloud credentials.");
+        if (string.IsNullOrWhiteSpace(body.CredentialJson))
+            return await BadRequest(req, "INVALID_REQUEST",
+                "credentialJson is required when linking an AWS account or GCP project.");
+        if (_secretStore == null)
+            return await BadRequest(req, "SECRET_STORE_REQUIRED",
+                "A secret store is not configured; cannot store cloud credentials.");
 
-            account.CredentialSecretName = $"cloudaccount-{account.AccountId}";
-            await _secretStore.SetSecretAsync(account.CredentialSecretName, body.CredentialJson);
-        }
+        account.CredentialSecretName = $"cloudaccount-{account.AccountId}";
+        await _secretStore.SetSecretAsync(account.CredentialSecretName, body.CredentialJson);
 
         await _cloudAccountRepo.CreateAsync(account);
 
@@ -846,14 +846,6 @@ public sealed class AiOpsFunctions
         ResourceCount = resourceCount,
         CreatedAt = a.CreatedAt
     };
-
-    /// <summary>
-    /// Actor identity for audit fields. JWT claim extraction is not yet wired
-    /// (see TenantFunctions TODO), so accept the display-name header the SPA
-    /// sends and fall back to a generic operator label.
-    /// </summary>
-    private static string GetActor(HttpRequestData req) =>
-        req.Headers.TryGetValues("X-User-Name", out var values) ? values.First() : "operator";
 
     private static async Task<HttpResponseData> BadRequest(HttpRequestData req, string code, string message)
     {

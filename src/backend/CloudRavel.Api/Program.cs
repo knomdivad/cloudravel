@@ -1,3 +1,4 @@
+using CloudRavel.Api.Auth;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.Auth;
 using CloudRavel.Core.Interfaces;
@@ -15,7 +16,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VaultSharp;
@@ -52,8 +52,15 @@ var host = new HostBuilder()
             jsonOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
             options.Serializer = new Azure.Core.Serialization.JsonObjectSerializer(jsonOptions);
         });
+
+        var config = context.Configuration;
+
+        // CORS allow-list (comma-separated). Defaults to local Next.js origin.
+        HttpResponseDataExtensions.ConfigureFromRaw(config["Cors:AllowedOrigins"]);
+
         // Instance environment (Development gates real cloud inventory collection)
         services.AddSingleton<IPlatformInfo, PlatformInfo>();
+        services.AddSingleton<LoginRateLimiter>();
 
         // Database
         services.AddSingleton<ITenantDbConnectionFactory, TenantDbConnectionFactory>();
@@ -98,8 +105,8 @@ var host = new HostBuilder()
         // Job queue: Service Bus when configured (default on Azure), otherwise
         // the SQL-table-backed queue — needs no infra beyond the database, so
         // the host never hard-depends on Service Bus just to start.
-        var serviceBusConnection = context.Configuration["ServiceBusConnection"]
-            ?? context.Configuration.GetConnectionString("ServiceBusConnection");
+        var serviceBusConnection = config["ServiceBusConnection"]
+            ?? config.GetConnectionString("ServiceBusConnection");
         if (!string.IsNullOrEmpty(serviceBusConnection))
         {
             services.AddScoped<IJobQueue, AzureServiceBusJobQueue>();
@@ -109,24 +116,40 @@ var host = new HostBuilder()
             services.AddScoped<IJobQueue, DatabaseJobQueue>();
         }
 
-        // Secret storage: OpenBao (self-hosted, Vault-API-compatible) — cloud-agnostic,
-        // unlike Azure Key Vault. Optional, same as Key Vault was: a deployment with no
-        // secret store configured still boots, just can't store/retrieve credentials.
-        var openBaoAddress = context.Configuration["OpenBao:Address"];
-        if (!string.IsNullOrEmpty(openBaoAddress))
+        // Secret storage: OpenBao (default for self-host) or Azure Key Vault.
+        // SecretStore:Provider = OpenBao | KeyVault (case-insensitive).
+        // A deployment with no store configured still boots, but credentialed
+        // cloud links and AI key storage fail closed at the API layer.
+        var secretProvider = (config["SecretStore:Provider"] ?? "").Trim();
+        var openBaoAddress = config["OpenBao:Address"];
+        var keyVaultUri = config["KeyVault:VaultUri"] ?? config["KeyVault__VaultUri"];
+
+        if (string.Equals(secretProvider, "KeyVault", StringComparison.OrdinalIgnoreCase)
+            || (string.IsNullOrEmpty(openBaoAddress) && !string.IsNullOrEmpty(keyVaultUri)
+                && !string.Equals(secretProvider, "OpenBao", StringComparison.OrdinalIgnoreCase)))
         {
-            IAuthMethodInfo authMethod = new TokenAuthMethodInfo(context.Configuration["OpenBao:Token"] ?? "");
+            if (string.IsNullOrEmpty(keyVaultUri))
+                throw new InvalidOperationException("SecretStore:Provider=KeyVault requires KeyVault:VaultUri.");
+            services.AddSingleton<ISecretStore>(new KeyVaultSecretStore(new Uri(keyVaultUri)));
+        }
+        else if (!string.IsNullOrEmpty(openBaoAddress)
+                 || string.Equals(secretProvider, "OpenBao", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrEmpty(openBaoAddress))
+                throw new InvalidOperationException("SecretStore:Provider=OpenBao requires OpenBao:Address.");
+            IAuthMethodInfo authMethod = new TokenAuthMethodInfo(config["OpenBao:Token"] ?? "");
             var vaultClientSettings = new VaultClientSettings(openBaoAddress, authMethod);
             services.AddSingleton<IVaultClient>(new VaultClient(vaultClientSettings));
             services.AddSingleton<ISecretStore, OpenBaoSecretStore>();
         }
 
         // Authentication — two independent login paths, both accepted on every
-        // protected endpoint. Entra ID SSO is unchanged; "Local" validates the
-        // JWTs LocalAuthService issues from POST /api/auth/login. A deployment
-        // with no Entra tenant configured (AzureAd:TenantId empty) simply never
-        // receives Entra tokens — the Local scheme still works standalone.
-        var config = context.Configuration;
+        // protected endpoint. LocalAuth:JwtSigningKey is required (fail closed).
+        var signingKey = config["LocalAuth:JwtSigningKey"];
+        if (string.IsNullOrWhiteSpace(signingKey))
+            throw new InvalidOperationException(
+                "LocalAuth:JwtSigningKey is required. Set LocalAuth__JwtSigningKey (or LOCAL_AUTH_JWT_SIGNING_KEY in compose) to a long random value.");
+
         services.AddAuthentication(options =>
             {
                 options.DefaultAuthenticateScheme = "EntraOrLocal";
@@ -143,13 +166,11 @@ var host = new HostBuilder()
             .AddJwtBearer("Local", options =>
             {
                 options.MapInboundClaims = false;
-                var signingKey = config["LocalAuth:JwtSigningKey"] ?? "";
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidIssuer = LocalAuthConstants.Issuer,
                     ValidAudience = LocalAuthConstants.Audience,
-                    IssuerSigningKey = new SymmetricSecurityKey(LocalAuthConstants.DeriveSigningKey(
-                        string.IsNullOrEmpty(signingKey) ? Guid.NewGuid().ToString() : signingKey)),
+                    IssuerSigningKey = new SymmetricSecurityKey(LocalAuthConstants.DeriveSigningKey(signingKey)),
                     ValidateIssuer = true,
                     ValidateAudience = true,
                     ValidateLifetime = true,

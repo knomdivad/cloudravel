@@ -99,48 +99,56 @@ Two independent tiers: a system tier (`users.global_role`) and a per-organizatio
 
 ## Data Isolation Enforcement Points
 
-### Layer 1: API Gateway (APIM)
-- JWT validation at gateway level
-- Extract tenant_id from X-Tenant-Id header
-- Validate tenant_id against user's authorized tenants claim
+### Layer 1: API (Functions host)
+- Custom middleware validates Entra or local JWT on every HTTP trigger
+  (`AuthEnforcementMiddleware` + `TenantContextMiddleware`)
+- `X-Tenant-Id` must match path org/tenant ids on resource routes (`RequirePathTenantMatch`)
+- Inactive users are rejected on every request; Entra callers are JIT-provisioned as `member`
+- CORS is an explicit allow-list (`Cors:AllowedOrigins`) — not `*`
+
+Optional Azure front door (APIM / App Gateway) can sit in front of the Function App for
+network policy; it is **not** required by the application runtime.
 
 ### Layer 2: Application Code
-- Every API function sets SQL session context: `tenant_id`
-- Every blob operation uses tenant-specific container
-- Every Resource Graph query is scoped to tenant's subscriptions
-- Every AWS/GCP call resolves credentials from the tenant's own linked cloud accounts
+- Tenant-scoped SQL uses `SESSION_CONTEXT('tenant_id')` via `TenantDbConnectionFactory`
+- Org/system role gates on mutating endpoints (`RequireOrgRoleAsync` / `RequireSystemAdminAsync`)
+- AWS/GCP/Azure app-reg credentials resolve from the configured secret store only
 - Remediation execution resolves the playbook + tenant policy on every run
+- Audit actor identity is taken from JWT claims only (never client headers)
 
 ### Layer 3: Database (RLS)
-- Row-Level Security policy on every tenant-scoped table, including the AIOps tables
+- Row-Level Security policy on tenant-scoped tables, including AIOps tables
   (`cloud_accounts`, `anomalies`, `metric_baselines`, `incidents`, `incident_events`,
-  `remediation_actions`) — `remediation_playbooks` is a global allow-list catalog and
-  deliberately carries no tenant data
-- Even direct SQL access (for debugging) requires setting session context
-- DBA access requires explicit policy exemption
+  `remediation_actions`, `inventory_snapshots` FILTER+BLOCK, `audit_events`)
+- `remediation_playbooks` is a global allow-list catalog (no tenant data)
+- `job_queue` is worker/admin-only (no `tenant_id` column)
+- Admin operations use `bypass_rls` session context
 
 ### Layer 4: Encryption
-- Azure SQL TDE (transparent data encryption) — at rest
-- TLS 1.2+ — in transit
-- Column-level encryption for sensitive config values (connection strings)
-- Key Vault-managed keys per tenant (optional, for strict compliance)
+- Azure SQL TDE (or equivalent at-rest encryption for the SQL engine in use)
+- TLS 1.2+ in transit
+- Column-level encryption / per-tenant CMK: **not implemented** (future)
 
 ## Secrets Management
 
-| Secret Type | Storage | Rotation |
-|---|---|---|
-| App Registration client secrets | Key Vault | Auto-rotate every 90 days |
-| App Registration certificates | Key Vault | Auto-rotate every 12 months |
-| Azure SQL connection string | Key Vault + Managed Identity (passwordless preferred) | N/A |
-| Azure OpenAI API key (`AzureOpenAiApiKey`) | Key Vault (set by Terraform) | On demand (key regen + re-apply) |
-| AWS access keys (`cloudaccount-{id}`) | Key Vault — JSON `{accessKeyId, secretAccessKey, defaultRegion}` | Customer-driven; re-link account to rotate |
-| GCP service account keys (`cloudaccount-{id}`) | Key Vault — standard SA key JSON | Customer-driven; re-link account to rotate |
-| Service Bus connection | Managed Identity (no key) | N/A |
-| Blob Storage connection | Managed Identity (no key) | N/A |
+The app uses `ISecretStore` with a configurable provider:
 
-Cloud account credentials are written to Key Vault at link time and only the secret
-*name* is persisted in SQL. Credentials never appear in API responses, logs, or the
-AI context.
+| Deployment | Provider | Config |
+|---|---|---|
+| Docker Compose / Helm (self-host) | OpenBao (Vault API) | `OpenBao:Address`, `OpenBao:Token`, `SecretStore:Provider=OpenBao` |
+| Azure (Terraform) | Azure Key Vault | `KeyVault:VaultUri`, `SecretStore:Provider=KeyVault` |
+
+| Secret Type | Storage | Notes |
+|---|---|---|
+| App Registration client secrets | Secret store | Fail closed if store missing |
+| AWS access keys | Secret store (`cloudaccount-{id}`) | Required at link time |
+| GCP service account keys | Secret store | Required at link time |
+| OpenAI-compatible API key | Secret store or env `OpenAI:ApiKey` | System admin UI writes to store |
+| Local auth JWT signing key | Env / K8s secret / Key Vault | **Required at API startup** |
+| SQL / Service Bus / Blob (Azure) | Managed Identity preferred | Terraform path |
+
+Credential **values** never appear in API responses, logs, or the AI tool context —
+only secret *names* are stored in SQL.
 
 ## Audit Trail
 

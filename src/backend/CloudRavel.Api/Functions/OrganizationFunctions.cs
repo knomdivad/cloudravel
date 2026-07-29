@@ -110,7 +110,7 @@ public sealed class OrganizationFunctions
             Name = body.Name.Trim(),
             Environment = environment,
             Status = "active",
-            CreatedBy = GetActor(req)
+            CreatedBy = context.GetActor()
         });
 
         _logger.LogInformation("Created organization {OrgId} ({Name})", org.OrgId, org.Name);
@@ -134,6 +134,9 @@ public sealed class OrganizationFunctions
     {
         var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
         if (forbid != null) return forbid;
+
+        var mismatch = await context.RequirePathTenantMatchAsync(req, orgId);
+        if (mismatch != null) return mismatch;
 
         var org = await _orgRepo.GetByIdAsync(orgId);
         if (org == null)
@@ -164,6 +167,11 @@ public sealed class OrganizationFunctions
             ? $"cloudorg-{newOrgId}-creds"
             : null;
 
+        // App Registration credentials require a secret store — fail closed.
+        if (credentialSecretName != null && !string.IsNullOrEmpty(body.ClientSecret) && _secretStore == null)
+            return await BadRequest(req, "SECRET_STORE_REQUIRED",
+                "A secret store is required to store App Registration credentials.");
+
         // Always create the peer cloud_orgs connection — the inventory collector
         // loops these, so this is the single source of truth for N Azure tenants.
         var azureOrg = await _cloudOrgRepo.CreateAsync(new CloudOrg
@@ -178,22 +186,19 @@ public sealed class OrganizationFunctions
             CredentialSecretName = credentialSecretName,
             LighthouseDelegationId = body.LighthouseDelegationId,
             SubscriptionScope = subscriptionScope,
-            CreatedBy = GetActor(req)
+            CreatedBy = context.GetActor()
         });
 
         if (body.SubscriptionIds is { Count: > 0 })
             await _cloudOrgRepo.AddAzureSubscriptionsAsync(orgId, newOrgId, body.SubscriptionIds);
 
-        if (credentialSecretName != null && !string.IsNullOrEmpty(body.ClientSecret))
+        if (credentialSecretName != null && !string.IsNullOrEmpty(body.ClientSecret) && _secretStore != null)
         {
-            if (_secretStore == null)
-                _logger.LogWarning("Secret store not configured — cannot store credentials for Azure org {OrgId}", newOrgId);
-            else
-                await _secretStore.SetSecretAsync(credentialSecretName, JsonSerializer.Serialize(new
-                {
-                    clientId = body.ClientId,
-                    clientSecret = body.ClientSecret
-                }));
+            await _secretStore.SetSecretAsync(credentialSecretName, JsonSerializer.Serialize(new
+            {
+                clientId = body.ClientId,
+                clientSecret = body.ClientSecret
+            }));
         }
 
         // The FIRST Azure connection for this workspace also materializes the
@@ -253,9 +258,6 @@ public sealed class OrganizationFunctions
             CloudCount = azureOrgs.Count + aws + gcp
         };
     }
-
-    private static string GetActor(HttpRequestData req) =>
-        req.Headers.TryGetValues("X-User-Name", out var values) ? values.First() : "operator";
 
     private static async Task<HttpResponseData> BadRequest(HttpRequestData req, string code, string message)
     {

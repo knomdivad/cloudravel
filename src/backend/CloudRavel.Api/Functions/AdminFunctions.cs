@@ -79,8 +79,8 @@ public sealed class AdminFunctions
         if (!string.IsNullOrWhiteSpace(body.OpenAiApiKey))
         {
             if (_secretStore == null)
-                return await BadRequest(req, "SECRETSTORE_UNAVAILABLE",
-                    "A secret store (OpenBao) is not configured, so the API key cannot be stored securely.");
+                return await BadRequest(req, "SECRET_STORE_REQUIRED",
+                    "A secret store is not configured, so the API key cannot be stored securely.");
             await _secretStore.SetSecretAsync(SystemSettingKeys.OpenAiApiKeySecretPath, body.OpenAiApiKey.Trim());
             await _settings.SetAsync(SystemSettingKeys.OpenAiApiKeySecretName, SystemSettingKeys.OpenAiApiKeySecretPath, actor);
             _logger.LogInformation("OpenAI API key updated by {Actor}", actor);

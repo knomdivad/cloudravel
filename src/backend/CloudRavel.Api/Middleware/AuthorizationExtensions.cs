@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
@@ -54,6 +55,70 @@ public static class AuthorizationExtensions
     {
         if (context.IsSystemAdmin() || context.HasOrgRole(minRole)) return null;
         return await ForbidAsync(req, $"This action requires the '{minRole}' role in this organization.");
+    }
+
+    /// <summary>
+    /// Ensures the route path tenant/org id matches the X-Tenant-Id the middleware
+    /// authorized. Prevents header/path IDOR on resource-scoped routes.
+    /// </summary>
+    public static async Task<HttpResponseData?> RequirePathTenantMatchAsync(
+        this FunctionContext context, HttpRequestData req, Guid pathTenantOrOrgId)
+    {
+        var headerTenant = context.TryGetTenantId();
+        if (headerTenant != pathTenantOrOrgId)
+        {
+            var response = req.CreateCorsResponse(HttpStatusCode.BadRequest);
+            await response.WriteAsJsonAsync(new
+            {
+                code = "TENANT_MISMATCH",
+                message = "The X-Tenant-Id header must match the organization/tenant in the path."
+            });
+            return response;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Ensures the caller is an authenticated principal with a resolvable user id.
+    /// Middleware already enforces IsActive; this is a belt-and-suspenders check for handlers.
+    /// </summary>
+    public static async Task<HttpResponseData?> RequireAuthenticatedUserAsync(
+        this FunctionContext context, HttpRequestData req)
+    {
+        if (context.GetUserId().HasValue) return null;
+        var response = req.CreateCorsResponse(HttpStatusCode.Unauthorized);
+        await response.WriteAsJsonAsync(new
+        {
+            code = "UNAUTHENTICATED",
+            message = "A valid authenticated user identity is required."
+        });
+        return response;
+    }
+
+    /// <summary>
+    /// Audit / created-by actor from JWT claims only — never client headers.
+    /// Preference: name → email → preferred_username → sub/oid → "unknown".
+    /// </summary>
+    public static string GetActor(this FunctionContext context)
+    {
+        var httpUser = context.GetHttpContext()?.User;
+        if (httpUser?.Identity?.IsAuthenticated != true)
+            return "unknown";
+
+        return FirstClaim(httpUser, "name")
+            ?? FirstClaim(httpUser, "preferred_username")
+            ?? FirstClaim(httpUser, ClaimTypes.Email)
+            ?? FirstClaim(httpUser, "email")
+            ?? FirstClaim(httpUser, "oid")
+            ?? FirstClaim(httpUser, ClaimTypes.NameIdentifier)
+            ?? FirstClaim(httpUser, "sub")
+            ?? "unknown";
+    }
+
+    private static string? FirstClaim(ClaimsPrincipal user, string type)
+    {
+        var v = user.FindFirst(type)?.Value;
+        return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
     }
 
     private static async Task<HttpResponseData> ForbidAsync(HttpRequestData req, string message)

@@ -194,10 +194,16 @@ function SsoCard({ orgId, showToast }: { orgId: string; showToast: (m: string, t
 
   return (
     <section className="bg-white rounded-lg border border-gray-200 p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-1">Single Sign-On</h2>
+      <h2 className="text-lg font-semibold text-gray-900 mb-1 flex items-center gap-2">
+        Single Sign-On
+        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+          config only — not enforced
+        </span>
+      </h2>
       <p className="text-sm text-gray-500 mb-4">
-        Configure this organization&apos;s identity provider. Settings are saved now;
-        <span className="text-amber-700"> per-org login enforcement is coming in a follow-up</span> — today the platform authenticates via its global Entra tenant and local accounts.
+        Settings are stored for future use ({sso?.enforcementStatus ?? 'not_implemented'}).
+        <span className="text-amber-700"> Per-org login federation is not enforced yet</span> —
+        the platform authenticates via its global Entra tenant and local accounts only.
       </p>
       <form onSubmit={save} className="space-y-4">
         <div>

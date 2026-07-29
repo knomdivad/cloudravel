@@ -2,13 +2,28 @@
 
 ## Executive Summary
 
-CloudRavel is a production-ready, multi-tenant **AIOps operating platform**
-for enterprise cloud estates spanning **Azure, AWS, and GCP**. It provides authoritative
-inventory baselines, change intelligence, security posture tracking, **proactive anomaly
-detection, incident management, and gated auto-remediation** — the day-to-day operational
-work an enterprise would otherwise outsource to a Managed Service Provider, run from a
-single control plane and driven by an AI operations engineer (any OpenAI-compatible model —
-configurable endpoint and API key, so the model provider isn't tied to any one cloud either).
+CloudRavel is a multi-tenant **AIOps operating platform** for enterprise cloud
+estates spanning **Azure, AWS, and GCP**. It provides inventory baselines, change
+intelligence, security posture tracking, **proactive anomaly detection, incident
+management, and gated auto-remediation** from a single control plane, with an AI
+operations assistant (any OpenAI-compatible model — configurable endpoint and API key).
+
+> **Status:** Actively hardened for multi-tenant use. The local Docker/OrbStack stack
+> and Helm chart are the supported run paths. Treat default credentials (`admin` /
+> `ChangeMe123!`, OpenBao `root`) as **local-dev only**. See **Known limitations**
+> below before production deployment.
+
+### Known limitations
+
+| Area | Reality today |
+|---|---|
+| Default credentials | Seeded `admin` / `ChangeMe123!` and OpenBao token `root` are for local/dev only |
+| Org SSO UI | Settings are stored; **login federation is not enforced** (`enforcementStatus: not_implemented`) |
+| Live cloud collection | Requires `Platform:Environment=Production` and real cloud credentials |
+| Lighthouse ARM generation | Manual / customer-side process — not fully automated in-app |
+| APIM / private endpoints | Optional Azure networking (Terraform modules), not the default local path |
+| Login rate limit | In-process only; multi-instance needs a shared store (e.g. Redis) |
+| JWT lifetime | Local tokens default to **4 hours** (configurable via `LocalAuth:TokenLifetimeHours`) |
 
 ### What "MSP replacement" means here
 
