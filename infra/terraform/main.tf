@@ -296,18 +296,18 @@ resource "azurerm_linux_function_app" "main" {
     "ServiceBusConnection__fullyQualifiedNamespace" = "${azurerm_servicebus_namespace.main.name}.servicebus.windows.net"
     "BlobStorageUrl"                                = azurerm_storage_account.main.primary_blob_endpoint
     # App reads OpenAI:* (OpenAI-compatible client). Map Azure OpenAI here.
-    "OpenAI__BaseUrl"                               = "${azurerm_cognitive_account.openai.endpoint}openai/v1"
-    "OpenAI__ApiKey"                                = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AzureOpenAiApiKey)"
-    "OpenAI__Model"                                 = azurerm_cognitive_deployment.gpt.name
+    "OpenAI__BaseUrl" = "${azurerm_cognitive_account.openai.endpoint}openai/v1"
+    "OpenAI__ApiKey"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AzureOpenAiApiKey)"
+    "OpenAI__Model"   = azurerm_cognitive_deployment.gpt.name
     # Kept for transitional tooling that still reads the legacy names.
-    "AzureOpenAI__Endpoint"                         = azurerm_cognitive_account.openai.endpoint
-    "AzureOpenAI__ApiKey"                           = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AzureOpenAiApiKey)"
-    "AzureOpenAI__DeploymentName"                   = azurerm_cognitive_deployment.gpt.name
-    "LocalAuth__JwtSigningKey"                      = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/LocalAuthJwtSigningKey)"
-    "Cors__AllowedOrigins"                          = "https://${azurerm_static_web_app.main.default_host_name}"
-    "Platform__Environment"                         = var.environment == "prod" ? "Production" : "Development"
-    "AzureAd__TenantId"                             = data.azurerm_client_config.current.tenant_id
-    "AzureAd__ClientId"                             = azuread_application.api.client_id
+    "AzureOpenAI__Endpoint"       = azurerm_cognitive_account.openai.endpoint
+    "AzureOpenAI__ApiKey"         = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AzureOpenAiApiKey)"
+    "AzureOpenAI__DeploymentName" = azurerm_cognitive_deployment.gpt.name
+    "LocalAuth__JwtSigningKey"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/LocalAuthJwtSigningKey)"
+    "Cors__AllowedOrigins"        = "https://${azurerm_static_web_app.main.default_host_name}"
+    "Platform__Environment"       = var.environment == "prod" ? "Production" : "Development"
+    "AzureAd__TenantId"           = data.azurerm_client_config.current.tenant_id
+    "AzureAd__ClientId"           = azuread_application.api.client_id
   }
 
   # Ensure the runtime storage RBAC roles exist before the Function App starts.
