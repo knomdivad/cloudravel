@@ -133,6 +133,7 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
         if (z < 3)
             return [];
 
+        var recentChanges = await _changeRepo.GetChangesAsync(tenantId, now.AddHours(-24), null, limit: 50);
         return new[]
         {
             new Anomaly
@@ -141,6 +142,7 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
                 Fingerprint = Fingerprint(tenantId, "ChangeVelocitySpike", "changes.total.24h"),
                 Kind = AnomalyKind.ChangeVelocitySpike,
                 Severity = z >= 5 ? AnomalySeverity.High : AnomalySeverity.Medium,
+                Provider = await DominantProviderAsync(tenantId, recentChanges.Select(c => c.ResourceId)),
                 Title = $"Change volume spike: {observed} changes in 24h ({z:F1}σ above baseline)",
                 Description = $"The tenant recorded {observed} resource changes in the last 24 hours against a " +
                               $"30-day daily baseline of {mean:F1} (σ={stdDev:F1}). Investigate for runaway " +
@@ -170,7 +172,18 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
             return [];
 
         var criticalCount = newSevere.Count(f => f.Severity == "Critical");
-        var sample = newSevere.Take(10).Select(f => new { f.AssessmentName, f.Severity, f.ResourceId });
+        var sample = newSevere.Take(10).Select(f => new { f.AssessmentName, f.Severity, f.ResourceId, f.FindingId });
+        var provider = CloudProviderInference.FromResources(
+            newSevere.SelectMany(f => new[] { f.ResourceId, f.FindingId }));
+        // Categories often include AWS/GCP when findings come from multi-cloud governance
+        if (provider == CloudProvider.Azure)
+        {
+            var cats = newSevere.SelectMany(f => f.Categories ?? []).ToList();
+            if (cats.Any(c => c.Equals("GCP", StringComparison.OrdinalIgnoreCase) || c.Equals("SCC", StringComparison.OrdinalIgnoreCase)))
+                provider = CloudProvider.Gcp;
+            else if (cats.Any(c => c.Equals("AWS", StringComparison.OrdinalIgnoreCase) || c.Equals("SecurityHub", StringComparison.OrdinalIgnoreCase)))
+                provider = CloudProvider.Aws;
+        }
 
         return new[]
         {
@@ -180,10 +193,12 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
                 Fingerprint = Fingerprint(tenantId, "SecurityPostureRegression", now.ToString("yyyyMMdd")),
                 Kind = AnomalyKind.SecurityPostureRegression,
                 Severity = criticalCount > 0 ? AnomalySeverity.Critical : AnomalySeverity.High,
+                Provider = provider,
                 Title = $"{newSevere.Count} new severe security finding(s) in 24h ({criticalCount} critical)",
-                Description = "Microsoft Defender for Cloud reported new Critical/High findings in the last 24 hours. " +
-                              "Review the security page and correlate with recent changes to identify the root cause.",
-                MetricName = "defender.new_severe.24h",
+                Description = "New Critical/High security findings in the last 24 hours (Azure Defender, AWS Security Hub, " +
+                              "GCP Security Command Center, or inventory posture). Review the Security page and correlate " +
+                              "with recent changes to identify the root cause.",
+                MetricName = "security.new_severe.24h",
                 ObservedValue = newSevere.Count,
                 Score = newSevere.Count,
                 DetectedAt = now,
@@ -217,6 +232,7 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
                 Severity = group.Any(c => c.Severity == ChangeSeverity.Critical)
                     ? AnomalySeverity.Critical
                     : AnomalySeverity.High,
+                Provider = CloudProviderInference.FromResource(group.Key),
                 Title = $"Security configuration drift on {ShortResourceName(group.Key)}",
                 Description = $"{group.Count()} security-impacting change(s) detected in 24h. Latest by " +
                               $"{latest.ActorName ?? "unknown actor"} via {latest.ClientType ?? "unknown client"}.",
@@ -274,6 +290,7 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
                 Fingerprint = Fingerprint(tenantId, "UnusualActorActivity", actorId),
                 Kind = AnomalyKind.UnusualActorActivity,
                 Severity = touchesSecurity ? AnomalySeverity.High : AnomalySeverity.Medium,
+                Provider = CloudProviderInference.FromResources(changes.Select(c => c.ResourceId)),
                 Title = $"First-seen actor '{first.ActorName ?? actorId}' made {changes.Count} change(s)",
                 Description = $"Actor {first.ActorName ?? actorId} ({first.ActorType ?? "unknown type"}) has no " +
                               $"activity in the 30-day baseline but made {changes.Count} change(s) in the last " +
@@ -320,6 +337,7 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
                     Fingerprint = Fingerprint(tenantId, "ResourceSprawl", "inventory.resource_count"),
                     Kind = AnomalyKind.ResourceSprawl,
                     Severity = growth >= 0.5 ? AnomalySeverity.High : AnomalySeverity.Medium,
+                    Provider = await DominantProviderAsync(tenantId, null),
                     Title = $"Resource count grew {growth:P0} above baseline ({baseline.Mean:F0} → {count})",
                     Description = "The tenant's resource count grew sharply against its rolling baseline. " +
                                   "Check for runaway automation, unapproved deployments, or misfiring IaC pipelines.",
@@ -367,10 +385,11 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
                 Fingerprint = Fingerprint(tenantId, "CostAnomaly", "advisor.cost.savings"),
                 Kind = AnomalyKind.CostAnomaly,
                 Severity = totalSavings - baseline.Mean >= 10000 ? AnomalySeverity.High : AnomalySeverity.Medium,
+                Provider = CloudProviderInference.FromResources(costRecs.Select(r => r.ResourceId)),
                 Title = $"Identified waste jumped to ${totalSavings:N0}/yr (baseline ${baseline.Mean:N0}/yr)",
-                Description = "Azure Advisor's estimated annual cost savings rose sharply, which usually means " +
-                              "newly deployed over-provisioned resources or workloads left running. Review the " +
-                              "cost recommendations and consider the proposed right-sizing actions.",
+                Description = "Estimated annual cost savings (Azure Advisor / multi-cloud cost recommenders) rose sharply, " +
+                              "which usually means newly deployed over-provisioned resources or workloads left running. " +
+                              "Review cost recommendations on the Governance page.",
                 MetricName = "advisor.cost.savings",
                 ObservedValue = totalSavings,
                 BaselineMean = baseline.Mean,
@@ -424,10 +443,11 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
                 Fingerprint = Fingerprint(tenant.TenantId, "StaleTelemetry", "snapshot"),
                 Kind = AnomalyKind.StaleTelemetry,
                 Severity = age > maxAge * 2 ? AnomalySeverity.High : AnomalySeverity.Medium,
+                Provider = await DominantProviderAsync(tenant.TenantId, null),
                 Title = $"Inventory snapshot is stale ({age.TotalHours:F0}h old)",
                 Description = $"The last completed snapshot finished {latest.CompletedAt:u}. Expected cadence is " +
-                              $"every {tenant.SnapshotFrequencyMinutes} minutes. Check ARI automation, credentials " +
-                              "(Lighthouse delegation / app registration secret expiry), and the ingestion queue.",
+                              $"every {tenant.SnapshotFrequencyMinutes} minutes. Check inventory collection, cloud " +
+                              "credentials (Azure Lighthouse/app reg, AWS keys, GCP SA), and the ingestion queue.",
                 MetricName = "snapshot.age.hours",
                 ObservedValue = age.TotalHours,
                 DetectedAt = now,
@@ -559,5 +579,38 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
     {
         var idx = resourceId.LastIndexOf('/');
         return idx >= 0 && idx < resourceId.Length - 1 ? resourceId[(idx + 1)..] : resourceId;
+    }
+
+    /// <summary>
+    /// Prefer resource-id inference; fall back to a sample of the tenant inventory so
+    /// GCP-only estates are not labelled Azure.
+    /// </summary>
+    private async Task<CloudProvider> DominantProviderAsync(Guid tenantId, IEnumerable<string?>? resourceIds)
+    {
+        if (resourceIds != null)
+        {
+            var fromIds = CloudProviderInference.FromResources(resourceIds);
+            // FromResources returns Azure when empty — try inventory next.
+            if (resourceIds.Any(id => !string.IsNullOrWhiteSpace(id)))
+                return fromIds;
+        }
+
+        try
+        {
+            var sample = await _inventoryRepo.GetResourcesAsync(tenantId, limit: 100);
+            if (sample.Count == 0)
+                return CloudProvider.Azure;
+            var byHint = sample
+                .Select(r => CloudProviderInference.FromResource(r.ResourceId, r.Provider))
+                .GroupBy(p => p)
+                .OrderByDescending(g => g.Count())
+                .First()
+                .Key;
+            return byHint;
+        }
+        catch
+        {
+            return CloudProvider.Azure;
+        }
     }
 }

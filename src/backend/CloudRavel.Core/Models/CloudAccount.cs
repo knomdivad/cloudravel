@@ -13,6 +13,71 @@ public enum CloudProvider
 }
 
 /// <summary>
+/// Infers the cloud provider from a resource id / finding id / inventory provider hint.
+/// Used so AIOps anomalies and UI badges are not stuck on the Azure default for AWS/GCP estates.
+/// </summary>
+public static class CloudProviderInference
+{
+    public static CloudProvider FromResource(string? resourceId, string? providerHint = null)
+    {
+        if (!string.IsNullOrWhiteSpace(providerHint))
+        {
+            var hint = providerHint.Trim();
+            if (Enum.TryParse<CloudProvider>(hint, ignoreCase: true, out var parsed))
+                return parsed;
+            if (hint.Equals("google", StringComparison.OrdinalIgnoreCase)
+                || hint.Equals("googlecloud", StringComparison.OrdinalIgnoreCase))
+                return CloudProvider.Gcp;
+        }
+
+        if (string.IsNullOrWhiteSpace(resourceId))
+            return CloudProvider.Azure;
+
+        var id = resourceId.Trim();
+
+        // Stable finding / recommendation ids we mint for multi-cloud governance
+        if (id.StartsWith("gcp-", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("gcp:", StringComparison.OrdinalIgnoreCase))
+            return CloudProvider.Gcp;
+        if (id.StartsWith("aws-", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("aws:", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("arn:aws:", StringComparison.OrdinalIgnoreCase))
+            return CloudProvider.Aws;
+
+        // GCP Cloud Asset / SCC resource names: //compute.googleapis.com/projects/...
+        if (id.Contains("googleapis.com", StringComparison.OrdinalIgnoreCase)
+            || id.Contains("//cloudresourcemanager.googleapis.com/", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("projects/", StringComparison.OrdinalIgnoreCase)
+               && (id.Contains("/instances/", StringComparison.OrdinalIgnoreCase)
+                   || id.Contains("/buckets/", StringComparison.OrdinalIgnoreCase)
+                   || id.Contains("/zones/", StringComparison.OrdinalIgnoreCase)))
+            return CloudProvider.Gcp;
+
+        // Azure ARM ids
+        if (id.Contains("/subscriptions/", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("/subscriptions", StringComparison.OrdinalIgnoreCase)
+            || id.Contains("providers/Microsoft.", StringComparison.OrdinalIgnoreCase))
+            return CloudProvider.Azure;
+
+        return CloudProvider.Azure;
+    }
+
+    /// <summary>Majority vote across resource ids (ties prefer first non-default signal).</summary>
+    public static CloudProvider FromResources(IEnumerable<string?> resourceIds)
+    {
+        var counts = new Dictionary<CloudProvider, int>();
+        foreach (var id in resourceIds)
+        {
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            var p = FromResource(id);
+            counts[p] = counts.GetValueOrDefault(p) + 1;
+        }
+        if (counts.Count == 0) return CloudProvider.Azure;
+        return counts.OrderByDescending(kv => kv.Value).First().Key;
+    }
+}
+
+/// <summary>
 /// A provider-agnostic cloud organization — the top-level grouping and a peer
 /// across providers: an Azure tenant, an AWS Organization, or a GCP Organization.
 /// AWS accounts and GCP projects belong to one of these, NOT to an Azure tenant.
