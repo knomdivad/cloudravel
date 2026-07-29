@@ -193,6 +193,7 @@ public sealed class TenantRepository : ITenantRepository
         const string sql = @"
             UPDATE tenants SET 
                 display_name = @DisplayName,
+                azure_tenant_id = @AzureTenantId,
                 onboarding_method = @OnboardingMethod,
                 snapshot_frequency_minutes = @SnapshotFrequencyMinutes,
                 change_poll_frequency_minutes = @ChangePollFrequencyMinutes,
@@ -207,6 +208,7 @@ public sealed class TenantRepository : ITenantRepository
         {
             tenant.TenantId,
             tenant.DisplayName,
+            tenant.AzureTenantId,
             OnboardingMethod = ToDbValue(tenant.OnboardingMethod),
             tenant.SnapshotFrequencyMinutes,
             tenant.ChangePollFrequencyMinutes,

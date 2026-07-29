@@ -22,17 +22,23 @@ public sealed class OrgAdminFunctions
 
     private readonly IUserRepository _userRepo;
     private readonly IOrgSsoRepository _ssoRepo;
+    private readonly IOrganizationRepository _orgRepo;
+    private readonly ITenantRepository _tenantRepo;
     private readonly ISecretStore? _secretStore;
     private readonly ILogger<OrgAdminFunctions> _logger;
 
     public OrgAdminFunctions(
         IUserRepository userRepo,
         IOrgSsoRepository ssoRepo,
+        IOrganizationRepository orgRepo,
+        ITenantRepository tenantRepo,
         ILogger<OrgAdminFunctions> logger,
         ISecretStore? secretStore = null)
     {
         _userRepo = userRepo;
         _ssoRepo = ssoRepo;
+        _orgRepo = orgRepo;
+        _tenantRepo = tenantRepo;
         _secretStore = secretStore;
         _logger = logger;
     }
@@ -106,6 +112,9 @@ public sealed class OrgAdminFunctions
         }
 
         var grantedBy = context.GetUserId() ?? Guid.Empty;
+        // user_tenant_access FK → tenants; orgs created before the workspace-shell
+        // fix may lack a tenants row — repair on demand.
+        await EnsureWorkspaceTenantShellAsync(orgId, grantedBy);
         await _userRepo.GrantTenantAccessAsync(user.UserId, orgId, body.Role, grantedBy);
 
         var dto = AdminFunctions.ToDto(user);
@@ -234,6 +243,27 @@ public sealed class OrgAdminFunctions
         if (context.TryGetTenantId() != orgId)
             return await BadRequest(req, "TENANT_MISMATCH", "The X-Tenant-Id header must match the organization in the path.");
         return await context.RequireOrgRoleAsync(req, OrgRole.OrgAdmin);
+    }
+
+    /// <summary>
+    /// Ensures a <c>tenants</c> row exists for this org_id so membership grants
+    /// (FK to tenants) succeed even if the org was created before shell rows.
+    /// </summary>
+    private async Task EnsureWorkspaceTenantShellAsync(Guid orgId, Guid createdBy)
+    {
+        if (await _tenantRepo.GetByIdAsync(orgId) != null) return;
+
+        var org = await _orgRepo.GetByIdAsync(orgId);
+        var name = org?.Name ?? orgId.ToString();
+        await _tenantRepo.CreateAsync(new Tenant
+        {
+            TenantId = orgId,
+            DisplayName = name,
+            AzureTenantId = WorkspaceTenantPlaceholders.AzureTenantId,
+            OnboardingMethod = OnboardingMethod.Lighthouse,
+            Status = TenantStatus.Active,
+        }, createdBy == Guid.Empty ? Guid.Empty : createdBy);
+        _logger.LogInformation("Materialized workspace tenants shell for org {OrgId}", orgId);
     }
 
     private static string? Trim(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();

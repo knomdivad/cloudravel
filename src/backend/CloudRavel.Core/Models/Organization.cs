@@ -1,6 +1,15 @@
 namespace CloudRavel.Core.Models;
 
 /// <summary>
+/// Placeholder Azure tenant id on the workspace <c>tenants</c> shell created with an
+/// Organization before any cloud is connected. Replaced when Azure is linked.
+/// </summary>
+public static class WorkspaceTenantPlaceholders
+{
+    public const string AzureTenantId = "00000000-0000-0000-0000-000000000000";
+}
+
+/// <summary>
 /// An Organization — the in-app workspace an operator selects and adds clouds to.
 ///
 /// org_id is the workspace / RLS boundary value shared by every tenant_id column,
