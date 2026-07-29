@@ -470,20 +470,24 @@ public sealed partial class AwsProviderAdapter
         _ => "OperationalExcellence"
     };
 
+    /// <summary>
+    /// Extract element text for a tag name, case-insensitive, allowing attributes on the open tag
+    /// (e.g. &lt;vpcId&gt; or &lt;vpcId xmlns="…"&gt;).
+    /// </summary>
     private static IEnumerable<string> ExtractXmlTags(string xml, string tag)
     {
-        var open = $"<{tag}>";
-        var close = $"</{tag}>";
-        var idx = 0;
-        while (true)
+        if (string.IsNullOrEmpty(xml) || string.IsNullOrEmpty(tag))
+            yield break;
+
+        // <tag>value</tag> or <tag attr="x">value</tag> (case-insensitive)
+        var pattern = $@"<{tag}(?:\s[^>]*)?>([^<]*)</{tag}>";
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(xml, pattern,
+                     System.Text.RegularExpressions.RegexOptions.IgnoreCase))
         {
-            var start = xml.IndexOf(open, idx, StringComparison.Ordinal);
-            if (start < 0) yield break;
-            start += open.Length;
-            var end = xml.IndexOf(close, start, StringComparison.Ordinal);
-            if (end < 0) yield break;
-            yield return xml[start..end];
-            idx = end + close.Length;
+            var value = m.Groups[1].Value.Trim();
+            if (!string.IsNullOrEmpty(value))
+                yield return value;
         }
     }
 }

@@ -210,7 +210,7 @@ export const HELP_SECTIONS = [
       'IAM → Users → Security credentials → Create access key (or use STS temporary keys + session token).',
       'Inventory: tag:GetResources (Resource Groups Tagging API) plus EC2 Describe* (VPCs, subnets, security groups, instances, volumes, …) in each scanned region.',
       'Tagging API alone often misses default/untagged networking — EC2 read permissions are required for full VPC coverage.',
-      'IAM for inventory: tag:GetResources, ec2:DescribeVpcs, ec2:DescribeSubnets, ec2:DescribeSecurityGroups, ec2:DescribeInstances, ec2:DescribeVolumes, ec2:DescribeInternetGateways, ec2:DescribeRouteTables, ec2:DescribeNetworkAcls, ec2:DescribeNatGateways.',
+      'IAM for inventory: tag:GetResources + ec2:Describe* (especially DescribeVpcs — without it VPCs may be missing even when security groups appear). Include: DescribeVpcs, DescribeSubnets, DescribeSecurityGroups, DescribeInstances, DescribeVolumes, DescribeInternetGateways, DescribeRouteTables, DescribeNetworkAcls, DescribeNatGateways.',
       'Security / Governance (read): securityhub:GetFindings, config:Describe*, support:DescribeTrustedAdvisor* (Business/Enterprise), s3:ListAllMyBuckets, s3:GetBucketPublicAccessBlock.',
       'Remediation playbooks need matching write actions (e.g. s3:PutBucketPublicAccessBlock, ec2:StopInstances).',
       'Regions to scan matter: only listed regions are inventoried (blank = default region only).',
