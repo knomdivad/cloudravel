@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.Auth;
 using CloudRavel.Core.DTOs;
@@ -108,29 +109,61 @@ public sealed class AdminFunctions
         return response;
     }
 
-    /// <summary>POST /api/admin/users — create a local user (optionally a system admin).</summary>
+    private static readonly JsonSerializerOptions AdminJson = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
+    /// <summary>
+    /// POST /api/admin/users and POST /api/admin/users/create —
+    /// create a local user (optionally a system admin). Dual routes: some hosts
+    /// only bind one verb on shared route templates with GET list.
+    /// </summary>
     [Function("CreateUser")]
-    public async Task<HttpResponseData> CreateUser(
+    public Task<HttpResponseData> CreateUser(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/users")] HttpRequestData req,
-        FunctionContext context)
+        FunctionContext context) =>
+        CreateUserCoreAsync(req, context);
+
+    [Function("CreateUserExplicit")]
+    public Task<HttpResponseData> CreateUserExplicit(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/users/create")] HttpRequestData req,
+        FunctionContext context) =>
+        CreateUserCoreAsync(req, context);
+
+    private async Task<HttpResponseData> CreateUserCoreAsync(HttpRequestData req, FunctionContext context)
     {
         var forbid = await context.RequireSystemAdminAsync(req);
         if (forbid != null) return forbid;
 
-        var body = await req.ReadFromJsonAsync<CreateUserRequest>();
+        CreateUserRequest? body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync<CreateUserRequest>(req.Body, AdminJson);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse CreateUser body");
+            body = null;
+        }
+
         if (body == null || string.IsNullOrWhiteSpace(body.Password)
             || string.IsNullOrWhiteSpace(body.DisplayName)
             || string.IsNullOrWhiteSpace(body.Email))
-            return await BadRequest(req, "INVALID_REQUEST", "displayName, email, and password are required.");
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest,
+                new ErrorResponse { Code = "INVALID_REQUEST", Message = "displayName, email, and password are required." });
 
         var email = body.Email.Trim().ToLowerInvariant();
         if (!email.Contains('@', StringComparison.Ordinal))
-            return await BadRequest(req, "INVALID_EMAIL", "email must be a valid email address (also used as login username).");
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest,
+                new ErrorResponse { Code = "INVALID_EMAIL", Message = "email must be a valid email address (also used as login username)." });
 
         // Email is the unique login identity; username is set equal to email.
         if (await _userRepo.GetByEmailAsync(email) != null
             || await _userRepo.GetByUsernameAsync(email) != null)
-            return await Conflict(req, "EMAIL_TAKEN", "That email is already in use.");
+            return await WriteJsonAsync(req, HttpStatusCode.Conflict,
+                new ErrorResponse { Code = "EMAIL_TAKEN", Message = "That email is already in use." });
 
         var globalRole = string.Equals(body.GlobalRole, SystemRole.SystemAdmin, StringComparison.OrdinalIgnoreCase)
             ? SystemRole.SystemAdmin : SystemRole.Member;
@@ -150,12 +183,19 @@ public sealed class AdminFunctions
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create user '{Email}'", email);
-            return await BadRequest(req, "USER_CREATE_FAILED",
-                $"Could not create user. Detail: {ex.Message}");
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest,
+                new ErrorResponse { Code = "USER_CREATE_FAILED", Message = $"Could not create user. Detail: {ex.Message}" });
         }
 
-        var response = req.CreateCorsResponse(HttpStatusCode.Created);
-        await response.WriteAsJsonAsync(ToDto(created));
+        _logger.LogInformation("Created user {UserId} ({Email}) role={Role}", created.UserId, created.Email, created.GlobalRole);
+        return await WriteJsonAsync(req, HttpStatusCode.Created, ToDto(created));
+    }
+
+    private static async Task<HttpResponseData> WriteJsonAsync<T>(HttpRequestData req, HttpStatusCode status, T body)
+    {
+        var response = req.CreateCorsResponse(status);
+        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        await response.WriteStringAsync(JsonSerializer.Serialize(body, AdminJson));
         return response;
     }
 

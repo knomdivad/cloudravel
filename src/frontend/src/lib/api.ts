@@ -88,14 +88,21 @@ async function apiCall<T>(
   });
 
   if (!response.ok) {
-    const error: ApiError = await response.json().catch(() => ({
-      code: 'UNKNOWN',
-      message: `API error: ${response.status} ${response.statusText}`,
-    }));
-    throw new Error(error.message);
+    const raw = await response.text();
+    let message = `API error: ${response.status} ${response.statusText}`;
+    try {
+      const error = JSON.parse(raw) as ApiError & { Message?: string; code?: string; Code?: string };
+      message = error.message || error.Message || message;
+      if (error.code || error.Code) message = `[${error.code || error.Code}] ${message}`;
+    } catch {
+      if (raw?.trim()) message = `${message} — ${raw.trim().slice(0, 200)}`;
+    }
+    throw new Error(message);
   }
 
-  return response.json();
+  const text = await response.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 // A sentinel used for workspace-registry endpoints (list/create) that aren't
@@ -176,20 +183,28 @@ export async function updateSystemSettings(request: {
 }
 
 export async function getAllUsers(): Promise<AdminUser[]> {
-  const res = await apiCall<{ users: AdminUser[] }>('/admin/users', NO_WORKSPACE);
-  return res.users ?? [];
+  const res = await apiCall<{ users?: AdminUser[]; Users?: AdminUser[] }>('/admin/users', NO_WORKSPACE);
+  return res.users ?? res.Users ?? [];
 }
 
 export async function createUser(request: {
   displayName: string;
   email: string;
-  username: string;
+  username?: string;
   password: string;
   globalRole?: string;
 }): Promise<AdminUser> {
-  return apiCall<AdminUser>('/admin/users', NO_WORKSPACE, {
+  const email = request.email.trim().toLowerCase();
+  // Prefer unambiguous route (avoids GET/POST template collisions on some hosts).
+  return apiCall<AdminUser>('/admin/users/create', NO_WORKSPACE, {
     method: 'POST',
-    body: JSON.stringify(request),
+    body: JSON.stringify({
+      displayName: request.displayName,
+      email,
+      username: email,
+      password: request.password,
+      globalRole: request.globalRole,
+    }),
   });
 }
 
