@@ -349,7 +349,11 @@ export async function getResourceDetail(
 
 export async function getInventorySummary(
   tenantId: string
-): Promise<{ totalResources: number; resourceTypes: ResourceTypeSummary[] }> {
+): Promise<{
+  totalResources: number;
+  resourceTypes: ResourceTypeSummary[];
+  byProvider?: { provider: string; count: number }[];
+}> {
   return apiCall(`/inventory/summary`, tenantId);
 }
 

@@ -49,25 +49,7 @@ public sealed class ChangeFunctions
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new ChangesResponse
         {
-            Changes = changes.Select(ch => new ResourceChangeDto
-            {
-                ChangeId = ch.ChangeId,
-                ResourceId = ch.ResourceId,
-                ResourceType = ch.ResourceType,
-                ChangeType = ch.ChangeType.ToString(),
-                DetectedAt = ch.DetectedAt,
-                ChangedProperties = ch.ChangedProperties?.Select(p => new PropertyChangeDto
-                {
-                    Property = p.Path,
-                    OldValue = p.Before,
-                    NewValue = p.After
-                }).ToList(),
-                ActorName = ch.ActorName,
-                ActorType = ch.ActorType,
-                ClientType = ch.ClientType,
-                Classification = ch.Classification.ToString(),
-                Severity = ch.Severity?.ToString()
-            }).ToList(),
+            Changes = changes.Select(MapChangeDto).ToList(),
             Pagination = new PaginationDto { Offset = offset, Limit = limit, Total = total }
         });
         return response;
@@ -93,21 +75,31 @@ public sealed class ChangeFunctions
         {
             TenantId = tenantId,
             WindowHours = hours,
-            Changes = changes.Select(ch => new ResourceChangeDto
-            {
-                ChangeId = ch.ChangeId,
-                ResourceId = ch.ResourceId,
-                ResourceType = ch.ResourceType,
-                ChangeType = ch.ChangeType.ToString(),
-                DetectedAt = ch.DetectedAt,
-                ActorName = ch.ActorName,
-                ClientType = ch.ClientType,
-                Classification = ch.Classification.ToString(),
-                Severity = ch.Severity?.ToString()
-            }).ToList()
+            Changes = changes.Select(MapChangeDto).ToList()
         });
         return response;
     }
+
+    private static ResourceChangeDto MapChangeDto(ResourceChange ch) => new()
+    {
+        ChangeId = ch.ChangeId,
+        ResourceId = ch.ResourceId,
+        ResourceType = ch.ResourceType,
+        Provider = CloudProviderInference.FromResource(ch.ResourceId).ToString().ToLowerInvariant(),
+        ChangeType = ch.ChangeType.ToString(),
+        DetectedAt = ch.DetectedAt,
+        ChangedProperties = ch.ChangedProperties?.Select(p => new PropertyChangeDto
+        {
+            Property = p.Path,
+            OldValue = p.Before,
+            NewValue = p.After
+        }).ToList(),
+        ActorName = ch.ActorName,
+        ActorType = ch.ActorType,
+        ClientType = ch.ClientType,
+        Classification = ch.Classification.ToString(),
+        Severity = ch.Severity?.ToString()
+    };
 
     /// <summary>
     /// GET /api/changes/timeline

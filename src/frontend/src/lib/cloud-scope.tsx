@@ -16,6 +16,92 @@ export function normalizeCloudProvider(p?: string | null): 'azure' | 'aws' | 'gc
   return 'azure';
 }
 
+/**
+ * Infer cloud provider from a resource id (ARN, ARM path, GCP asset name).
+ * Prefer an explicit API `provider` hint when present.
+ */
+export function inferProviderFromResourceId(
+  resourceId?: string | null,
+  providerHint?: string | null,
+): 'azure' | 'aws' | 'gcp' {
+  return resolveCloudProvider({ resourceId, provider: providerHint });
+}
+
+/**
+ * Resolve cloud provider for multi-cloud UI badges (changes, security, governance, ops).
+ * Free-text / id signals override a stuck Azure stored label when the payload is clearly AWS/GCP.
+ */
+export function resolveCloudProvider(opts: {
+  provider?: string | null;
+  resourceId?: string | null;
+  id?: string | null;
+  text?: string | null;
+}): 'azure' | 'aws' | 'gcp' {
+  const blob = [opts.resourceId, opts.id, opts.text, opts.provider].filter(Boolean).join('\n');
+
+  if (
+    /arn:aws:|aws-s3-|aws-sh:|aws-sg-|aws-ta:|aws-config:|Security Hub|Trusted Advisor/i.test(blob)
+  ) {
+    return 'aws';
+  }
+  if (
+    /googleapis\.com|gcp-scc:|gcp-rec:|gcp-storage|Security Command Center|publicAccessPrevention/i.test(
+      blob,
+    ) ||
+    (opts.resourceId?.startsWith('projects/') &&
+      /\/(instances|buckets|zones)\//.test(opts.resourceId))
+  ) {
+    return 'gcp';
+  }
+  if (
+    /\/subscriptions\/|providers\/Microsoft\.|Microsoft Defender|Azure Advisor/i.test(blob)
+  ) {
+    return 'azure';
+  }
+
+  const fromId = inferFromId(opts.resourceId) ?? inferFromId(opts.id);
+  if (fromId) return fromId;
+
+  if (opts.provider?.trim()) {
+    return normalizeCloudProvider(opts.provider);
+  }
+  return 'azure';
+}
+
+function inferFromId(id?: string | null): 'azure' | 'aws' | 'gcp' | null {
+  if (!id?.trim()) return null;
+  const v = id.trim();
+  if (
+    v.startsWith('arn:aws:') ||
+    v.startsWith('aws-') ||
+    v.startsWith('aws:') ||
+    /^aws/i.test(v)
+  ) {
+    return 'aws';
+  }
+  if (
+    v.includes('googleapis.com') ||
+    v.startsWith('gcp-') ||
+    v.startsWith('gcp:')
+  ) {
+    return 'gcp';
+  }
+  if (
+    v.includes('/subscriptions/') ||
+    v.startsWith('/subscriptions') ||
+    v.includes('providers/Microsoft.')
+  ) {
+    return 'azure';
+  }
+  return null;
+}
+
+/** Short display name for a change row (leaf of resource id / ARN). */
+export function changeResourceLeafName(resourceId?: string | null): string {
+  if (!resourceId) return '—';
+  return leafName(resourceId) || resourceId;
+}
+
 export function cloudLabel(p?: string | null): string {
   const n = normalizeCloudProvider(p);
   if (n === 'aws') return 'AWS';

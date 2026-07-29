@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { useDefenderFindings } from '../../lib/hooks';
+import { ProviderBadge, resolveCloudProvider, changeResourceLeafName } from '../../lib/cloud-scope';
 import type { Recommendation } from '../../lib/types';
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
@@ -141,7 +142,17 @@ function FindingCard({
       >
         <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${colors.dot}`} />
         <div className="flex-1 min-w-0">
-          <p className="font-medium text-gray-900">{finding.title}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium text-gray-900">{finding.title}</p>
+            <ProviderBadge
+              provider={resolveCloudProvider({
+                provider: finding.provider,
+                resourceId: finding.resourceId,
+                id: finding.id,
+                text: [finding.title, finding.description, finding.category].filter(Boolean).join('\n'),
+              })}
+            />
+          </div>
           <div className="flex items-center gap-3 mt-1">
             <span className={`text-xs font-medium ${colors.text} uppercase`}>{sev}</span>
             <span className="text-xs text-gray-400">|</span>
@@ -149,7 +160,9 @@ function FindingCard({
             {finding.resourceId && (
               <>
                 <span className="text-xs text-gray-400">|</span>
-                <span className="text-xs text-gray-500 truncate">{finding.resourceId.split('/').pop()}</span>
+                <span className="text-xs text-gray-500 truncate" title={finding.resourceId}>
+                  {changeResourceLeafName(finding.resourceId)}
+                </span>
               </>
             )}
           </div>

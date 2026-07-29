@@ -4,18 +4,13 @@ import React, { useState } from 'react';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { useRemediations } from '../../lib/hooks';
 import { approveRemediation, rejectRemediation } from '../../lib/api';
+import { ProviderBadge, resolveCloudProvider, changeResourceLeafName } from '../../lib/cloud-scope';
 import type { RemediationAction } from '../../lib/types';
 
 const RISK_COLORS: Record<string, { bg: string; text: string }> = {
   Low: { bg: 'bg-green-50', text: 'text-green-700' },
   Medium: { bg: 'bg-yellow-50', text: 'text-yellow-700' },
   High: { bg: 'bg-red-50', text: 'text-red-700' },
-};
-
-const PROVIDER_BADGES: Record<string, string> = {
-  Azure: 'bg-azure-100 text-azure-700',
-  Aws: 'bg-amber-100 text-amber-800',
-  Gcp: 'bg-emerald-100 text-emerald-700',
 };
 
 const HISTORY_STATUS_COLORS: Record<string, string> = {
@@ -167,9 +162,14 @@ function ApprovalCard({
             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${risk.bg} ${risk.text}`}>
               {action.riskLevel} risk
             </span>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[action.provider] ?? ''}`}>
-              {action.provider.toUpperCase()}
-            </span>
+            <ProviderBadge
+              provider={resolveCloudProvider({
+                provider: action.provider,
+                resourceId: action.resourceId,
+                id: action.playbookKey,
+                text: [action.title, action.reason, action.playbookKey].filter(Boolean).join('\n'),
+              })}
+            />
           </div>
 
           <div className="mt-3 space-y-2 text-sm">
@@ -190,7 +190,10 @@ function ApprovalCard({
             {action.resourceId && (
               <div>
                 <p className="text-xs font-medium text-gray-500">Target resource</p>
-                <p className="text-gray-700 font-mono text-xs break-all">{action.resourceId}</p>
+                <p className="text-gray-700 font-mono text-xs break-all" title={action.resourceId}>
+                  {changeResourceLeafName(action.resourceId)}
+                  <span className="block text-gray-400 mt-0.5 break-all">{action.resourceId}</span>
+                </p>
               </div>
             )}
             {action.parametersJson && (
@@ -256,6 +259,14 @@ function HistoryCard({ action }: { action: RemediationAction }) {
     <div className="bg-white rounded-xl border border-gray-200">
       <button onClick={() => setExpanded(!expanded)} className="w-full text-left px-5 py-3 flex items-center gap-3">
         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusCls}`}>{action.status}</span>
+        <ProviderBadge
+          provider={resolveCloudProvider({
+            provider: action.provider,
+            resourceId: action.resourceId,
+            id: action.playbookKey,
+            text: [action.title, action.reason, action.playbookKey].filter(Boolean).join('\n'),
+          })}
+        />
         <span className="text-sm font-medium text-gray-900 truncate flex-1">{action.title}</span>
         {action.approvalMode === 'auto' && (
           <span className="text-[10px] font-medium bg-azure-50 text-azure-600 px-1.5 py-0.5 rounded">AUTO</span>

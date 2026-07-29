@@ -281,4 +281,23 @@ public sealed class InventoryRepository : IInventoryRepository
         var results = await conn.QueryAsync<ResourceTypeSummary>(sql, new { TenantId = tenantId, SnapshotId = snapshotId });
         return results.ToList();
     }
+
+    public async Task<IReadOnlyDictionary<string, int>> GetResourceCountsByProviderAsync(Guid tenantId, long? snapshotId = null)
+    {
+        await using var conn = await _connectionFactory.CreateConnectionAsync(tenantId);
+
+        var sql = snapshotId.HasValue
+            ? @"SELECT LOWER(provider) AS Provider, COUNT(*) AS Count
+                FROM inventory_resources
+                WHERE tenant_id = @TenantId AND snapshot_id = @SnapshotId
+                GROUP BY LOWER(provider)"
+            : @"SELECT LOWER(ir.provider) AS Provider, COUNT(*) AS Count
+                FROM inventory_resources ir
+                INNER JOIN latest_snapshots ls ON ir.tenant_id = ls.tenant_id AND ir.snapshot_id = ls.snapshot_id
+                WHERE ir.tenant_id = @TenantId
+                GROUP BY LOWER(ir.provider)";
+
+        var rows = await conn.QueryAsync<(string Provider, int Count)>(sql, new { TenantId = tenantId, SnapshotId = snapshotId });
+        return rows.ToDictionary(r => r.Provider, r => r.Count, StringComparer.OrdinalIgnoreCase);
+    }
 }

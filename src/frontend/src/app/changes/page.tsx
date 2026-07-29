@@ -4,6 +4,11 @@ import React, { useState, useMemo } from 'react';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { useChanges, useChangeTimeline } from '../../lib/hooks';
 import {
+  ProviderBadge,
+  inferProviderFromResourceId,
+  changeResourceLeafName,
+} from '../../lib/cloud-scope';
+import {
   BarChart,
   Bar,
   XAxis,
@@ -127,6 +132,7 @@ export default function ChangesPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-gray-500">
+                    <th className="px-4 py-3 font-medium">Cloud</th>
                     <th className="px-4 py-3 font-medium">Resource</th>
                     <th className="px-4 py-3 font-medium">Change</th>
                     <th className="px-4 py-3 font-medium">Classification</th>
@@ -138,9 +144,14 @@ export default function ChangesPage() {
                 <tbody>
                   {(changes?.changes ?? []).map((c) => (
                     <tr key={c.changeId} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-3 align-top">
+                        <ProviderBadge
+                          provider={inferProviderFromResourceId(c.resourceId, c.provider)}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900 truncate max-w-xs" title={c.resourceId}>
-                          {c.resourceId.split('/').pop()}
+                          {changeResourceLeafName(c.resourceId)}
                         </div>
                         <div className="text-xs text-gray-400">{c.resourceType.split('/').pop()}</div>
                       </td>
@@ -184,7 +195,7 @@ export default function ChangesPage() {
                   ))}
                   {(changes?.changes ?? []).length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-400">
+                      <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
                         No changes found for the selected period.
                       </td>
                     </tr>

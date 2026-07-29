@@ -62,6 +62,11 @@ public interface IInventoryRepository
     Task<int> GetResourceCountAsync(Guid tenantId, long? snapshotId = null);
     Task<IReadOnlyList<ResourceTypeSummary>> GetResourceTypeSummaryAsync(Guid tenantId, long? snapshotId = null);
     /// <summary>
+    /// Latest-snapshot resource counts keyed by provider (azure / aws / gcp).
+    /// Powers multi-cloud dashboard breakdowns.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, int>> GetResourceCountsByProviderAsync(Guid tenantId, long? snapshotId = null);
+    /// <summary>
     /// Latest-snapshot resource counts for a provider, keyed by subscription_id
     /// (which for AWS/GCP is the account/project external id). Powers the per-org
     /// and per-account rollups on the Clouds page.

@@ -134,6 +134,8 @@ export interface ResourceChange {
   changeId: string;
   resourceId: string;
   resourceType: string;
+  /** Cloud provider (azure / aws / gcp), inferred from resource id when omitted. */
+  provider?: string;
   changeType: 'Create' | 'Update' | 'Delete';
   detectedAt: string;
   changedProperties?: PropertyChange[];
@@ -165,6 +167,8 @@ export interface Recommendation {
   source: 'advisor' | 'policy' | 'defender';
   id: string;
   resourceId?: string;
+  /** Cloud provider (azure / aws / gcp), inferred when omitted. */
+  provider?: string;
   category: string;
   severity: string;
   title: string;
