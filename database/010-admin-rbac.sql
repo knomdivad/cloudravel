@@ -15,6 +15,13 @@
 -- Run after 001-009.
 -- ============================================================================
 
+-- Filtered index on users(username) (004-local-auth) requires QUOTED_IDENTIFIER ON.
+-- Classic sqlcmd defaults it OFF unless -I is passed; set explicitly so this
+-- migration is safe under either invocation.
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+GO
+
 -- ----------------------------------------------------------------------------
 -- 1. users.global_role : admin/operator/auditor  ->  system_admin/member
 --    (single batch: the @c variable must stay in scope across the drops)

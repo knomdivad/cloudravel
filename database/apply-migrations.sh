@@ -38,7 +38,9 @@ MIGRATIONS=(
   seed-demo-data
 )
 
-run() { "$SQLCMD" -S "$SERVER" -U "$DB_USER" -P "$MSSQL_SA_PASSWORD" "$@"; }
+# -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;
+#     sqlcmd defaults OFF, which breaks UPDATEs on users after 004-local-auth).
+run() { "$SQLCMD" -S "$SERVER" -U "$DB_USER" -P "$MSSQL_SA_PASSWORD" -I "$@"; }
 
 echo "Waiting for SQL Server at $SERVER..."
 for i in $(seq 1 60); do

@@ -15,6 +15,11 @@
 -- Run after 001-010.
 -- ============================================================================
 
+-- users has a filtered index (004); sqlcmd needs QUOTED_IDENTIFIER ON for UPDATEs.
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM users WHERE global_role = 'system_admin')
 BEGIN
     UPDATE TOP (1) users SET global_role = 'system_admin'
