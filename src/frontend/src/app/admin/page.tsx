@@ -225,7 +225,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
       {error && <ErrorBox>{error}</ErrorBox>}
       <form onSubmit={submit} className="space-y-4">
         <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Jane Operator" />
-        <Field label="Email" required value={email} onChange={setEmail} placeholder="jane@example.com" />
+        <Field label="Email" value={email} onChange={setEmail} placeholder="jane@example.com (optional — defaults to username@local)" />
         <Field label="Username" required mono value={username} onChange={setUsername} placeholder="jane" />
         <Field label="Temporary Password" required type="password" value={password} onChange={setPassword} placeholder="Communicate out-of-band" />
         <div>

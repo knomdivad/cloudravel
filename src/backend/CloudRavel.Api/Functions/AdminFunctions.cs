@@ -119,23 +119,40 @@ public sealed class AdminFunctions
 
         var body = await req.ReadFromJsonAsync<CreateUserRequest>();
         if (body == null || string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrWhiteSpace(body.Password)
-            || string.IsNullOrWhiteSpace(body.DisplayName) || string.IsNullOrWhiteSpace(body.Email))
-            return await BadRequest(req, "INVALID_REQUEST", "displayName, email, username, and password are required.");
+            || string.IsNullOrWhiteSpace(body.DisplayName))
+            return await BadRequest(req, "INVALID_REQUEST", "displayName, username, and password are required.");
 
-        if (await _userRepo.GetByUsernameAsync(body.Username.Trim()) != null)
+        var username = body.Username.Trim();
+        var email = string.IsNullOrWhiteSpace(body.Email)
+            ? $"{username}@local"
+            : body.Email.Trim();
+
+        if (await _userRepo.GetByUsernameAsync(username) != null)
             return await Conflict(req, "USERNAME_TAKEN", "That username is already in use.");
+        if (await _userRepo.GetByEmailAsync(email) != null)
+            return await Conflict(req, "EMAIL_TAKEN", "That email is already in use.");
 
         var globalRole = string.Equals(body.GlobalRole, SystemRole.SystemAdmin, StringComparison.OrdinalIgnoreCase)
             ? SystemRole.SystemAdmin : SystemRole.Member;
 
-        var created = await _userRepo.CreateLocalUserAsync(new User
+        User created;
+        try
         {
-            UserId = Guid.NewGuid(),
-            DisplayName = body.DisplayName.Trim(),
-            Email = body.Email.Trim(),
-            Username = body.Username.Trim(),
-            GlobalRole = globalRole
-        }, PasswordHasher.Hash(body.Password));
+            created = await _userRepo.CreateLocalUserAsync(new User
+            {
+                UserId = Guid.NewGuid(),
+                DisplayName = body.DisplayName.Trim(),
+                Email = email,
+                Username = username,
+                GlobalRole = globalRole
+            }, PasswordHasher.Hash(body.Password));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create user '{Username}'", username);
+            return await BadRequest(req, "USER_CREATE_FAILED",
+                $"Could not create user. Detail: {ex.Message}");
+        }
 
         var response = req.CreateCorsResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(ToDto(created));

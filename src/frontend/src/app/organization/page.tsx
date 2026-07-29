@@ -142,7 +142,7 @@ function AddMemberModal({ orgId, onClose, onAdded }: { orgId: string; onClose: (
         ) : (
           <>
             <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Jane Operator" />
-            <Field label="Email" value={email} onChange={setEmail} placeholder="jane@example.com" />
+            <Field label="Email" value={email} onChange={setEmail} placeholder="jane@example.com (optional — defaults to username@local)" />
             <Field label="Username" required mono value={username} onChange={setUsername} placeholder="jane" />
             <Field label="Temporary Password" required type="password" value={password} onChange={setPassword} placeholder="Communicate out-of-band" />
           </>

@@ -38,9 +38,11 @@ public sealed class UserRepository : IUserRepository
     public async Task<User?> GetByEmailAsync(string email)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
-        var sql = $"{SelectColumns} WHERE email = @Email";
+        // FirstOrDefault: email is not unique in the schema; Single throws (500) when
+        // multiple rows share an address (common after blank-email creates + retries).
+        var sql = $"{SelectColumns} WHERE email = @Email ORDER BY created_at";
 
-        return await conn.QuerySingleOrDefaultAsync<User>(sql, new { Email = email });
+        return await conn.QueryFirstOrDefaultAsync<User>(sql, new { Email = email });
     }
 
     public async Task<User?> GetByUsernameAsync(string username)
