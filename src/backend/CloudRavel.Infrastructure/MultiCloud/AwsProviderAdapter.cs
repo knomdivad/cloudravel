@@ -168,6 +168,9 @@ public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
         Dictionary<string, InventoryResource> byArn, CancellationToken ct)
     {
         var accountId = account.ExternalId;
+        // Collect raw XML so we can harvest VPC ids referenced by SGs/instances even if
+        // DescribeVpcs is denied or returns an unexpected shape.
+        var xmlBlobs = new List<string>();
 
         // action → (xml id tag, arn resource type prefix, inventory type)
         var describes = new (string Action, string IdTag, string ArnType, string ResourceType)[]
@@ -188,29 +191,28 @@ public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
             try
             {
                 var xml = await Ec2QueryAsync(creds, region, action, ct);
-                foreach (var id in ExtractXmlTags(xml, idTag).Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (string.IsNullOrWhiteSpace(id)) continue;
-                    var arn = $"arn:aws:ec2:{region}:{accountId}:{arnType}/{id}";
-                    if (byArn.ContainsKey(arn)) continue; // keep tagging tags if already present
+                xmlBlobs.Add(xml);
+                var ids = ExtractXmlTags(xml, idTag)
+                    .Concat(ExtractEc2IdsByPrefix(xml, PrefixForArnType(arnType)))
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
 
-                    var nameFromTags = ExtractNameFromEc2TagSetNearId(xml, id);
-                    byArn[arn] = new InventoryResource
-                    {
-                        TenantId = account.TenantId,
-                        Provider = "aws",
-                        ResourceId = arn,
-                        SubscriptionId = accountId,
-                        ResourceGroup = "ec2",
-                        ResourceType = resourceType,
-                        ResourceName = nameFromTags ?? id,
-                        Location = region
-                    };
+                var added = 0;
+                foreach (var id in ids)
+                {
+                    if (!AddEc2Resource(byArn, account, region, accountId, arnType, resourceType, id!, xml))
+                        continue;
+                    added++;
                 }
+
+                if (string.Equals(action, "DescribeVpcs", StringComparison.OrdinalIgnoreCase))
+                    _logger.LogInformation("EC2 DescribeVpcs {Region}: {Count} VPC(s) merged for account {Account}",
+                        region, added, accountId);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "EC2 {Action} skipped in {Region}", action, region);
+                _logger.LogWarning(ex, "EC2 {Action} skipped in {Region} for account {Account}",
+                    action, region, accountId);
             }
         }
 
@@ -218,35 +220,99 @@ public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
         try
         {
             var xml = await Ec2QueryAsync(creds, region, "DescribeInstances", ct);
-            foreach (var id in ExtractXmlTags(xml, "instanceId").Distinct(StringComparer.OrdinalIgnoreCase))
+            xmlBlobs.Add(xml);
+            foreach (var id in ExtractXmlTags(xml, "instanceId")
+                         .Concat(ExtractEc2IdsByPrefix(xml, "i-"))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 if (string.IsNullOrWhiteSpace(id) || id.StartsWith("r-", StringComparison.OrdinalIgnoreCase))
                     continue;
-                var arn = $"arn:aws:ec2:{region}:{accountId}:instance/{id}";
-                if (byArn.ContainsKey(arn)) continue;
-                var nameFromTags = ExtractNameFromEc2TagSetNearId(xml, id);
-                byArn[arn] = new InventoryResource
-                {
-                    TenantId = account.TenantId,
-                    Provider = "aws",
-                    ResourceId = arn,
-                    SubscriptionId = accountId,
-                    ResourceGroup = "ec2",
-                    ResourceType = "ec2/instance",
-                    ResourceName = nameFromTags ?? id,
-                    Location = region
-                };
+                AddEc2Resource(byArn, account, region, accountId, "instance", "ec2/instance", id, xml);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "EC2 DescribeInstances skipped in {Region}", region);
+            _logger.LogWarning(ex, "EC2 DescribeInstances skipped in {Region} for account {Account}", region, accountId);
         }
+
+        // Fallback: any vpc-xxx referenced by SGs/instances/subnets but missing as its own row
+        // (common when DescribeVpcs is missing from IAM but DescribeSecurityGroups works).
+        var harvestedVpcs = 0;
+        foreach (var xml in xmlBlobs)
+        {
+            foreach (var vpcId in ExtractEc2IdsByPrefix(xml, "vpc-")
+                         .Concat(ExtractXmlTags(xml, "vpcId"))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (AddEc2Resource(byArn, account, region, accountId, "vpc", "ec2/vpc", vpcId, xml))
+                    harvestedVpcs++;
+            }
+        }
+        if (harvestedVpcs > 0)
+            _logger.LogInformation("Harvested {Count} VPC id(s) from related EC2 responses in {Region}", harvestedVpcs, region);
+    }
+
+    private static bool AddEc2Resource(
+        Dictionary<string, InventoryResource> byArn,
+        CloudAccount account,
+        string region,
+        string accountId,
+        string arnType,
+        string resourceType,
+        string id,
+        string xmlForTags)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return false;
+        // Normalize id (strip accidental whitespace / XML noise)
+        id = id.Trim();
+        if (id.Length < 3) return false;
+
+        var arn = $"arn:aws:ec2:{region}:{accountId}:{arnType}/{id}";
+        if (byArn.ContainsKey(arn)) return false;
+
+        var nameFromTags = ExtractNameFromEc2TagSetNearId(xmlForTags, id);
+        byArn[arn] = new InventoryResource
+        {
+            TenantId = account.TenantId,
+            Provider = "aws",
+            ResourceId = arn,
+            SubscriptionId = accountId,
+            ResourceGroup = "ec2",
+            ResourceType = resourceType,
+            ResourceName = nameFromTags ?? id,
+            Location = region
+        };
+        return true;
+    }
+
+    private static string PrefixForArnType(string arnType) => arnType switch
+    {
+        "vpc" => "vpc-",
+        "subnet" => "subnet-",
+        "security-group" => "sg-",
+        "internet-gateway" => "igw-",
+        "route-table" => "rtb-",
+        "network-acl" => "acl-",
+        "natgateway" => "nat-",
+        "volume" => "vol-",
+        "instance" => "i-",
+        _ => ""
+    };
+
+    /// <summary>Find EC2 resource ids like vpc-0abc… / sg-0abc… in XML text.</summary>
+    private static IEnumerable<string> ExtractEc2IdsByPrefix(string xml, string prefix)
+    {
+        if (string.IsNullOrEmpty(prefix) || string.IsNullOrEmpty(xml))
+            yield break;
+        // vpc- / sg- / subnet- ids: prefix + 8–32 hex (classic) or 17+ hex (longer form)
+        var pattern = prefix.Replace("-", "\\-") + "[0-9a-fA-F]{8,32}";
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(xml, pattern))
+            yield return m.Value;
     }
 
     private async Task<string> Ec2QueryAsync(AwsCredentials creds, string region, string action, CancellationToken ct)
     {
-        var body = Encoding.UTF8.GetBytes($"Action={action}&Version=2016-11-15");
+        var body = Encoding.UTF8.GetBytes($"Action={Uri.EscapeDataString(action)}&Version=2016-11-15");
         var request = new HttpRequestMessage(HttpMethod.Post, $"https://ec2.{region}.amazonaws.com/")
         {
             Content = new ByteArrayContent(body)
@@ -265,7 +331,7 @@ public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
     /// </summary>
     private static string? ExtractNameFromEc2TagSetNearId(string xml, string resourceId)
     {
-        var idIdx = xml.IndexOf($">{resourceId}", StringComparison.Ordinal);
+        var idIdx = xml.IndexOf(resourceId, StringComparison.Ordinal);
         if (idIdx < 0) return null;
         // Search a window after the id for tagSet with Name
         var window = xml.Substring(idIdx, Math.Min(4000, xml.Length - idIdx));
