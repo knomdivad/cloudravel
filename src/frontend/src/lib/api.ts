@@ -173,7 +173,8 @@ export async function getMe(): Promise<Me> {
 // ============================================================================
 
 export async function getSystemSettings(): Promise<SystemSettings> {
-  return apiCall<SystemSettings>('/admin/settings', NO_WORKSPACE);
+  // /system/* — Azure Functions reserves /admin for host management (/api/admin/* 404s).
+  return apiCall<SystemSettings>('/system/settings', NO_WORKSPACE);
 }
 
 export async function updateSystemSettings(request: {
@@ -181,7 +182,7 @@ export async function updateSystemSettings(request: {
   openAiModel?: string;
   openAiApiKey?: string;
 }): Promise<SystemSettings> {
-  return apiCall<SystemSettings>('/admin/settings', NO_WORKSPACE, {
+  return apiCall<SystemSettings>('/system/settings', NO_WORKSPACE, {
     method: 'PUT',
     body: JSON.stringify(request),
   });
@@ -239,7 +240,7 @@ export async function updateUser(
   userId: string,
   request: { globalRole?: string; isActive?: boolean; password?: string }
 ): Promise<AdminUser> {
-  return apiCall<AdminUser>(`/admin/users/${userId}`, NO_WORKSPACE, {
+  return apiCall<AdminUser>(`/system/users/${userId}`, NO_WORKSPACE, {
     method: 'PATCH',
     body: JSON.stringify(request),
   });
