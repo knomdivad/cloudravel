@@ -175,7 +175,8 @@ public sealed class OrgAdminFunctions
             IdpClientId = s?.IdpClientId,
             Domain = s?.Domain,
             Enabled = s?.Enabled ?? false,
-            ClientSecretConfigured = !string.IsNullOrWhiteSpace(s?.ClientSecretName)
+            ClientSecretConfigured = !string.IsNullOrWhiteSpace(s?.ClientSecretName),
+            EnforcementStatus = "not_implemented"
         });
         return response;
     }

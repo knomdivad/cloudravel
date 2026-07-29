@@ -54,8 +54,18 @@ public sealed class TenantFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "tenants")] HttpRequestData req,
         FunctionContext context)
     {
-        // Tenant header is optional for listing — returns all accessible tenants
-        var tenants = await _tenantRepo.GetAllActiveAsync();
+        // RBAC: system_admin sees every active tenant; others only granted workspaces.
+        var userId = context.GetUserId();
+        if (userId == null)
+        {
+            var unauth = req.CreateCorsResponse(HttpStatusCode.Unauthorized);
+            await unauth.WriteAsJsonAsync(new ErrorResponse { Code = "UNAUTHENTICATED", Message = "Not signed in." });
+            return unauth;
+        }
+
+        IReadOnlyList<Tenant> tenants = context.IsSystemAdmin()
+            ? await _tenantRepo.GetAllActiveAsync()
+            : await _tenantRepo.GetByUserAccessAsync(userId.Value);
 
         var summaries = new List<TenantSummaryDto>();
         foreach (var tenant in tenants)
@@ -99,6 +109,9 @@ public sealed class TenantFunctions
             await badReq.WriteAsJsonAsync(new ErrorResponse { Code = "INVALID_ID", Message = "Tenant ID must be a valid GUID." });
             return badReq;
         }
+
+        var mismatch = await context.RequirePathTenantMatchAsync(req, id);
+        if (mismatch != null) return mismatch;
 
         var tenant = await _tenantRepo.GetByIdAsync(id);
         if (tenant == null)
@@ -166,26 +179,30 @@ public sealed class TenantFunctions
         var createdBy = context.GetUserId() ?? Guid.Empty;
         var created = await _tenantRepo.CreateAsync(tenant, createdBy);
 
-        // Store credentials in the secret store for App Registration tenants
+        // Store credentials in the secret store for App Registration tenants — fail closed.
         if (method == OnboardingMethod.AppRegistration
             && !string.IsNullOrEmpty(body.ClientId)
             && !string.IsNullOrEmpty(body.ClientSecret))
         {
             if (_secretStore == null)
             {
-                _logger.LogWarning("Secret store not configured — cannot store credentials for tenant {TenantId}", created.TenantId);
-            }
-            else
-            {
-                var secretPayload = JsonSerializer.Serialize(new
+                var noStore = req.CreateCorsResponse(HttpStatusCode.ServiceUnavailable);
+                await noStore.WriteAsJsonAsync(new ErrorResponse
                 {
-                    clientId = body.ClientId,
-                    clientSecret = body.ClientSecret
+                    Code = "SECRET_STORE_REQUIRED",
+                    Message = "A secret store is required to store App Registration credentials."
                 });
-                await _secretStore.SetSecretAsync(created.SecretName!, secretPayload);
-                _logger.LogInformation("Stored credentials in the secret store for tenant {TenantId} as {SecretName}",
-                    created.TenantId, created.SecretName);
+                return noStore;
             }
+
+            var secretPayload = JsonSerializer.Serialize(new
+            {
+                clientId = body.ClientId,
+                clientSecret = body.ClientSecret
+            });
+            await _secretStore.SetSecretAsync(created.SecretName!, secretPayload);
+            _logger.LogInformation("Stored credentials in the secret store for tenant {TenantId} as {SecretName}",
+                created.TenantId, created.SecretName);
         }
 
         await _auditRepo.LogAsync(new AuditEvent
@@ -245,6 +262,9 @@ public sealed class TenantFunctions
             await badReq.WriteAsJsonAsync(new ErrorResponse { Code = "INVALID_ID", Message = "Tenant ID must be a valid GUID." });
             return badReq;
         }
+
+        var mismatch = await context.RequirePathTenantMatchAsync(req, id);
+        if (mismatch != null) return mismatch;
 
         var body = await req.ReadFromJsonAsync<StatusUpdateRequest>();
         if (body == null || !Enum.TryParse<TenantStatus>(body.Status, true, out var newStatus))

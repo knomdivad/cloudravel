@@ -289,15 +289,23 @@ resource "azurerm_linux_function_app" "main" {
   }
 
   app_settings = {
+    # Secrets: Azure Key Vault via ISecretStore (SecretStore:Provider=KeyVault)
+    "SecretStore__Provider"                         = "KeyVault"
     "KeyVault__VaultUri"                            = azurerm_key_vault.main.vault_uri
     "SqlConnectionString"                           = "Server=tcp:sql-${local.unique_suffix}.database.windows.net,1433;Database=cloudraveldb;Authentication=Active Directory Managed Identity;Encrypt=True;"
     "ServiceBusConnection__fullyQualifiedNamespace" = "${azurerm_servicebus_namespace.main.name}.servicebus.windows.net"
     "BlobStorageUrl"                                = azurerm_storage_account.main.primary_blob_endpoint
-    "AiFoundry__Endpoint"                           = local.ai_inference_uri
-    "AiFoundry__ApiKey"                             = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AiFoundryApiKey)"
+    # App reads OpenAI:* (OpenAI-compatible client). Map Azure OpenAI here.
+    "OpenAI__BaseUrl"                               = "${azurerm_cognitive_account.openai.endpoint}openai/v1"
+    "OpenAI__ApiKey"                                = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AzureOpenAiApiKey)"
+    "OpenAI__Model"                                 = azurerm_cognitive_deployment.gpt.name
+    # Kept for transitional tooling that still reads the legacy names.
     "AzureOpenAI__Endpoint"                         = azurerm_cognitive_account.openai.endpoint
     "AzureOpenAI__ApiKey"                           = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/AzureOpenAiApiKey)"
     "AzureOpenAI__DeploymentName"                   = azurerm_cognitive_deployment.gpt.name
+    "LocalAuth__JwtSigningKey"                      = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/LocalAuthJwtSigningKey)"
+    "Cors__AllowedOrigins"                          = "https://${azurerm_static_web_app.main.default_host_name}"
+    "Platform__Environment"                         = var.environment == "prod" ? "Production" : "Development"
     "AzureAd__TenantId"                             = data.azurerm_client_config.current.tenant_id
     "AzureAd__ClientId"                             = azuread_application.api.client_id
   }
@@ -505,6 +513,30 @@ resource "terraform_data" "azure_openai_api_key" {
     interpreter = ["bash", "-c"]
     environment = {
       SECRET_VALUE = azurerm_cognitive_account.openai.primary_access_key
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.deployer_kv]
+}
+
+# Local-auth JWT signing key (required by the Functions host). Generated once and
+# stored in Key Vault; subsequent applies keep the same secret name/ref.
+resource "random_password" "local_auth_jwt" {
+  length  = 48
+  special = false
+}
+
+resource "terraform_data" "local_auth_jwt_signing_key" {
+  triggers_replace = [
+    random_password.local_auth_jwt.result,
+    azurerm_key_vault.main.name,
+  ]
+
+  provisioner "local-exec" {
+    command     = "az keyvault secret set --vault-name \"${azurerm_key_vault.main.name}\" --name LocalAuthJwtSigningKey --value \"$SECRET_VALUE\" --content-type \"text/plain\" --output none"
+    interpreter = ["bash", "-c"]
+    environment = {
+      SECRET_VALUE = random_password.local_auth_jwt.result
     }
   }
 

@@ -1,4 +1,5 @@
 using System.Net;
+using CloudRavel.Api.Auth;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.DTOs;
 using CloudRavel.Core.Interfaces;
@@ -18,12 +19,18 @@ public sealed class AuthFunctions
 {
     private readonly ILocalAuthService _localAuth;
     private readonly IUserRepository _userRepo;
+    private readonly LoginRateLimiter _rateLimiter;
     private readonly ILogger<AuthFunctions> _logger;
 
-    public AuthFunctions(ILocalAuthService localAuth, IUserRepository userRepo, ILogger<AuthFunctions> logger)
+    public AuthFunctions(
+        ILocalAuthService localAuth,
+        IUserRepository userRepo,
+        LoginRateLimiter rateLimiter,
+        ILogger<AuthFunctions> logger)
     {
         _localAuth = localAuth;
         _userRepo = userRepo;
+        _rateLimiter = rateLimiter;
         _logger = logger;
     }
 
@@ -43,13 +50,33 @@ public sealed class AuthFunctions
             return badReq;
         }
 
-        var result = await _localAuth.LoginAsync(body.Username.Trim(), body.Password);
+        var username = body.Username.Trim();
+        var clientIp = req.Headers.TryGetValues("X-Forwarded-For", out var xff)
+            ? xff.FirstOrDefault()?.Split(',')[0].Trim()
+            : req.Url.Host;
+        var rateKey = $"{clientIp}|{username.ToLowerInvariant()}";
+
+        if (!_rateLimiter.IsAllowed(rateKey))
+        {
+            _logger.LogWarning("Login rate limit exceeded for {Key}", rateKey);
+            var tooMany = req.CreateCorsResponse((HttpStatusCode)429);
+            await tooMany.WriteAsJsonAsync(new ErrorResponse
+            {
+                Code = "RATE_LIMITED",
+                Message = "Too many login attempts. Try again in a minute."
+            });
+            return tooMany;
+        }
+
+        var result = await _localAuth.LoginAsync(username, body.Password);
         if (result == null)
         {
             var unauthorized = req.CreateCorsResponse(HttpStatusCode.Unauthorized);
             await unauthorized.WriteAsJsonAsync(new ErrorResponse { Code = "INVALID_CREDENTIALS", Message = "Invalid username or password." });
             return unauthorized;
         }
+
+        _rateLimiter.Reset(rateKey);
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new LoginResponseDto
@@ -69,8 +96,8 @@ public sealed class AuthFunctions
 
     /// <summary>
     /// GET /api/auth/me — the authenticated caller's identity and system role.
-    /// Works for BOTH local and Entra sessions, giving the frontend a single,
-    /// uniform role source (Entra tokens carry no role claim of their own).
+    /// Works for BOTH local and Entra sessions (Entra callers are JIT-provisioned
+    /// in TenantContextMiddleware).
     /// </summary>
     [Function("Me")]
     public async Task<HttpResponseData> Me(
@@ -94,8 +121,6 @@ public sealed class AuthFunctions
             UserId = userId.Value,
             DisplayName = user?.DisplayName ?? httpUser?.FindFirst("name")?.Value ?? "User",
             Email = user?.Email ?? httpUser?.FindFirst("email")?.Value ?? string.Empty,
-            // A user record may not exist yet for an Entra caller (no JIT provisioning
-            // here) — default to the least-privileged system role in that case.
             SystemRole = user?.GlobalRole ?? "member"
         });
         return response;

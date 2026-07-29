@@ -41,6 +41,8 @@ export interface OrgSso {
   domain?: string | null;
   enabled: boolean;
   clientSecretConfigured: boolean;
+  /** Always 'not_implemented' until per-org IdP federation is enforced. */
+  enforcementStatus?: 'not_implemented' | 'enforced';
 }
 
 // --- Organization (the in-app workspace above clouds) ---

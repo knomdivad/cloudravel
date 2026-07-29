@@ -57,7 +57,7 @@ public sealed class AuthEnforcementMiddleware : IFunctionsWorkerMiddleware
         if (httpContext == null)
         {
             _logger.LogError("No HttpContext available for {Path} — AspNetCore integration misconfigured?", path);
-            var errorResponse = httpRequestData.CreateResponse(HttpStatusCode.InternalServerError);
+            var errorResponse = httpRequestData.CreateCorsResponse(HttpStatusCode.InternalServerError);
             context.GetInvocationResult().Value = errorResponse;
             return;
         }
@@ -65,7 +65,7 @@ public sealed class AuthEnforcementMiddleware : IFunctionsWorkerMiddleware
         var result = await httpContext.AuthenticateAsync();
         if (!result.Succeeded || result.Principal?.Identity?.IsAuthenticated != true)
         {
-            var response = httpRequestData.CreateResponse(HttpStatusCode.Unauthorized);
+            var response = httpRequestData.CreateCorsResponse(HttpStatusCode.Unauthorized);
             await response.WriteAsJsonAsync(new { code = "UNAUTHENTICATED", message = "A valid Bearer token (Entra ID or local login) is required." });
             context.GetInvocationResult().Value = response;
             return;

@@ -15,8 +15,11 @@ Reach the web UI:
   then open http://localhost:8080/
 {{- end }}
 
-Default login (seeded): username "admin", password "ChangeMe123!"
-Change it immediately — the hash is public (it ships in source control).
+SECURITY — change these before any non-local use:
+  • Default login (seeded): username "admin", password "ChangeMe123!"
+    The password hash is public (it ships in source control). Change it immediately.
+  • secrets.localAuthJwtSigningKey must be a long random value (required to boot).
+  • Do not use OpenBao token "root" outside local/dev.
 
 {{- if .Values.openbao.enabled }}
 
@@ -27,7 +30,12 @@ point externalOpenBao.address at a real Vault/OpenBao.
 {{- if not .Values.secrets.localAuthJwtSigningKey }}
 {{- if not .Values.secrets.existingSecret }}
 
-WARNING: secrets.localAuthJwtSigningKey is empty. Local login tokens won't
-survive an API restart or work across replicas. Set it before real use.
+WARNING: secrets.localAuthJwtSigningKey is empty. The API will fail to start
+(LocalAuth:JwtSigningKey is required). Set it before install.
 {{- end }}
+{{- end }}
+{{- if eq .Values.secrets.openBaoToken "root" }}
+
+WARNING: secrets.openBaoToken is "root" (dev default). Change it for any
+shared or production cluster.
 {{- end }}

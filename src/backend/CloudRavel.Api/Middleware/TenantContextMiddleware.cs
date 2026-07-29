@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using CloudRavel.Core.Interfaces;
+using CloudRavel.Core.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -12,15 +13,12 @@ namespace CloudRavel.Api.Middleware;
 /// Extracts and validates the tenant context from every incoming API request.
 ///
 /// Enforcement chain:
-///   1. UseAuthentication()/UseAuthorization() (Program.cs) + [Authorize] on each
-///      function already reject requests without a valid Entra or Local JWT.
-///   2. Reads X-Tenant-Id header
-///   3. Checks the authenticated user actually has access to that tenant
-///      (global "admin" role bypasses the per-tenant check, same as before)
-///   4. Sets TenantContext in function context items for downstream use
+///   1. AuthEnforcementMiddleware rejects requests without a valid JWT.
+///   2. This middleware resolves the user, rejects inactive accounts, JIT-provisions
+///      Entra callers, then validates X-Tenant-Id against RBAC.
+///   3. Sets TenantContext / roles in function context items for downstream use.
 ///
-/// This is the first tenant-scoping enforcement layer. RLS at the database
-/// level is the second.
+/// RLS at the database level is the second isolation layer for tenant-scoped tables.
 /// </summary>
 public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
 {
@@ -35,7 +33,6 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
 
     public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)
     {
-        // Skip tenant validation for non-HTTP functions (timers, service bus, etc.)
         var httpRequestData = await context.GetHttpRequestDataAsync();
         if (httpRequestData == null)
         {
@@ -43,14 +40,12 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
             return;
         }
 
-        // CORS preflight never carries X-Tenant-Id — let CorsFunctions handle it.
         if (httpRequestData.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
         {
             await next(context);
             return;
         }
 
-        // Skip for health check and the login endpoint itself
         var path = httpRequestData.Url.AbsolutePath.ToLowerInvariant();
         if (path.Contains("/health") || path.Contains("/auth/login"))
         {
@@ -58,18 +53,90 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
             return;
         }
 
-        // Extract tenant ID from header
+        // Resolve identity from JWT (already authenticated by AuthEnforcementMiddleware).
+        var userId = context.GetUserId();
+        if (!userId.HasValue)
+        {
+            var response = httpRequestData.CreateCorsResponse(System.Net.HttpStatusCode.Unauthorized);
+            await response.WriteAsJsonAsync(new
+            {
+                code = "UNAUTHENTICATED",
+                message = "A valid Bearer token with a resolvable user identity is required."
+            });
+            context.GetInvocationResult().Value = response;
+            return;
+        }
+
+        var user = await _userRepo.GetByIdAsync(userId.Value);
+        var httpUser = context.GetHttpContext()?.User;
+        var isEntra = IsEntraPrincipal(httpUser);
+
+        // JIT-provision Entra callers so roles / org grants can be attached later.
+        if (user == null && isEntra)
+        {
+            user = await ProvisionEntraUserAsync(userId.Value, httpUser);
+        }
+
+        if (user == null)
+        {
+            // Local JWT for a deleted user, or Entra provision failure.
+            var response = httpRequestData.CreateCorsResponse(System.Net.HttpStatusCode.Unauthorized);
+            await response.WriteAsJsonAsync(new
+            {
+                code = "USER_NOT_FOUND",
+                message = "No user record exists for this identity."
+            });
+            context.GetInvocationResult().Value = response;
+            return;
+        }
+
+        if (!user.IsActive)
+        {
+            var response = httpRequestData.CreateCorsResponse(System.Net.HttpStatusCode.Forbidden);
+            await response.WriteAsJsonAsync(new
+            {
+                code = "USER_DISABLED",
+                message = "This account has been disabled."
+            });
+            context.GetInvocationResult().Value = response;
+            return;
+        }
+
+        var isSystemAdmin = user.GlobalRole == "system_admin";
+        context.Items["SystemRole"] = user.GlobalRole ?? "member";
+
+        // Tenant header optional for listing endpoints and /auth/me.
         if (!httpRequestData.Headers.TryGetValues("X-Tenant-Id", out var tenantIdValues))
         {
-            // For tenant/organization listing endpoints, tenant header is optional
-            if ((path.Contains("/tenants") || path.Contains("/organizations"))
-                && httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            if ((path.Contains("/tenants") || path.Contains("/organizations") || path.Contains("/auth/me")
+                 || path.Contains("/admin/"))
+                && (httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase)
+                    || path.Contains("/auth/me")
+                    || path.Contains("/admin/")))
             {
                 await next(context);
                 return;
             }
 
-            var response = httpRequestData.CreateResponse(System.Net.HttpStatusCode.BadRequest);
+            // POST /organizations (create) and some admin mutations don't need a workspace header.
+            if (path.Contains("/organizations")
+                && httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains("/azure") && !path.Contains("/users") && !path.Contains("/sso"))
+            {
+                await next(context);
+                return;
+            }
+
+            if (path.Contains("/admin/")
+                && (httpRequestData.Method.Equals("PUT", StringComparison.OrdinalIgnoreCase)
+                    || httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
+                    || httpRequestData.Method.Equals("PATCH", StringComparison.OrdinalIgnoreCase)))
+            {
+                await next(context);
+                return;
+            }
+
+            var response = httpRequestData.CreateCorsResponse(System.Net.HttpStatusCode.BadRequest);
             await response.WriteAsJsonAsync(new { code = "MISSING_TENANT", message = "X-Tenant-Id header is required." });
             context.GetInvocationResult().Value = response;
             return;
@@ -78,49 +145,68 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         var tenantIdStr = tenantIdValues.First();
         if (!Guid.TryParse(tenantIdStr, out var tenantId))
         {
-            var response = httpRequestData.CreateResponse(System.Net.HttpStatusCode.BadRequest);
+            var response = httpRequestData.CreateCorsResponse(System.Net.HttpStatusCode.BadRequest);
             await response.WriteAsJsonAsync(new { code = "INVALID_TENANT", message = "X-Tenant-Id must be a valid GUID." });
             context.GetInvocationResult().Value = response;
             return;
         }
 
-        var userId = context.GetUserId();
-        if (userId.HasValue)
+        if (tenantId == Guid.Empty)
         {
-            // Resolve the caller's roles once and stash them for downstream role
-            // gating (see AuthorizationExtensions). A system_admin has access to
-            // every workspace and acts as an org_admin within it; otherwise the
-            // caller must hold a user_tenant_access role for this workspace.
-            var user = await _userRepo.GetByIdAsync(userId.Value);
-            var isSystemAdmin = user?.GlobalRole == "system_admin";
-            context.Items["SystemRole"] = user?.GlobalRole ?? "member";
-
-            if (tenantId == Guid.Empty)
+            // Global / registry scope (NO_WORKSPACE sentinel).
+            context.Items["OrgRole"] = string.Empty;
+        }
+        else
+        {
+            var orgRole = isSystemAdmin ? "org_admin" : await _userRepo.GetTenantRoleAsync(userId.Value, tenantId);
+            if (!isSystemAdmin && orgRole == null)
             {
-                // Global / registry scope (the NO_WORKSPACE sentinel): there is no
-                // workspace to check access against. Endpoints gate themselves
-                // (e.g. RequireSystemAdmin), and org listing filters per-user.
-                context.Items["OrgRole"] = string.Empty;
+                var response = httpRequestData.CreateCorsResponse(System.Net.HttpStatusCode.Forbidden);
+                await response.WriteAsJsonAsync(new { code = "TENANT_FORBIDDEN", message = "You do not have access to this tenant." });
+                context.GetInvocationResult().Value = response;
+                return;
             }
-            else
-            {
-                var orgRole = isSystemAdmin ? "org_admin" : await _userRepo.GetTenantRoleAsync(userId.Value, tenantId);
-                if (!isSystemAdmin && orgRole == null)
-                {
-                    var response = httpRequestData.CreateResponse(System.Net.HttpStatusCode.Forbidden);
-                    await response.WriteAsJsonAsync(new { code = "TENANT_FORBIDDEN", message = "You do not have access to this tenant." });
-                    context.GetInvocationResult().Value = response;
-                    return;
-                }
-                context.Items["OrgRole"] = orgRole ?? string.Empty;
-            }
+            context.Items["OrgRole"] = orgRole ?? string.Empty;
         }
 
-        // Store tenant context for use by API functions
         context.Items["TenantId"] = tenantId;
 
-        _logger.LogDebug("Request scoped to tenant {TenantId}", tenantId);
+        _logger.LogDebug("Request scoped to tenant {TenantId} for user {UserId}", tenantId, userId);
         await next(context);
+    }
+
+    private async Task<User> ProvisionEntraUserAsync(Guid userId, ClaimsPrincipal? principal)
+    {
+        var displayName = principal?.FindFirst("name")?.Value
+            ?? principal?.FindFirst("preferred_username")?.Value
+            ?? "Entra User";
+        var email = principal?.FindFirst("email")?.Value
+            ?? principal?.FindFirst(ClaimTypes.Email)?.Value
+            ?? principal?.FindFirst("preferred_username")?.Value
+            ?? string.Empty;
+
+        var user = new User
+        {
+            UserId = userId,
+            DisplayName = displayName,
+            Email = email,
+            GlobalRole = "member",
+            IsActive = true,
+            AuthProvider = "entra",
+        };
+
+        var created = await _userRepo.UpsertAsync(user);
+        _logger.LogInformation("JIT-provisioned Entra user {UserId} ({Email})", userId, email);
+        return created;
+    }
+
+    private static bool IsEntraPrincipal(ClaimsPrincipal? user)
+    {
+        if (user?.Identity?.IsAuthenticated != true) return false;
+        // Local tokens use issuer cloudravel-local-auth; Entra tokens carry oid.
+        if (user.FindFirst("oid") != null) return true;
+        var iss = user.FindFirst("iss")?.Value ?? string.Empty;
+        return iss.Contains("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase);
     }
 }
 

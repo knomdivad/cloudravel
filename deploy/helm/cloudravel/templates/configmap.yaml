@@ -8,6 +8,8 @@ data:
   FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
   Platform__Environment: {{ .Values.api.platformEnvironment | quote }}
   OpenBao__Address: {{ include "cloudravel.openBaoAddress" . | quote }}
+  SecretStore__Provider: "OpenBao"
+  Cors__AllowedOrigins: {{ .Values.api.corsAllowedOrigins | quote }}
   OpenAI__BaseUrl: {{ .Values.api.openAi.baseUrl | quote }}
   OpenAI__Model: {{ .Values.api.openAi.model | quote }}
   AzureAd__TenantId: {{ .Values.api.entra.tenantId | quote }}

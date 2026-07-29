@@ -41,7 +41,9 @@ secrets:
   existingSecret: ""
   mssqlSaPassword: ""              # REQUIRED (unless using existingSecret / external SQL)
   localAuthJwtSigningKey: ""       # REQUIRED for local login to survive restarts
-  openBaoToken: "root"             # dev default; change for a real OpenBao/Vault
+  # Empty by default — set explicitly for bundled OpenBao, or use existingSecret.
+  # Never leave "root" in production.
+  openBaoToken: ""
   openAiApiKey: ""                 # optional (AI Insights)
 
 # ---------------------------------------------------------------------------
@@ -53,6 +55,8 @@ api:
     port: 80
   # Instance environment: Development disables live cloud collection.
   platformEnvironment: Development
+  # Comma-separated browser origins. Set to your UI origin(s); avoid "*".
+  corsAllowedOrigins: "http://localhost:3000"
   openAi:
     baseUrl: ""
     model: gpt-5.5

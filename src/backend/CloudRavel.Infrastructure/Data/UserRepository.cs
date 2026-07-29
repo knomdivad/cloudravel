@@ -54,6 +54,7 @@ public sealed class UserRepository : IUserRepository
     public async Task<User> UpsertAsync(User user)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        // Never elevates global_role on MATCH — only seeds it on insert (Entra JIT → member).
         const string sql = @"
             MERGE users AS target
             USING (SELECT @UserId AS user_id) AS source
@@ -63,16 +64,17 @@ public sealed class UserRepository : IUserRepository
                 email = @Email,
                 last_login_at = SYSUTCDATETIME()
             WHEN NOT MATCHED THEN INSERT
-                (user_id, display_name, email, global_role)
+                (user_id, display_name, email, global_role, is_active, auth_provider)
             VALUES
-                (@UserId, @DisplayName, @Email, @GlobalRole);";
+                (@UserId, @DisplayName, @Email, @GlobalRole, 1, @AuthProvider);";
 
         await conn.ExecuteAsync(sql, new
         {
             user.UserId,
             user.DisplayName,
             user.Email,
-            user.GlobalRole
+            user.GlobalRole,
+            AuthProvider = string.IsNullOrWhiteSpace(user.AuthProvider) ? "entra" : user.AuthProvider
         });
 
         _logger.LogDebug("Upserted user {UserId} ({Email})", user.UserId, user.Email);

@@ -112,6 +112,9 @@ services:
       OpenBao__Token: ${OPENBAO_TOKEN:-root}
       # --- Local auth signing key (required for the non-Entra login path) ---
       LocalAuth__JwtSigningKey: ${LOCAL_AUTH_JWT_SIGNING_KEY:-dev-only-change-me-in-production}
+      # CORS allow-list (comma-separated). Browser SPA origin only — no wildcard.
+      Cors__AllowedOrigins: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      SecretStore__Provider: OpenBao
       # --- AI model: any OpenAI-compatible endpoint (optional). These are the
       #     ENV-VAR FALLBACK; a system admin can override them at runtime under
       #     Admin → System Settings (stored in system_settings + secret store).
