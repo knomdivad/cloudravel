@@ -260,9 +260,13 @@ Notes:
   production set `openbao.enabled=false` and `externalOpenBao.address` to a real
   Vault/OpenBao cluster.
 - **Security / Governance / Approvals for AWS/GCP:** after multi-cloud inventory
-  collection, inventory posture rules write Security findings and Governance
-  recommendations (and may propose gated remediations). Azure still uses Advisor /
-  Policy / Defender timers when those are enabled.
+  collection (and hourly via `MultiCloudGovernanceTimer`), CloudRavel syncs:
+  - **AWS:** Security Hub, Config compliance, Trusted Advisor (support plan),
+    S3 public access blocks, open security groups
+  - **GCP:** Security Command Center, Recommender, Organization Policy
+  - **Inventory posture** rules (both clouds)
+  Results land in the same tables as Azure Defender / Advisor / Policy. Matching
+  playbooks can appear under Approvals. Azure still uses its own timers when enabled.
   AI Insights needs `OPENAI_*` (or Admin → System Settings).
 - To ship an update: `git pull && docker compose up --build` (add `--force-recreate`
   if a container is caching an old image).

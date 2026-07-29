@@ -644,6 +644,17 @@ export async function collectCloudAccount(tenantId: string, accountId: string): 
   return apiCall(`/cloud-accounts/${accountId}/collect`, tenantId, { method: 'POST' });
 }
 
+/** On-demand AWS/GCP Security · Governance · Policy sync for the current workspace. */
+export async function syncMultiCloudGovernance(tenantId: string): Promise<{
+  tenantId: string;
+  securityFindings: number;
+  recommendations: number;
+  policyRecords: number;
+  notes: string[];
+}> {
+  return apiCall(`/cloud-orgs/governance/sync`, tenantId, { method: 'POST' });
+}
+
 export async function createCloudOrg(
   tenantId: string,
   request: { provider: string; name: string; externalId?: string }
@@ -760,6 +771,7 @@ export const api = {
   deleteCloudAccount,
   updateCloudAccountCredentials,
   collectCloudAccount,
+  syncMultiCloudGovernance,
   getPlatformInfo,
   getMe,
   getSystemSettings,

@@ -20,7 +20,7 @@ namespace CloudRavel.Infrastructure.MultiCloud;
 ///   gcp.compute.stop_instance          — params: project?, zone, instance
 ///   gcp.storage.enforce_pap            — params: bucket (public access prevention)
 /// </summary>
-public sealed class GcpProviderAdapter : ICloudProviderAdapter
+public sealed partial class GcpProviderAdapter : ICloudProviderAdapter
 {
     private static readonly HttpClient Http = new();
 
@@ -180,11 +180,14 @@ public sealed class GcpProviderAdapter : ICloudProviderAdapter
     {
         if (_secretStore == null)
             throw new InvalidOperationException("Secret store is not configured; cannot resolve GCP credentials.");
-        if (string.IsNullOrEmpty(account.CredentialSecretName))
-            throw new InvalidOperationException($"GCP project {account.ExternalId} has no credential secret configured.");
+        var secretName = !string.IsNullOrWhiteSpace(account.CredentialSecretName)
+            ? account.CredentialSecretName
+            : $"cloudaccount-{account.AccountId}";
 
-        var secretValue = await _secretStore.GetSecretAsync(account.CredentialSecretName)
-            ?? throw new InvalidOperationException($"No credential secret found for GCP project {account.ExternalId}.");
+        var secretValue = await _secretStore.GetSecretAsync(secretName)
+            ?? throw new InvalidOperationException(
+                $"No credential secret found for GCP project '{account.ExternalId}' (looked up '{secretName}'). " +
+                "Re-paste the service account key via Clouds → Credentials if OpenBao was restarted without persistence.");
         using var keyDoc = JsonDocument.Parse(secretValue);
         var root = keyDoc.RootElement;
         var clientEmail = root.GetProperty("client_email").GetString()!;

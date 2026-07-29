@@ -95,6 +95,7 @@ var host = new HostBuilder()
         services.AddScoped<ICloudProviderAdapterFactory, CloudProviderAdapterFactory>();
         services.AddScoped<IMultiCloudInventoryService, MultiCloudInventoryService>();
         services.AddScoped<IMultiCloudPostureService, MultiCloudPostureService>();
+        services.AddScoped<IMultiCloudGovernanceSyncService, MultiCloudGovernanceSyncService>();
 
         // AIOps engine: proactive anomaly detection + gated remediation
         services.AddScoped<IAnomalyDetectionService, AnomalyDetectionService>();

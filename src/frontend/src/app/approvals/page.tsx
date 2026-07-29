@@ -51,8 +51,8 @@ export default function ApprovalsPage() {
       <div>
         <h1 className="text-xl font-bold">Remediation Approvals</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Gated actions proposed by the AIOps engine, the AI assistant, or operators.
-          Nothing runs without approval (unless tenant policy auto-approves low-risk playbooks).
+          Gated actions from Azure, AWS, and GCP (AIOps drift, multi-cloud governance sync, AI assistant, or operators).
+          Nothing runs without approval unless tenant policy auto-approves low-risk playbooks.
         </p>
       </div>
 

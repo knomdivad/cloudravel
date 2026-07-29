@@ -19,7 +19,7 @@ namespace CloudRavel.Infrastructure.MultiCloud;
 ///   aws.ec2.stop_instance       — EC2 StopInstances (params: instanceId, region)
 ///   aws.s3.block_public_access  — S3 PutPublicAccessBlock (params: bucket, region)
 /// </summary>
-public sealed class AwsProviderAdapter : ICloudProviderAdapter
+public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
 {
     private static readonly HttpClient Http = new();
 
@@ -231,11 +231,14 @@ public sealed class AwsProviderAdapter : ICloudProviderAdapter
     {
         if (_secretStore == null)
             throw new InvalidOperationException("Secret store is not configured; cannot resolve AWS credentials.");
-        if (string.IsNullOrEmpty(account.CredentialSecretName))
-            throw new InvalidOperationException($"AWS account {account.ExternalId} has no credential secret configured.");
+        var secretName = !string.IsNullOrWhiteSpace(account.CredentialSecretName)
+            ? account.CredentialSecretName
+            : $"cloudaccount-{account.AccountId}";
 
-        var secretValue = await _secretStore.GetSecretAsync(account.CredentialSecretName)
-            ?? throw new InvalidOperationException($"No credential secret found for AWS account {account.ExternalId}.");
+        var secretValue = await _secretStore.GetSecretAsync(secretName)
+            ?? throw new InvalidOperationException(
+                $"No credential secret found for AWS account '{account.ExternalId}' (looked up '{secretName}'). " +
+                "Re-paste keys via Clouds → Credentials if OpenBao was restarted without persistence.");
         var creds = JsonSerializer.Deserialize<AwsCredentials>(secretValue,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         if (creds == null || string.IsNullOrEmpty(creds.AccessKeyId) || string.IsNullOrEmpty(creds.SecretAccessKey))
