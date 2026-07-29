@@ -334,6 +334,7 @@ public sealed class InventoryFunctions
         var tenantId = context.GetTenantId();
 
         var summary = await _inventoryRepo.GetResourceTypeSummaryAsync(tenantId);
+        var byProvider = await _inventoryRepo.GetResourceCountsByProviderAsync(tenantId);
         var total = await _inventoryRepo.GetResourceCountAsync(tenantId);
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
@@ -345,7 +346,12 @@ public sealed class InventoryFunctions
             {
                 ResourceType = s.ResourceType,
                 Count = s.Count
-            }).ToList()
+            }).ToList(),
+            // Multi-cloud breakdown for dashboard pie (azure / aws / gcp → count)
+            ByProvider = byProvider
+                .OrderByDescending(kv => kv.Value)
+                .Select(kv => new { provider = kv.Key, count = kv.Value })
+                .ToList()
         });
         return response;
     }

@@ -66,32 +66,52 @@ export default function DashboardPage() {
   const { data: defenderData } = useDefenderFindings(tenantId, { status: 'Unhealthy', limit: 100 });
   const { data: policyData } = usePolicyCompliance(tenantId, { state: 'NonCompliant', limit: 100 });
 
-  // Aggregate resource types into service families for the pie chart
-  // Must be before any early returns to satisfy React's rules of hooks
-  const serviceFamilies = useMemo(() => {
-    const types = inventorySummary?.resourceTypes ?? [];
-    const familyMap = new Map<string, number>();
+  // Pie chart: by cloud when 2+ clouds have inventory; otherwise by service family.
+  // Must be before any early returns to satisfy React's rules of hooks.
+  const pieChart = useMemo(() => {
+    const byProvider = (inventorySummary?.byProvider ?? []).filter((p) => p.count > 0);
+    // API may return camelCase or PascalCase
+    const providers = byProvider.length
+      ? byProvider
+      : normalizeByProvider(inventorySummary);
 
-    for (const rt of types) {
-      const match = rt.resourceType.match(/^Microsoft\.(\w+)\//i);
-      const family = match ? match[1] : rt.resourceType.split('/')[0];
-      familyMap.set(family, (familyMap.get(family) ?? 0) + rt.count);
+    if (providers.length > 1) {
+      const data = providers
+        .map((p) => ({
+          name: cloudDisplayName(p.provider),
+          count: p.count,
+          fill: CLOUD_COLORS[p.provider.toLowerCase()] ?? '#6b7280',
+        }))
+        .sort((a, b) => b.count - a.count);
+      return { mode: 'cloud' as const, title: 'Resources by cloud', data };
     }
 
-    const sorted = Array.from(familyMap.entries())
-      .map(([name, count]) => ({ name, count }))
+    const types = inventorySummary?.resourceTypes ?? [];
+    const familyMap = new Map<string, number>();
+    for (const rt of types) {
+      const family = serviceFamilyName(rt.resourceType);
+      familyMap.set(family, (familyMap.get(family) ?? 0) + rt.count);
+    }
+    let sorted = Array.from(familyMap.entries())
+      .map(([name, count]) => ({ name, count, fill: '' }))
       .sort((a, b) => b.count - a.count);
-
-    // Top 7 + "Other" bucket
     if (sorted.length > 8) {
       const top = sorted.slice(0, 7);
       const otherCount = sorted.slice(7).reduce((sum, s) => sum + s.count, 0);
-      return [...top, { name: 'Other', count: otherCount }];
+      sorted = [...top, { name: 'Other', count: otherCount, fill: '' }];
     }
-    return sorted;
+    const data = sorted.map((s, i) => ({
+      ...s,
+      fill: FAMILY_PIE_COLORS[i % FAMILY_PIE_COLORS.length],
+    }));
+    const cloudHint =
+      providers.length === 1 ? cloudDisplayName(providers[0].provider) : null;
+    return {
+      mode: 'family' as const,
+      title: cloudHint ? `Service families (${cloudHint})` : 'Service families',
+      data,
+    };
   }, [inventorySummary]);
-
-  const PIE_COLORS = ['#0078d4', '#005a9e', '#004578', '#106ebe', '#2b88d8', '#71afe5', '#c7e0f4', '#deecf9'];
 
   if (!tenantId) {
     return (
@@ -178,32 +198,43 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Resource Breakdown */}
+        {/* Resource Breakdown: by cloud (multi-cloud) or service family (single cloud) */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Service Families</h3>
+          <h3 className="text-sm font-semibold text-gray-700 mb-4">{pieChart.title}</h3>
           {invLoading ? (
             <div className="h-64 flex items-center justify-center text-gray-400">Loading...</div>
+          ) : pieChart.data.length === 0 ? (
+            <div className="h-64 flex items-center justify-center text-gray-400 text-sm">
+              No inventory yet. Collect clouds to see the breakdown.
+            </div>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
                 <Pie
-                  data={serviceFamilies}
+                  data={pieChart.data}
                   dataKey="count"
                   nameKey="name"
                   cx="50%"
                   cy="50%"
                   outerRadius={90}
                   label={({ name, percent }) =>
-                    `${name} (${(percent * 100).toFixed(0)}%)`
+                    `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`
                   }
                   labelLine={false}
                   fontSize={10}
                 >
-                  {serviceFamilies.map((_, i) => (
-                    <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                  {pieChart.data.map((entry, i) => (
+                    <Cell key={i} fill={entry.fill || FAMILY_PIE_COLORS[i % FAMILY_PIE_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number) => value.toLocaleString()} />
+                <Tooltip
+                  formatter={(value: number, _name, props) => {
+                    const total = pieChart.data.reduce((s, d) => s + d.count, 0);
+                    const pct = total > 0 ? ((Number(value) / total) * 100).toFixed(1) : '0';
+                    return [`${Number(value).toLocaleString()} (${pct}%)`, props?.payload?.name ?? ''];
+                  }}
+                />
+                <Legend />
               </PieChart>
             </ResponsiveContainer>
           )}
@@ -266,6 +297,61 @@ export default function DashboardPage() {
       </div>
     </div>
   );
+}
+
+// ============================================================================
+// Pie chart helpers
+// ============================================================================
+
+const CLOUD_COLORS: Record<string, string> = {
+  azure: '#0078d4',
+  aws: '#ff9900',
+  gcp: '#34a853',
+};
+
+const FAMILY_PIE_COLORS = [
+  '#0078d4', '#005a9e', '#004578', '#106ebe', '#2b88d8', '#71afe5', '#c7e0f4', '#deecf9',
+  '#ff9900', '#34a853', '#7c3aed',
+];
+
+function cloudDisplayName(provider: string): string {
+  const p = provider.toLowerCase();
+  if (p === 'aws') return 'AWS';
+  if (p === 'gcp') return 'GCP';
+  if (p === 'azure') return 'Azure';
+  return provider;
+}
+
+/** Azure Microsoft.X / AWS service / GCP *.googleapis.com service → family label. */
+function serviceFamilyName(resourceType: string): string {
+  const az = resourceType.match(/^Microsoft\.(\w+)/i);
+  if (az) return az[1];
+
+  if (resourceType.includes('.googleapis.com/')) {
+    const svc = resourceType.split('.googleapis.com/')[0] || resourceType;
+    return svc.charAt(0).toUpperCase() + svc.slice(1);
+  }
+
+  // AWS: "ec2/instance" or "s3"
+  const head = resourceType.split('/')[0] || resourceType;
+  if (!head) return 'Other';
+  return head.length <= 4 ? head.toUpperCase() : head.charAt(0).toUpperCase() + head.slice(1);
+}
+
+function normalizeByProvider(
+  summary: { byProvider?: { provider: string; count: number }[]; ByProvider?: { provider?: string; Provider?: string; count?: number; Count?: number }[] } | undefined
+): { provider: string; count: number }[] {
+  const raw = summary?.byProvider ?? summary?.ByProvider ?? [];
+  return raw
+    .map((r) => ({
+      provider: String((r as { provider?: string; Provider?: string }).provider
+        ?? (r as { Provider?: string }).Provider
+        ?? ''),
+      count: Number((r as { count?: number; Count?: number }).count
+        ?? (r as { Count?: number }).Count
+        ?? 0),
+    }))
+    .filter((r) => r.provider && r.count > 0);
 }
 
 // ============================================================================
