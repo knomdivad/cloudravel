@@ -21,7 +21,9 @@ SERVER=${DB_HOST:-mssql}
 DB_USER=${DB_USER:-sa}
 DB=cloudraveldb
 LEGACY_DB=aimdb
-# Applied in order; the demo seed runs last (once) so a fresh stack has data.
+# Schema/RBAC migrations only. The bootstrap local admin is created by
+# 004-local-auth (+ 011 ensures system_admin). Demo data is NOT applied —
+# load seed-demo-data.sql manually if you want Contoso sample rows.
 MIGRATIONS=(
   001-schema
   002-fix-rls-bypass
@@ -35,10 +37,11 @@ MIGRATIONS=(
   010-admin-rbac
   011-ensure-bootstrap-admin
   012-rls-hardening
-  seed-demo-data
 )
 
-run() { "$SQLCMD" -S "$SERVER" -U "$DB_USER" -P "$MSSQL_SA_PASSWORD" "$@"; }
+# -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;
+#     sqlcmd defaults OFF, which breaks UPDATEs on users after 004-local-auth).
+run() { "$SQLCMD" -S "$SERVER" -U "$DB_USER" -P "$MSSQL_SA_PASSWORD" -I "$@"; }
 
 echo "Waiting for SQL Server at $SERVER..."
 for i in $(seq 1 60); do

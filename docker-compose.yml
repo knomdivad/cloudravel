@@ -58,8 +58,9 @@ services:
     volumes:
       - azurite-data:/data
 
-  # Applies database/001–006 + demo seed once each (dbo.__migrations ledger),
-  # so `docker compose up` is safe to re-run and picks up new migrations.
+  # Applies schema migrations once each (dbo.__migrations ledger). Leaves a
+  # blank estate plus the bootstrap local admin (admin / ChangeMe123!) —
+  # no Contoso demo seed. Optional: sqlcmd seed-demo-data.sql by hand.
   migrator:
     image: mcr.microsoft.com/mssql-tools:latest
     platform: linux/amd64
