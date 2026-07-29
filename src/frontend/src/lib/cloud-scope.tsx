@@ -24,37 +24,76 @@ export function inferProviderFromResourceId(
   resourceId?: string | null,
   providerHint?: string | null,
 ): 'azure' | 'aws' | 'gcp' {
-  if (providerHint && providerHint.trim()) {
-    return normalizeCloudProvider(providerHint);
-  }
-  const id = (resourceId ?? '').trim();
-  if (!id) return 'azure';
+  return resolveCloudProvider({ resourceId, provider: providerHint });
+}
+
+/**
+ * Resolve cloud provider for multi-cloud UI badges (changes, security, governance, ops).
+ * Free-text / id signals override a stuck Azure stored label when the payload is clearly AWS/GCP.
+ */
+export function resolveCloudProvider(opts: {
+  provider?: string | null;
+  resourceId?: string | null;
+  id?: string | null;
+  text?: string | null;
+}): 'azure' | 'aws' | 'gcp' {
+  const blob = [opts.resourceId, opts.id, opts.text, opts.provider].filter(Boolean).join('\n');
 
   if (
-    id.startsWith('arn:aws:') ||
-    id.startsWith('aws-') ||
-    id.startsWith('aws:') ||
-    /^aws/i.test(id)
+    /arn:aws:|aws-s3-|aws-sh:|aws-sg-|aws-ta:|aws-config:|Security Hub|Trusted Advisor/i.test(blob)
   ) {
     return 'aws';
   }
   if (
-    id.includes('googleapis.com') ||
-    id.startsWith('gcp-') ||
-    id.startsWith('gcp:') ||
-    (id.startsWith('projects/') &&
-      (id.includes('/instances/') || id.includes('/buckets/') || id.includes('/zones/')))
+    /googleapis\.com|gcp-scc:|gcp-rec:|gcp-storage|Security Command Center|publicAccessPrevention/i.test(
+      blob,
+    ) ||
+    (opts.resourceId?.startsWith('projects/') &&
+      /\/(instances|buckets|zones)\//.test(opts.resourceId))
   ) {
     return 'gcp';
   }
   if (
-    id.includes('/subscriptions/') ||
-    id.startsWith('/subscriptions') ||
-    id.includes('providers/Microsoft.')
+    /\/subscriptions\/|providers\/Microsoft\.|Microsoft Defender|Azure Advisor/i.test(blob)
   ) {
     return 'azure';
   }
+
+  const fromId = inferFromId(opts.resourceId) ?? inferFromId(opts.id);
+  if (fromId) return fromId;
+
+  if (opts.provider?.trim()) {
+    return normalizeCloudProvider(opts.provider);
+  }
   return 'azure';
+}
+
+function inferFromId(id?: string | null): 'azure' | 'aws' | 'gcp' | null {
+  if (!id?.trim()) return null;
+  const v = id.trim();
+  if (
+    v.startsWith('arn:aws:') ||
+    v.startsWith('aws-') ||
+    v.startsWith('aws:') ||
+    /^aws/i.test(v)
+  ) {
+    return 'aws';
+  }
+  if (
+    v.includes('googleapis.com') ||
+    v.startsWith('gcp-') ||
+    v.startsWith('gcp:')
+  ) {
+    return 'gcp';
+  }
+  if (
+    v.includes('/subscriptions/') ||
+    v.startsWith('/subscriptions') ||
+    v.includes('providers/Microsoft.')
+  ) {
+    return 'azure';
+  }
+  return null;
 }
 
 /** Short display name for a change row (leaf of resource id / ARN). */

@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { useOpsSummary, useAnomalies } from '../../lib/hooks';
 import { updateAnomalyStatus } from '../../lib/api';
+import { ProviderBadge, resolveCloudProvider, changeResourceLeafName } from '../../lib/cloud-scope';
 import type { Anomaly, Incident, RemediationAction, CloudAccount } from '../../lib/types';
 
 const SEVERITY_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -24,45 +25,21 @@ const KIND_LABELS: Record<string, string> = {
   ResourceSprawl: 'Resource Sprawl',
 };
 
-const PROVIDER_BADGES: Record<string, string> = {
-  Azure: 'bg-azure-100 text-azure-700',
-  Aws: 'bg-amber-100 text-amber-800',
-  Gcp: 'bg-emerald-100 text-emerald-700',
-};
-
-/** Normalize provider casing from API (Azure | Aws | Gcp | azure | AWS …). */
-function normalizeProvider(p?: string | null): string {
-  const raw = (p ?? '').trim();
-  if (!raw) return 'UNKNOWN';
-  if (/^aws$/i.test(raw)) return 'AWS';
-  if (/^gcp$/i.test(raw)) return 'GCP';
-  if (/^azure$/i.test(raw)) return 'AZURE';
-  return raw.toUpperCase();
+function anomalyProvider(anomaly: Anomaly): string {
+  return resolveCloudProvider({
+    provider: anomaly.provider,
+    resourceId: anomaly.resourceId,
+    text: [anomaly.title, anomaly.description, anomaly.metricName, anomaly.kind].filter(Boolean).join('\n'),
+  });
 }
 
-/** Client-side inference so stuck Azure DB labels still display correctly before/without API redeploy. */
-function inferProvider(anomaly: Anomaly): string {
-  const blob = [anomaly.resourceId, anomaly.title, anomaly.description, anomaly.metricName]
-    .filter(Boolean)
-    .join('\n');
-  if (/googleapis\.com|gcp-|Security Command Center|publicAccessPrevention/i.test(blob)) return 'GCP';
-  if (/arn:aws:|aws-s3-|aws-sh:|aws-sg-|Security Hub|Trusted Advisor/i.test(blob)) return 'AWS';
-  if (/\/subscriptions\/|providers\/Microsoft\.|Microsoft Defender|Azure Advisor/i.test(blob)) return 'AZURE';
-  // Tenant-wide anomaly on a non-Azure estate: prefer linked account providers from the page when available
-  const stored = normalizeProvider(anomaly.provider);
-  if (stored === 'AZURE' && anomaly.resourceId && !/\/subscriptions\//i.test(anomaly.resourceId)) {
-    // Unknown non-ARM resource id — don't force Azure in the badge
-    if (anomaly.resourceId.includes('//') || anomaly.resourceId.startsWith('projects/')) return 'GCP';
-  }
-  return stored;
-}
-
-function providerBadge(p?: string | null): string {
-  const n = normalizeProvider(p);
-  if (n === 'AWS') return PROVIDER_BADGES.Aws;
-  if (n === 'GCP') return PROVIDER_BADGES.Gcp;
-  if (n === 'AZURE') return PROVIDER_BADGES.Azure;
-  return 'bg-gray-100 text-gray-600';
+function remediationProvider(action: RemediationAction): string {
+  return resolveCloudProvider({
+    provider: action.provider,
+    resourceId: action.resourceId,
+    id: action.playbookKey,
+    text: [action.title, action.reason, action.playbookKey].filter(Boolean).join('\n'),
+  });
 }
 
 export default function OperationsPage() {
@@ -258,9 +235,7 @@ function AnomalyCard({
             <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
               {KIND_LABELS[anomaly.kind] ?? anomaly.kind}
             </span>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${providerBadge(inferProvider(anomaly))}`}>
-              {inferProvider(anomaly)}
-            </span>
+            <ProviderBadge provider={anomalyProvider(anomaly)} />
             {anomaly.score != null && (
               <span className="text-xs text-gray-500">score {anomaly.score.toFixed(1)}</span>
             )}
@@ -272,7 +247,9 @@ function AnomalyCard({
             <p className="text-sm text-gray-600 mt-2">{anomaly.description}</p>
           )}
           {anomaly.resourceId && (
-            <p className="text-xs text-gray-400 font-mono mt-1 truncate">{anomaly.resourceId}</p>
+            <p className="text-xs text-gray-400 font-mono mt-1 truncate" title={anomaly.resourceId}>
+              {changeResourceLeafName(anomaly.resourceId)}
+            </p>
           )}
           {anomaly.observedValue != null && anomaly.baselineMean != null && (
             <p className="text-xs text-gray-500 mt-1">
@@ -348,7 +325,10 @@ const STATUS_COLORS: Record<string, string> = {
 function RemediationRow({ action }: { action: RemediationAction }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-3">
-      <p className="text-sm font-medium text-gray-900 truncate">{action.title}</p>
+      <div className="flex items-center gap-2 min-w-0">
+        <ProviderBadge provider={remediationProvider(action)} />
+        <p className="text-sm font-medium text-gray-900 truncate">{action.title}</p>
+      </div>
       <div className="flex items-center gap-2 mt-1 text-xs">
         <span className={`font-medium ${STATUS_COLORS[action.status] ?? 'text-gray-500'}`}>{action.status}</span>
         <span className="text-gray-400">·</span>
@@ -371,9 +351,7 @@ function CloudAccountRow({ account }: { account: CloudAccount }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
       <div className="flex items-center gap-2 min-w-0">
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${providerBadge(account.provider)}`}>
-          {normalizeProvider(account.provider)}
-        </span>
+        <ProviderBadge provider={account.provider} />
         <span className="text-sm text-gray-700 truncate">{account.displayName}</span>
       </div>
       <span className={`text-xs font-medium ${statusColor}`}>{account.status}</span>

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { useAdvisorRecommendations, usePolicyCompliance } from '../../lib/hooks';
+import { ProviderBadge, resolveCloudProvider, changeResourceLeafName } from '../../lib/cloud-scope';
 import type { Recommendation } from '../../lib/types';
 
 const ADVISOR_CATEGORIES = ['Cost', 'Security', 'Reliability', 'OperationalExcellence', 'Performance'];
@@ -113,6 +114,7 @@ export default function GovernancePage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr className="text-left text-gray-500">
+                      <th className="px-4 py-3 font-medium">Cloud</th>
                       <th className="px-4 py-3 font-medium">Recommendation</th>
                       <th className="px-4 py-3 font-medium">Category</th>
                       <th className="px-4 py-3 font-medium">Severity</th>
@@ -124,6 +126,16 @@ export default function GovernancePage() {
                   <tbody>
                     {advisorRecs.map((r) => (
                       <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
+                        <td className="px-4 py-3 align-top">
+                          <ProviderBadge
+                            provider={resolveCloudProvider({
+                              provider: r.provider,
+                              resourceId: r.resourceId,
+                              id: r.id,
+                              text: [r.title, r.description, r.category].filter(Boolean).join('\n'),
+                            })}
+                          />
+                        </td>
                         <td className="px-4 py-3">
                           <p className="font-medium text-gray-900">{r.title}</p>
                           {r.description && (
@@ -136,8 +148,8 @@ export default function GovernancePage() {
                         <td className="px-4 py-3">
                           <SeverityBadge severity={r.severity} />
                         </td>
-                        <td className="px-4 py-3 text-gray-600 text-xs font-mono truncate max-w-[200px]">
-                          {r.resourceId?.split('/').pop() ?? '—'}
+                        <td className="px-4 py-3 text-gray-600 text-xs font-mono truncate max-w-[200px]" title={r.resourceId}>
+                          {r.resourceId ? changeResourceLeafName(r.resourceId) : '—'}
                         </td>
                         <td className="px-4 py-3 text-green-600 font-medium">
                           {r.estimatedSavings ? `$${r.estimatedSavings.toLocaleString()}` : '—'}
@@ -149,7 +161,7 @@ export default function GovernancePage() {
                     ))}
                     {advisorRecs.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-12 text-center text-gray-400">
+                        <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
                           No advisor recommendations found.
                         </td>
                       </tr>
@@ -172,6 +184,7 @@ export default function GovernancePage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-gray-500">
+                    <th className="px-4 py-3 font-medium">Cloud</th>
                     <th className="px-4 py-3 font-medium">Policy</th>
                     <th className="px-4 py-3 font-medium">Category</th>
                     <th className="px-4 py-3 font-medium">Severity</th>
@@ -182,22 +195,38 @@ export default function GovernancePage() {
                 <tbody>
                   {policyRecs.map((r: any, i: number) => (
                     <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">{r.title ?? r.policyDefinitionName}</td>
+                      <td className="px-4 py-3 align-top">
+                        <ProviderBadge
+                          provider={resolveCloudProvider({
+                            provider: r.provider,
+                            resourceId: r.resourceId,
+                            id: r.policyAssignmentId ?? r.policyDefinitionId ?? r.id,
+                            text: [r.title, r.policyName, r.policyDefinitionName, r.category]
+                              .filter(Boolean)
+                              .join('\n'),
+                          })}
+                        />
+                      </td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        {r.title ?? r.policyName ?? r.policyDefinitionName}
+                      </td>
                       <td className="px-4 py-3 text-gray-600">{r.category ?? '—'}</td>
                       <td className="px-4 py-3">
                         <SeverityBadge severity={r.severity ?? 'medium'} />
                       </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs font-mono truncate max-w-[200px]">
-                        {r.resourceId?.split('/').pop() ?? '—'}
+                      <td className="px-4 py-3 text-gray-600 text-xs font-mono truncate max-w-[200px]" title={r.resourceId}>
+                        {r.resourceId ? changeResourceLeafName(r.resourceId) : '—'}
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-xs">
-                        {r.lastSeenAt ? new Date(r.lastSeenAt).toLocaleDateString() : '—'}
+                        {r.lastSeenAt || r.lastEvaluatedAt
+                          ? new Date(r.lastSeenAt ?? r.lastEvaluatedAt).toLocaleDateString()
+                          : '—'}
                       </td>
                     </tr>
                   ))}
                   {policyRecs.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-12 text-center text-gray-400">
+                      <td colSpan={6} className="px-4 py-12 text-center text-gray-400">
                         All policies are compliant. Great job!
                       </td>
                     </tr>

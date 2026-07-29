@@ -51,6 +51,7 @@ public sealed class RecommendationFunctions
                 Source = "advisor",
                 Id = r.RecommendationId,
                 ResourceId = r.ResourceId,
+                Provider = InferRecommendationProvider(r.RecommendationId, r.ResourceId),
                 Category = r.Category,
                 Severity = r.Impact,
                 Title = r.Title,
@@ -93,8 +94,11 @@ public sealed class RecommendationFunctions
                 r.PolicyName,
                 r.PolicyDefinitionId,
                 r.ResourceId,
+                Provider = InferRecommendationProvider(r.PolicyAssignmentId, r.ResourceId),
                 r.ComplianceState,
                 r.Category,
+                Title = r.PolicyName,
+                LastSeenAt = r.LastEvaluatedAt,
                 r.LastEvaluatedAt
             }).ToList(),
             Pagination = new PaginationDto { Offset = offset, Limit = limit, Total = records.Count }
@@ -130,6 +134,7 @@ public sealed class RecommendationFunctions
                 Source = "defender",
                 Id = f.FindingId,
                 ResourceId = f.ResourceId,
+                Provider = InferRecommendationProvider(f.FindingId, f.ResourceId),
                 Category = f.Categories?.FirstOrDefault() ?? "Security",
                 Severity = f.Severity,
                 Title = f.AssessmentName,
@@ -179,6 +184,19 @@ public sealed class RecommendationFunctions
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { Status = newStatus.ToString(), UpdatedAt = DateTime.UtcNow });
         return response;
+    }
+
+    /// <summary>
+    /// Prefer multi-cloud mint prefixes (aws-sh:, gcp-scc:, aws-ta:, …) then resource id shape.
+    /// </summary>
+    private static string InferRecommendationProvider(string? stableId, string? resourceId)
+    {
+        // Stable ids are often more reliable than resource ids for multi-cloud posture rows.
+        var fromId = CloudProviderInference.FromResource(stableId);
+        if (fromId is CloudProvider.Aws or CloudProvider.Gcp)
+            return fromId.ToString().ToLowerInvariant();
+
+        return CloudProviderInference.FromResource(resourceId, stableId).ToString().ToLowerInvariant();
     }
 
     private sealed class LifecycleUpdateRequest

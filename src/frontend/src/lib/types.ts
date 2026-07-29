@@ -167,6 +167,8 @@ export interface Recommendation {
   source: 'advisor' | 'policy' | 'defender';
   id: string;
   resourceId?: string;
+  /** Cloud provider (azure / aws / gcp), inferred when omitted. */
+  provider?: string;
   category: string;
   severity: string;
   title: string;
