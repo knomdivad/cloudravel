@@ -43,7 +43,9 @@ export default function SecurityPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold">Security Posture</h1>
-        <p className="text-sm text-gray-500 mt-1">Microsoft Defender for Cloud findings</p>
+        <p className="text-sm text-gray-500 mt-1">
+          Azure Defender findings plus multi-cloud inventory posture (AWS/GCP public exposure, open firewalls, and related checks).
+        </p>
       </div>
 
       {/* Severity Summary Cards */}

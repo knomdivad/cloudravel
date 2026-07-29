@@ -35,19 +35,40 @@ services:
     volumes:
       - mssql-data:/var/opt/mssql
 
-  # Cloud-agnostic secret store (Vault-API-compatible). Dev mode keeps secrets
-  # in memory with a fixed root token — fine for local; use a real OpenBao/Vault
-  # with persistent storage and proper auth in production.
+  # Cloud-agnostic secret store (Vault-API-compatible).
+  # Default: file storage under openbao-data (survives container restarts).
+  # Set OPENBAO_MODE=dev for the old in-memory -dev server (ephemeral secrets).
   openbao:
     image: docker.io/openbao/openbao:latest
-    command: server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200
+    # Persistent mode uses deploy/openbao/entrypoint.sh + config.hcl.
+    # Dev mode: in-memory, token always "root" (OPENBAO_TOKEN default).
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        if [ "$${OPENBAO_MODE:-file}" = "dev" ]; then
+          exec bao server -dev -dev-root-token-id=$${OPENBAO_TOKEN:-root} -dev-listen-address=0.0.0.0:8200
+        fi
+        tr -d '\015' < /openbao/config/entrypoint.sh > /tmp/openbao-entrypoint.sh
+        exec sh /tmp/openbao-entrypoint.sh
     environment:
-      BAO_DEV_ROOT_TOKEN_ID: root
-      BAO_ADDR: http://0.0.0.0:8200
+      BAO_ADDR: http://127.0.0.1:8200
+      OPENBAO_MODE: ${OPENBAO_MODE:-file}
+      OPENBAO_ROOT_TOKEN: ${OPENBAO_TOKEN:-root}
+      OPENBAO_CONFIG: /openbao/config/config.hcl
+      OPENBAO_DATA_DIR: /openbao/data
     cap_add:
       - IPC_LOCK
     ports:
       - "8200:8200"
+    volumes:
+      - openbao-data:/openbao/data
+      - ./deploy/openbao:/openbao/config:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || vault status >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
   # Azure Storage emulator — the Functions host requires AzureWebJobsStorage for
   # timer-trigger scheduling (used by the AIOps timers), even with no real Azure.
@@ -101,7 +122,7 @@ services:
       azurite:
         condition: service_started
       openbao:
-        condition: service_started
+        condition: service_healthy
       migrator:
         condition: service_completed_successfully
     environment:
@@ -115,8 +136,11 @@ services:
       # --- Database (also backs the DatabaseJobQueue — no Service Bus needed) ---
       SqlConnectionString: "Server=mssql,1433;Database=cloudraveldb;User ID=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;"
       # --- Secret store: OpenBao (cloud-agnostic) ---
+      # Leave OPENBAO_TOKEN empty for file mode so the API reads TokenFile.
+      # Set OPENBAO_TOKEN=root only with OPENBAO_MODE=dev.
       OpenBao__Address: "http://openbao:8200"
-      OpenBao__Token: ${OPENBAO_TOKEN:-root}
+      OpenBao__Token: ${OPENBAO_TOKEN:-}
+      OpenBao__TokenFile: /openbao-data/.cloudravel-root-token
       # --- Local auth signing key (required for the non-Entra login path) ---
       LocalAuth__JwtSigningKey: ${LOCAL_AUTH_JWT_SIGNING_KEY:-dev-only-change-me-in-production}
       # CORS allow-list (comma-separated). Browser SPA origin only — no wildcard.
@@ -141,6 +165,9 @@ services:
       AzureWebJobs.SyncAdvisorTimer.Disabled: "true"
       AzureWebJobs.SyncPolicyTimer.Disabled: "true"
       AzureWebJobs.SyncDefenderTimer.Disabled: "true"
+    volumes:
+      # Root token written by persistent OpenBao entrypoint (file mode).
+      - openbao-data:/openbao-data:ro
     ports:
       - "7071:80"
 
@@ -170,3 +197,4 @@ services:
 volumes:
   mssql-data:
   azurite-data:
+  openbao-data:

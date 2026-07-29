@@ -139,7 +139,14 @@ openbao:
   image: docker.io/openbao/openbao:latest
   service:
     port: 8200
-  # Dev mode is EPHEMERAL (in-memory). For production, disable and use external.
+  # mode: file (default) = file storage + auto-init/unseal entrypoint (persistent when
+  #   persistence.enabled). Single replica only — not HA.
+  # mode: dev = in-memory -dev server (secrets lost on restart; token from secrets.openBaoToken).
+  mode: file
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { memory: 256Mi }
@@ -147,6 +154,8 @@ openbao:
 # Used only when openbao.enabled=false.
 externalOpenBao:
   address: ""                      # e.g. https://vault.example.com:8200
+  # Optional path to a root/app token mounted into the API pod (preferred over embedding).
+  tokenFile: ""
 
 # Migration Job (runs as a Helm post-install/post-upgrade hook).
 migrator:

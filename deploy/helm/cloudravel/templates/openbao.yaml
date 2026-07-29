@@ -1,4 +1,39 @@
 {{- if .Values.openbao.enabled }}
+{{- $mode := .Values.openbao.mode | default "file" }}
+{{- $persist := and (eq $mode "file") .Values.openbao.persistence.enabled }}
+{{- if $persist }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cloudravel.openbao.fullname" . }}-data
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.openbao.persistence.size | quote }}
+  {{- with .Values.openbao.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+{{- end }}
+{{- if ne $mode "dev" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cloudravel.openbao.fullname" . }}-config
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao
+data:
+  config.hcl: |
+{{ .Files.Get "openbao/config.hcl" | indent 4 }}
+  entrypoint.sh: |
+{{ .Files.Get "openbao/entrypoint.sh" | indent 4 }}
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,6 +43,8 @@ metadata:
     app.kubernetes.io/component: openbao
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "openbao") | nindent 6 }}
@@ -19,9 +56,8 @@ spec:
       containers:
         - name: openbao
           image: {{ .Values.openbao.image }}
-          # Dev mode: in-memory, single unsealed node, fixed root token. EPHEMERAL
-          # — secrets are lost on restart. Disable this and use externalOpenBao
-          # (a real Vault/OpenBao) for production.
+          {{- if eq $mode "dev" }}
+          # EPHEMERAL: secrets are lost on restart.
           args:
             - server
             - -dev
@@ -34,6 +70,28 @@ spec:
                   key: openbao-token
             - name: BAO_ADDR
               value: http://0.0.0.0:8200
+          {{- else }}
+          command: ["sh", "/openbao/config/entrypoint.sh"]
+          env:
+            - name: BAO_ADDR
+              value: http://127.0.0.1:8200
+            - name: OPENBAO_CONFIG
+              value: /openbao/config/config.hcl
+            - name: OPENBAO_DATA_DIR
+              value: /openbao/data
+            - name: OPENBAO_ROOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cloudravel.secretName" . }}
+                  key: openbao-token
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /openbao/config
+              readOnly: true
+            - name: data
+              mountPath: /openbao/data
+          {{- end }}
           ports:
             - name: http
               containerPort: 8200
@@ -41,13 +99,29 @@ spec:
             capabilities:
               add: ["IPC_LOCK"]
           readinessProbe:
-            httpGet:
-              path: /v1/sys/health
-              port: http
-            initialDelaySeconds: 5
+            exec:
+              command:
+                - sh
+                - -c
+                - bao status >/dev/null 2>&1 || vault status >/dev/null 2>&1
+            initialDelaySeconds: 10
             periodSeconds: 10
           resources:
             {{- toYaml .Values.openbao.resources | nindent 12 }}
+      {{- if ne $mode "dev" }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "cloudravel.openbao.fullname" . }}-config
+            defaultMode: 0755
+        - name: data
+          {{- if $persist }}
+          persistentVolumeClaim:
+            claimName: {{ include "cloudravel.openbao.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
