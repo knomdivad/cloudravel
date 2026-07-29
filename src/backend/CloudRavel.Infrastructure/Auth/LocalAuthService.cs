@@ -63,7 +63,17 @@ public sealed class LocalAuthService : ILocalAuthService
             signingCredentials: creds);
 
         var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
-        await _userRepo.UpdateLastLoginAsync(user.UserId);
+
+        // Never fail login solely because last_login_at could not be written
+        // (e.g. transient SQL / session-option issues on the users table).
+        try
+        {
+            await _userRepo.UpdateLastLoginAsync(user.UserId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Login succeeded for {UserId} but UpdateLastLogin failed", user.UserId);
+        }
 
         _logger.LogInformation("Local login succeeded for user {UserId} ({Username})", user.UserId, username);
         return new LocalAuthResult { Token = tokenString, ExpiresAt = expiresAt, User = user };

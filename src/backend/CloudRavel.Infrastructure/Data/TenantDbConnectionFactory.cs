@@ -8,12 +8,15 @@ namespace CloudRavel.Infrastructure.Data;
 
 /// <summary>
 /// Creates SQL connections with tenant-scoped Row-Level Security via SESSION_CONTEXT.
-/// 
+///
 /// Every connection acquired via CreateConnectionAsync() sets:
 ///   SESSION_CONTEXT('tenant_id') = {tenantId}
-/// 
+///
 /// This ensures that all SQL RLS policies automatically filter data to the requesting tenant,
 /// providing defense-in-depth against cross-tenant data leakage.
+///
+/// Also forces QUOTED_IDENTIFIER / ANSI_NULLS ON so DML against tables with filtered
+/// indexes (e.g. users.username) succeeds — required for local login last_login updates.
 /// </summary>
 public sealed class TenantDbConnectionFactory : ITenantDbConnectionFactory
 {
@@ -32,9 +35,8 @@ public sealed class TenantDbConnectionFactory : ITenantDbConnectionFactory
     {
         var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
+        await ApplySessionOptionsAsync(connection);
 
-        // Set RLS session context — all subsequent queries on this connection
-        // are automatically filtered to this tenant
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = "EXEC sp_set_session_context @key = N'tenant_id', @value = @tenantId, @read_only = 1";
         cmd.Parameters.Add(new SqlParameter("@tenantId", tenantId));
@@ -48,13 +50,25 @@ public sealed class TenantDbConnectionFactory : ITenantDbConnectionFactory
     {
         var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
+        await ApplySessionOptionsAsync(connection);
 
-        // Admin connections set bypass_rls flag for system operations
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = "EXEC sp_set_session_context @key = N'bypass_rls', @value = 1, @read_only = 1";
         await cmd.ExecuteNonQueryAsync();
 
-        _logger.LogWarning("Opened admin connection with RLS bypass");
+        _logger.LogDebug("Opened admin connection with RLS bypass");
         return connection;
+    }
+
+    /// <summary>
+    /// Filtered indexes and some indexed views require these SET options.
+    /// sqlcmd defaults them OFF; ADO.NET is usually ON, but we set them
+    /// explicitly so every connection is consistent.
+    /// </summary>
+    private static async Task ApplySessionOptionsAsync(SqlConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;";
+        await cmd.ExecuteNonQueryAsync();
     }
 }
