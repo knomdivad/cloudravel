@@ -251,6 +251,8 @@ public sealed partial class GcpProviderAdapter : ICloudProviderAdapter
         string location = "global";
         string? propertiesJson = null;
         Dictionary<string, string>? tags = null;
+        string? dataDisplayName = null;
+        string? dataName = null;
 
         if (asset.TryGetProperty("resource", out var resource))
         {
@@ -265,11 +267,23 @@ public sealed partial class GcpProviderAdapter : ICloudProviderAdapter
                     foreach (var kv in labels.EnumerateObject())
                         tags[kv.Name] = kv.Value.GetString() ?? "";
                 }
+                // Prefer human fields over the full asset name path
+                if (data.TryGetProperty("displayName", out var dn) && dn.ValueKind == JsonValueKind.String)
+                    dataDisplayName = dn.GetString();
+                if (data.TryGetProperty("name", out var dname) && dname.ValueKind == JsonValueKind.String)
+                    dataName = dname.GetString();
             }
         }
 
-        // name format: //compute.googleapis.com/projects/{p}/zones/{z}/instances/{name}
-        var displayName = name.Contains('/') ? name[(name.LastIndexOf('/') + 1)..] : name;
+        // Full asset name: //compute.googleapis.com/projects/{p}/zones/{z}/instances/{name}
+        var leafFromPath = name.Contains('/') ? name[(name.LastIndexOf('/') + 1)..] : name;
+        var displayName =
+            FirstNonEmpty(
+                dataDisplayName,
+                tags != null && tags.TryGetValue("name", out var labelName) ? labelName : null,
+                // data.name is often the short instance/bucket name, not the // full path
+                IsShortName(dataName) ? dataName : null,
+                leafFromPath);
 
         return new InventoryResource
         {
@@ -279,11 +293,29 @@ public sealed partial class GcpProviderAdapter : ICloudProviderAdapter
             SubscriptionId = account.ExternalId,
             ResourceGroup = assetType.Split('/')[0].Replace(".googleapis.com", ""),
             ResourceType = assetType,
-            ResourceName = displayName,
+            ResourceName = displayName ?? leafFromPath,
             Location = location,
             Tags = tags is { Count: > 0 } ? tags : null,
             PropertiesJson = propertiesJson
         };
+    }
+
+    private static bool IsShortName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        // Reject full asset paths / self-links
+        if (value.StartsWith("//", StringComparison.Ordinal)) return false;
+        if (value.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return false;
+        if (value.Contains("/projects/", StringComparison.OrdinalIgnoreCase) && value.Count(c => c == '/') > 3)
+            return false;
+        return true;
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        foreach (var v in values)
+            if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+        return null;
     }
 
     private static Dictionary<string, JsonElement> ParseParameters(string? parametersJson)

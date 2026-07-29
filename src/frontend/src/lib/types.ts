@@ -89,8 +89,23 @@ export interface InventoryResponse {
 
 export interface InventoryResource {
   resourceId: string;
-  subscriptionId: string;
+  /** azure | aws | gcp */
+  provider?: string;
+  /** Azure | AWS | GCP */
+  cloud?: string;
+  /** subscription | account | project */
+  scopeKind?: string;
+  /** Azure subscription / AWS account id / GCP project id */
+  scopeId?: string;
+  /** Friendly linked account/project name when known */
+  scopeName?: string;
+  /** Parent cloud org (AWS org / GCP org / Azure connection) name */
+  cloudOrgName?: string;
+  azureTenantId?: string;
+  /** Azure RG / AWS service / GCP namespace */
   resourceGroup: string;
+  resourceGroupKind?: string;
+  subscriptionId: string;
   resourceType: string;
   resourceName: string;
   location: string;

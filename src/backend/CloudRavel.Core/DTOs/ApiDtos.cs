@@ -101,8 +101,25 @@ public sealed class InventoryResponse
 public sealed class InventoryResourceDto
 {
     public string ResourceId { get; set; } = string.Empty;
-    public string SubscriptionId { get; set; } = string.Empty;
+    /// <summary>azure | aws | gcp (normalized lower-case from inventory_resources.provider).</summary>
+    public string Provider { get; set; } = "azure";
+    /// <summary>Display label: Azure | AWS | GCP.</summary>
+    public string Cloud { get; set; } = "Azure";
+    /// <summary>subscription | account | project — meaning of <see cref="ScopeId"/>.</summary>
+    public string ScopeKind { get; set; } = "subscription";
+    /// <summary>Azure subscription GUID, AWS account id, or GCP project id.</summary>
+    public string ScopeId { get; set; } = string.Empty;
+    /// <summary>Friendly name when known (linked cloud_accounts.display_name).</summary>
+    public string? ScopeName { get; set; }
+    /// <summary>Parent cloud org (AWS org / GCP org / Azure connection) display name when known.</summary>
+    public string? CloudOrgName { get; set; }
+    /// <summary>Azure AD tenant id (external_id) when this row is under an Azure connection.</summary>
+    public string? AzureTenantId { get; set; }
+    /// <summary>Azure resource group, AWS service, or GCP asset type prefix — raw DB value.</summary>
     public string ResourceGroup { get; set; } = string.Empty;
+    /// <summary>UI label for resource group column: Resource group | Service | Namespace.</summary>
+    public string ResourceGroupKind { get; set; } = "Resource group";
+    public string SubscriptionId { get; set; } = string.Empty;
     public string ResourceType { get; set; } = string.Empty;
     public string ResourceName { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;

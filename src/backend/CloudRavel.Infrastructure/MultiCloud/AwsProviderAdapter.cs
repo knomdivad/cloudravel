@@ -255,19 +255,32 @@ public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
         var arnRegion = parts.Length > 3 && !string.IsNullOrEmpty(parts[3]) ? parts[3] : region;
         var resourcePart = parts.Length > 5 ? parts[5] : (parts.Length > 4 ? parts[4] : arn);
 
-        string resourceType = service, resourceName = resourcePart;
+        string resourceType = service, leafFromArn = resourcePart;
         var slashIdx = resourcePart.IndexOf('/');
         var colonIdx = resourcePart.IndexOf(':');
         if (slashIdx > 0)
         {
             resourceType = $"{service}/{resourcePart[..slashIdx]}";
-            resourceName = resourcePart[(slashIdx + 1)..];
+            // Prefer the last path segment as the human-facing name (e.g. loadbalancer/app/my-alb/abc → my-alb
+            // is imperfect; Name tag below wins when present).
+            leafFromArn = resourcePart[(resourcePart.LastIndexOf('/') + 1)..];
+            // For simple "type/name" keep name; for multi-segment ALB ARNs keep middle name when useful
+            var segments = resourcePart.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length >= 2 && segments[0] is "app" or "net")
+                leafFromArn = segments.Length >= 2 ? segments[1] : leafFromArn;
+            else if (segments.Length == 2)
+                leafFromArn = segments[1];
         }
         else if (colonIdx > 0)
         {
             resourceType = $"{service}/{resourcePart[..colonIdx]}";
-            resourceName = resourcePart[(colonIdx + 1)..];
+            leafFromArn = resourcePart[(colonIdx + 1)..];
         }
+
+        // Prefer AWS Name tag over opaque ids (i-…, vol-…, etc.)
+        var resourceName = TryAwsNameTag(tags) ?? leafFromArn;
+        if (string.IsNullOrWhiteSpace(resourceName) || resourceName.Equals(arn, StringComparison.Ordinal))
+            resourceName = leafFromArn;
 
         return new InventoryResource
         {
@@ -281,6 +294,17 @@ public sealed partial class AwsProviderAdapter : ICloudProviderAdapter
             Location = string.IsNullOrEmpty(arnRegion) ? "global" : arnRegion,
             Tags = tags is { Count: > 0 } ? tags : null
         };
+    }
+
+    private static string? TryAwsNameTag(Dictionary<string, string>? tags)
+    {
+        if (tags == null) return null;
+        foreach (var key in new[] { "Name", "name", "aws:cloudformation:stack-name" })
+        {
+            if (tags.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v))
+                return v.Trim();
+        }
+        return null;
     }
 
     private static string? ExtractArnResourceName(string? arn)

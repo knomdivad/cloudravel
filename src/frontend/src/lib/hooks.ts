@@ -59,6 +59,7 @@ export function useInventoryResources(
     resourceType?: string;
     subscriptionId?: string;
     resourceGroup?: string;
+    provider?: string;
     offset?: number;
     limit?: number;
   }

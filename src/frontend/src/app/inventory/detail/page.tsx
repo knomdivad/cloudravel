@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useTenant } from '@/contexts/TenantContext';
 import { api } from '@/lib/api';
+import { ProviderBadge, cloudLabel, normalizeCloudProvider, displayResourceName } from '@/lib/cloud-scope';
 
 interface ResourceDetail {
   resourceId: string;
@@ -21,6 +22,14 @@ interface ResourceDetail {
   propertiesJson?: string;
   networkingJson?: string;
   securityConfigJson?: string;
+  provider?: string;
+  cloud?: string;
+  scopeKind?: string;
+  scopeId?: string;
+  scopeName?: string;
+  cloudOrgName?: string;
+  azureTenantId?: string;
+  resourceGroupKind?: string;
 }
 
 interface ResourceChange {
@@ -117,20 +126,79 @@ function ResourceDetailContent() {
     { id: 'changes' as const, label: `Changes (${changes.length})` },
   ];
 
+  const provider = resource.provider || resource.cloud;
+  const scopeKind =
+    resource.scopeKind ||
+    (normalizeCloudProvider(provider) === 'aws'
+      ? 'account'
+      : normalizeCloudProvider(provider) === 'gcp'
+        ? 'project'
+        : 'subscription');
+  const scopeId = resource.scopeId || resource.subscriptionId;
+  const rgKind = resource.resourceGroupKind || 'Resource group';
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <button onClick={() => router.back()} className="text-sm text-blue-600 hover:text-blue-800 mb-2 flex items-center gap-1">
             ← Back to Inventory
           </button>
-          <h1 className="text-2xl font-bold text-gray-900">{resource.resourceName}</h1>
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <ProviderBadge provider={provider} />
+            {resource.cloudOrgName && (
+              <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">{resource.cloudOrgName}</span>
+            )}
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900">{displayResourceName(resource)}</h1>
           <p className="text-sm text-gray-500 mt-1 font-mono break-all">{resource.resourceId}</p>
         </div>
-        <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
+        <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full shrink-0">
           {resource.resourceType === 'microsoft.resources/subscriptions' ? 'Subscription' : resource.resourceType}
         </span>
+      </div>
+
+      {/* Cloud context */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-3">Cloud context</h3>
+        <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+          <div>
+            <dt className="text-gray-400 text-xs">Cloud</dt>
+            <dd className="font-medium text-gray-900">{resource.cloud || cloudLabel(provider)}</dd>
+          </div>
+          <div>
+            <dt className="text-gray-400 text-xs">
+              {scopeKind === 'account' ? 'Account' : scopeKind === 'project' ? 'Project' : 'Subscription'}
+            </dt>
+            <dd className="font-medium text-gray-900">
+              {resource.scopeName || scopeId || '—'}
+              {resource.scopeName && scopeId && resource.scopeName !== scopeId && (
+                <span className="block text-xs font-mono text-gray-400 mt-0.5">{scopeId}</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-400 text-xs">Cloud organization</dt>
+            <dd className="font-medium text-gray-900">{resource.cloudOrgName || '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-gray-400 text-xs">
+              {normalizeCloudProvider(provider) === 'azure' ? 'Azure tenant' : 'Workspace'}
+            </dt>
+            <dd className="font-medium text-gray-900 font-mono text-xs break-all">
+              {resource.azureTenantId || selectedTenant || '—'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-400 text-xs">{rgKind}</dt>
+            <dd className="font-medium text-gray-900">{resource.resourceGroup || '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-gray-400 text-xs">Location</dt>
+            <dd className="font-medium text-gray-900">{resource.location || '—'}</dd>
+          </div>
+        </dl>
       </div>
 
       {/* Tabs */}
