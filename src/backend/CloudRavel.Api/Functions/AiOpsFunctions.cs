@@ -84,11 +84,13 @@ public sealed class AiOpsFunctions
         var limit = int.TryParse(query["limit"], out var l) ? Math.Min(l, 500) : 100;
 
         var anomalies = await _anomalyRepo.GetAnomaliesAsync(tenantId, status, severity, kind, offset, limit);
+        var estate = await ResolveEstateProviderAsync(tenantId);
+        await PersistCorrectedProvidersAsync(tenantId, anomalies, estate);
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new AnomaliesResponse
         {
-            Anomalies = anomalies.Select(ToDto).ToList(),
+            Anomalies = anomalies.Select(a => ToDto(a, estate)).ToList(),
             Pagination = new PaginationDto { Offset = offset, Limit = limit, Total = anomalies.Count }
         });
         return response;
@@ -958,6 +960,8 @@ public sealed class AiOpsFunctions
         var pendingApprovals = await _remediationRepo.GetPendingApprovalCountAsync(tenantId);
         var recentActions = await _remediationRepo.GetActionsAsync(tenantId, limit: 100);
         var cloudAccounts = await _cloudAccountRepo.GetByTenantAsync(tenantId);
+        var estate = await ResolveEstateProviderAsync(tenantId, cloudAccounts);
+        await PersistCorrectedProvidersAsync(tenantId, openAnomalies, estate);
 
         var now = DateTime.UtcNow;
         var week = now.AddDays(-7);
@@ -984,7 +988,7 @@ public sealed class AiOpsFunctions
             MeanTimeToResolveHours = resolvedWithTimes.Count > 0 ? Math.Round(resolvedWithTimes.Average(), 1) : null,
             AutoRemediationMode = tenant?.AutoRemediationMode.ToString() ?? "Gated",
             MonitoringEnabled = tenant?.AiOpsMonitoringEnabled ?? true,
-            RecentAnomalies = openAnomalies.Take(10).Select(ToDto).ToList(),
+            RecentAnomalies = openAnomalies.Take(10).Select(a => ToDto(a, estate)).ToList(),
             RecentIncidents = activeIncidents.Take(10).Select(i => ToDto(i, null)).ToList(),
             RecentRemediations = recentActions.Take(10).Select(ToDto).ToList(),
             CloudAccounts = cloudAccounts.Select(a => ToDto(a)).ToList()
@@ -996,24 +1000,86 @@ public sealed class AiOpsFunctions
     // Mapping + helpers
     // ========================================================================
 
-    private static AnomalyDto ToDto(Anomaly a) => new()
+    private static AnomalyDto ToDto(Anomaly a, CloudProvider? estateDefault = null)
     {
-        Id = a.Id,
-        Kind = a.Kind.ToString(),
-        Severity = a.Severity.ToString(),
-        Status = a.Status.ToString(),
-        Provider = a.Provider.ToString(),
-        Title = a.Title,
-        Description = a.Description,
-        ResourceId = a.ResourceId,
-        MetricName = a.MetricName,
-        ObservedValue = a.ObservedValue,
-        BaselineMean = a.BaselineMean,
-        Score = a.Score,
-        DetectedAt = a.DetectedAt,
-        LastSeenAt = a.LastSeenAt,
-        IncidentId = a.IncidentId
-    };
+        var provider = CloudProviderInference.Correct(a, estateDefault);
+        return new AnomalyDto
+        {
+            Id = a.Id,
+            Kind = a.Kind.ToString(),
+            Severity = a.Severity.ToString(),
+            Status = a.Status.ToString(),
+            Provider = provider.ToString(),
+            Title = a.Title,
+            Description = a.Description,
+            ResourceId = a.ResourceId,
+            MetricName = a.MetricName,
+            ObservedValue = a.ObservedValue,
+            BaselineMean = a.BaselineMean,
+            Score = a.Score,
+            DetectedAt = a.DetectedAt,
+            LastSeenAt = a.LastSeenAt,
+            IncidentId = a.IncidentId
+        };
+    }
+
+    /// <summary>
+    /// Dominant provider for this workspace from linked cloud accounts + inventory sample.
+    /// Used so GCP-only estates don't keep Azure badges on tenant-wide anomalies.
+    /// </summary>
+    private async Task<CloudProvider?> ResolveEstateProviderAsync(
+        Guid tenantId, IReadOnlyList<CloudAccount>? accounts = null)
+    {
+        accounts ??= await _cloudAccountRepo.GetByTenantAsync(tenantId);
+        var active = accounts.Where(a => a.Status != CloudAccountStatus.Disconnected).ToList();
+        if (active.Count > 0)
+        {
+            var providers = active.Select(a => a.Provider).Distinct().ToList();
+            // Homogeneous multi-cloud estate (all GCP or all AWS) → that provider.
+            if (providers.Count == 1)
+                return providers[0];
+            // No Azure accounts linked → majority among AWS/GCP.
+            var nonAzure = active.Where(a => a.Provider != CloudProvider.Azure).ToList();
+            if (nonAzure.Count == active.Count && nonAzure.Count > 0)
+                return nonAzure.GroupBy(a => a.Provider).OrderByDescending(g => g.Count()).First().Key;
+        }
+
+        try
+        {
+            var sample = await _inventoryRepo.GetResourcesAsync(tenantId, limit: 80);
+            if (sample.Count == 0) return null;
+            return sample
+                .Select(r => CloudProviderInference.FromResource(r.ResourceId, r.Provider))
+                .GroupBy(p => p)
+                .OrderByDescending(g => g.Count())
+                .First()
+                .Key;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Persist corrected providers so subsequent reads and UI stay accurate.</summary>
+    private async Task PersistCorrectedProvidersAsync(
+        Guid tenantId, IReadOnlyList<Anomaly> anomalies, CloudProvider? estateDefault)
+    {
+        foreach (var a in anomalies)
+        {
+            var corrected = CloudProviderInference.Correct(a, estateDefault);
+            if (corrected == a.Provider) continue;
+            try
+            {
+                await _anomalyRepo.UpdateProviderAsync(tenantId, a.Id, corrected);
+                a.Provider = corrected;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not persist corrected provider for anomaly {Id}", a.Id);
+            }
+        }
+    }
 
     private static IncidentDto ToDto(Incident i, IReadOnlyList<IncidentEvent>? events) => new()
     {

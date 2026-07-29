@@ -158,6 +158,14 @@ public sealed class AnomalyRepository : IAnomalyRepository
             new { TenantId = tenantId, Id = anomalyId, IncidentId = incidentId });
     }
 
+    public async Task UpdateProviderAsync(Guid tenantId, long anomalyId, CloudProvider provider)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        await conn.ExecuteAsync(
+            "UPDATE anomalies SET provider = @Provider WHERE tenant_id = @TenantId AND id = @Id",
+            new { TenantId = tenantId, Id = anomalyId, Provider = provider.ToString() });
+    }
+
     public async Task ResolveByFingerprintAsync(Guid tenantId, string fingerprint)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();

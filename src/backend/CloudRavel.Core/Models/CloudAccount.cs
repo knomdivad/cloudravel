@@ -75,6 +75,79 @@ public static class CloudProviderInference
         if (counts.Count == 0) return CloudProvider.Azure;
         return counts.OrderByDescending(kv => kv.Value).First().Key;
     }
+
+    /// <summary>
+    /// Correct a stored anomaly provider using resource id, free-text signals, and an
+    /// optional estate default (e.g. majority inventory provider for the workspace).
+    /// Fixes rows written before multi-cloud inference existed (stuck on Azure).
+    /// </summary>
+    public static CloudProvider Correct(Anomaly anomaly, CloudProvider? estateDefault = null)
+    {
+        var blob = string.Join('\n',
+            anomaly.ResourceId,
+            anomaly.Title,
+            anomaly.Description,
+            anomaly.DetailsJson,
+            anomaly.MetricName,
+            anomaly.Fingerprint);
+
+        if (LooksGcp(blob)) return CloudProvider.Gcp;
+        if (LooksAws(blob)) return CloudProvider.Aws;
+
+        if (!string.IsNullOrWhiteSpace(anomaly.ResourceId))
+        {
+            var fromId = FromResource(anomaly.ResourceId);
+            // Only trust Azure from resource id when the id looks like ARM.
+            if (fromId != CloudProvider.Azure || LooksAzure(blob))
+                return fromId;
+        }
+
+        // Tenant-wide anomalies (no resource) with a historical Azure default:
+        // prefer the estate's dominant provider when the text isn't Azure-specific.
+        if (anomaly.Provider == CloudProvider.Azure
+            && estateDefault is CloudProvider.Gcp or CloudProvider.Aws
+            && !LooksAzure(blob))
+            return estateDefault.Value;
+
+        return anomaly.Provider;
+    }
+
+    public static bool LooksGcp(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return text.Contains("googleapis.com", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("gcp-", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("gcp:", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("\"GCP\"", StringComparison.Ordinal)
+               || text.Contains("Security Command Center", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Cloud Storage", StringComparison.OrdinalIgnoreCase)
+                  && text.Contains("publicAccessPrevention", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("compute.googleapis.com", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("storage.googleapis.com", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("//cloudresourcemanager.googleapis.com/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool LooksAws(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return text.Contains("arn:aws:", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("aws-s3-", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("aws-sh:", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("aws-sg-", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("\"AWS\"", StringComparison.Ordinal)
+               || text.Contains("Security Hub", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Trusted Advisor", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool LooksAzure(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return text.Contains("/subscriptions/", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("providers/Microsoft.", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Microsoft Defender", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Azure Advisor", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Lighthouse", StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>

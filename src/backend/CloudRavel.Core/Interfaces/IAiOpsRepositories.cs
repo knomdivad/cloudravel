@@ -25,6 +25,8 @@ public interface IAnomalyRepository
     Task LinkToIncidentAsync(Guid tenantId, long anomalyId, long incidentId);
     /// <summary>Auto-resolve open anomalies of a kind whose condition no longer holds.</summary>
     Task ResolveByFingerprintAsync(Guid tenantId, string fingerprint);
+    /// <summary>Update only the provider column (used to backfill multi-cloud labels).</summary>
+    Task UpdateProviderAsync(Guid tenantId, long anomalyId, CloudProvider provider);
 
     Task<MetricBaseline?> GetBaselineAsync(Guid tenantId, string metricKey);
     Task UpsertBaselineAsync(MetricBaseline baseline);
