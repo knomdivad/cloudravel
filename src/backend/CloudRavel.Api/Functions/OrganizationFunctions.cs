@@ -104,14 +104,39 @@ public sealed class OrganizationFunctions
             ? "Production"
             : "Development";
 
+        var orgId = Guid.NewGuid();
+        var name = body.Name.Trim();
+        var createdBy = context.GetUserId() ?? Guid.Empty;
+
         var org = await _orgRepo.CreateAsync(new Organization
         {
-            OrgId = Guid.NewGuid(),
-            Name = body.Name.Trim(),
+            OrgId = orgId,
+            Name = name,
             Environment = environment,
             Status = "active",
             CreatedBy = context.GetActor()
         });
+
+        // user_tenant_access.tenant_id FK → tenants.tenant_id. Materialize a
+        // workspace shell immediately so org membership (and AIOps policy rows)
+        // work before any cloud is connected. Azure fields are placeholders until
+        // POST /organizations/{id}/azure (or AWS/GCP) attaches real clouds.
+        if (await _tenantRepo.GetByIdAsync(orgId) == null)
+        {
+            await _tenantRepo.CreateAsync(new Tenant
+            {
+                TenantId = orgId,
+                DisplayName = name,
+                AzureTenantId = WorkspaceTenantPlaceholders.AzureTenantId,
+                OnboardingMethod = OnboardingMethod.Lighthouse,
+                Status = TenantStatus.Active,
+            }, createdBy);
+        }
+
+        // Creator is org_admin of the new workspace (system_admin already has
+        // implicit access; this also keeps membership lists accurate).
+        if (createdBy != Guid.Empty)
+            await _userRepo.GrantTenantAccessAsync(createdBy, orgId, OrgRole.OrgAdmin, createdBy);
 
         _logger.LogInformation("Created organization {OrgId} ({Name})", org.OrgId, org.Name);
 
@@ -201,16 +226,14 @@ public sealed class OrganizationFunctions
             }));
         }
 
-        // The FIRST Azure connection for this workspace also materializes the
-        // legacy `tenants` row: workspace-level policy (AutoRemediationMode,
-        // AiOpsMonitoringEnabled, snapshot/change-poll cadence) lives there, and
-        // the scheduler timers (CollectInventoryTimer, PollChangesTimer, ...)
-        // enumerate `tenants` to know which workspaces to run at all. A 2nd+
-        // connection skips this — tenant_id is the workspace's PK, already taken.
+        // Workspace `tenants` row: created as a shell at org creation (for RBAC
+        // FK / AIOps). First Azure connection fills real Azure fields; later
+        // connections leave the workspace row alone (cloud_orgs holds peers).
         var existingWorkspaceTenant = await _tenantRepo.GetByIdAsync(orgId);
+        var createdBy = context.GetUserId() ?? Guid.Empty;
         if (existingWorkspaceTenant == null)
         {
-            var tenant = new Tenant
+            await _tenantRepo.CreateAsync(new Tenant
             {
                 TenantId = orgId,
                 DisplayName = body.DisplayName.Trim(),
@@ -219,13 +242,21 @@ public sealed class OrganizationFunctions
                 Status = TenantStatus.Active,
                 LighthouseDelegationId = body.LighthouseDelegationId,
                 SecretName = credentialSecretName
-            };
-            var createdBy = context.GetUserId() ?? Guid.Empty;
-            await _tenantRepo.CreateAsync(tenant, createdBy);
-
-            if (body.SubscriptionIds is { Count: > 0 })
-                await _tenantRepo.AddSubscriptionsAsync(orgId, body.SubscriptionIds);
+            }, createdBy);
         }
+        else if (string.Equals(existingWorkspaceTenant.AzureTenantId, WorkspaceTenantPlaceholders.AzureTenantId, StringComparison.OrdinalIgnoreCase)
+                 || string.IsNullOrWhiteSpace(existingWorkspaceTenant.AzureTenantId))
+        {
+            existingWorkspaceTenant.DisplayName = body.DisplayName.Trim();
+            existingWorkspaceTenant.AzureTenantId = azureTenantId;
+            existingWorkspaceTenant.OnboardingMethod = method;
+            existingWorkspaceTenant.LighthouseDelegationId = body.LighthouseDelegationId;
+            existingWorkspaceTenant.SecretName = credentialSecretName ?? existingWorkspaceTenant.SecretName;
+            await _tenantRepo.UpdateAsync(existingWorkspaceTenant);
+        }
+
+        if (body.SubscriptionIds is { Count: > 0 })
+            await _tenantRepo.AddSubscriptionsAsync(orgId, body.SubscriptionIds);
 
         _logger.LogInformation("Connected Azure tenant {AzureTenantId} ({OnboardingMethod}) to organization {OrgId}",
             azureTenantId, method, orgId);
