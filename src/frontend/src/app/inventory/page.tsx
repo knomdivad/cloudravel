@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { useInventoryResources, useInventorySummary } from '../../lib/hooks';
-import { CloudScopeCell, scopeKindLabel } from '../../lib/cloud-scope';
+import { CloudScopeCell, scopeKindLabel, displayResourceName } from '../../lib/cloud-scope';
 
 const PAGE_SIZE = 50;
 
@@ -190,11 +190,13 @@ export default function InventoryPage() {
                           href={`/inventory/detail?id=${encodeURIComponent(r.resourceId)}`}
                           className="text-azure-600 hover:underline font-medium"
                         >
-                          {r.resourceName}
+                          {displayResourceName(r)}
                         </a>
-                        <p className="text-[11px] text-gray-400 font-mono truncate max-w-xs mt-0.5" title={r.resourceId}>
-                          {r.resourceId}
-                        </p>
+                        {displayResourceName(r) !== r.resourceId && (
+                          <p className="text-[11px] text-gray-400 font-mono truncate max-w-xs mt-0.5" title={r.resourceId}>
+                            {r.resourceId}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-600 align-top">
                         {r.resourceType.split('/').slice(-1)[0]}

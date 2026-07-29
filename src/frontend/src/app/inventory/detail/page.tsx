@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useTenant } from '@/contexts/TenantContext';
 import { api } from '@/lib/api';
-import { ProviderBadge, cloudLabel, normalizeCloudProvider } from '@/lib/cloud-scope';
+import { ProviderBadge, cloudLabel, normalizeCloudProvider, displayResourceName } from '@/lib/cloud-scope';
 
 interface ResourceDetail {
   resourceId: string;
@@ -151,7 +151,7 @@ function ResourceDetailContent() {
               <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">{resource.cloudOrgName}</span>
             )}
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">{resource.resourceName}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{displayResourceName(resource)}</h1>
           <p className="text-sm text-gray-500 mt-1 font-mono break-all">{resource.resourceId}</p>
         </div>
         <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full shrink-0">

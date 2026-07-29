@@ -225,13 +225,66 @@ public sealed class InventoryFunctions
             ResourceGroupKind = rgKind,
             SubscriptionId = r.SubscriptionId,
             ResourceType = r.ResourceType,
-            ResourceName = r.ResourceName,
+            ResourceName = FriendlyResourceName(r),
             Location = r.Location,
             SkuName = r.SkuName,
             SkuTier = r.SkuTier,
             Tags = r.Tags,
             IdentityType = r.IdentityType
         };
+    }
+
+    /// <summary>
+    /// Prefer a human-readable name over full ARNs / Cloud Asset paths for list UI.
+    /// </summary>
+    private static string FriendlyResourceName(InventoryResource r)
+    {
+        // AWS Name tag / GCP label often already stored on Tags
+        if (r.Tags != null)
+        {
+            foreach (var key in new[] { "Name", "name", "displayName" })
+            {
+                if (r.Tags.TryGetValue(key, out var tag) && !string.IsNullOrWhiteSpace(tag)
+                    && !LooksLikeFullResourceId(tag))
+                    return tag.Trim();
+            }
+        }
+
+        var name = r.ResourceName?.Trim() ?? "";
+        if (!string.IsNullOrEmpty(name) && !LooksLikeFullResourceId(name) && name != r.ResourceId)
+            return name;
+
+        var leaf = LeafName(r.ResourceId);
+        if (!string.IsNullOrEmpty(leaf) && !LooksLikeFullResourceId(leaf))
+            return leaf;
+
+        return !string.IsNullOrEmpty(name) ? name : r.ResourceId;
+    }
+
+    private static bool LooksLikeFullResourceId(string value) =>
+        value.StartsWith("arn:", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("//", StringComparison.Ordinal)
+        || value.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+        || (value.Contains("/projects/", StringComparison.OrdinalIgnoreCase) && value.Count(c => c == '/') >= 4)
+        || (value.StartsWith("/subscriptions/", StringComparison.OrdinalIgnoreCase) && value.Count(c => c == '/') >= 6);
+
+    private static string? LeafName(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        // ARN: last path segment after final / (or full resource part for s3:::bucket)
+        if (id.StartsWith("arn:", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = id.Split(':', 6);
+            var resourcePart = parts.Length > 5 ? parts[5] : id;
+            if (string.IsNullOrEmpty(resourcePart) && parts.Length > 4)
+                resourcePart = parts[^1];
+            if (resourcePart.Contains('/'))
+                return resourcePart[(resourcePart.LastIndexOf('/') + 1)..];
+            return resourcePart;
+        }
+        if (id.Contains('/'))
+            return id[(id.LastIndexOf('/') + 1)..];
+        return id;
     }
 
     private static string NormalizeProvider(string? provider, string resourceId)

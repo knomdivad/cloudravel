@@ -90,6 +90,46 @@ export function scopeKindLabel(resource: InventoryResource): string {
   return 'Resource group';
 }
 
+/**
+ * Human-facing name for list/detail. Prefer resourceName / Name tag; never lead with full ARN or asset path.
+ */
+export function displayResourceName(resource: InventoryResource): string {
+  const tags = resource.tags;
+  if (tags) {
+    for (const key of ['Name', 'name', 'displayName']) {
+      const v = tags[key];
+      if (v && !looksLikeFullId(v)) return v;
+    }
+  }
+  const name = (resource.resourceName || '').trim();
+  if (name && !looksLikeFullId(name) && name !== resource.resourceId) return name;
+  const leaf = leafName(resource.resourceId);
+  if (leaf && !looksLikeFullId(leaf)) return leaf;
+  return name || leaf || resource.resourceId || '—';
+}
+
+function looksLikeFullId(value: string): boolean {
+  return (
+    value.startsWith('arn:') ||
+    value.startsWith('//') ||
+    value.startsWith('https://') ||
+    (value.includes('/projects/') && (value.match(/\//g) || []).length >= 4) ||
+    (value.startsWith('/subscriptions/') && (value.match(/\//g) || []).length >= 6)
+  );
+}
+
+function leafName(id?: string): string {
+  if (!id) return '';
+  if (id.startsWith('arn:')) {
+    const parts = id.split(':');
+    const resourcePart = parts.length > 5 ? parts.slice(5).join(':') : parts[parts.length - 1] || '';
+    if (resourcePart.includes('/')) return resourcePart.slice(resourcePart.lastIndexOf('/') + 1);
+    return resourcePart;
+  }
+  if (id.includes('/')) return id.slice(id.lastIndexOf('/') + 1);
+  return id;
+}
+
 function truncateId(id: string, max = 18): string {
   if (!id) return '';
   if (id.length <= max) return id;
