@@ -26,7 +26,7 @@ BEGIN
     WHERE user_id = (
         SELECT TOP (1) user_id FROM users
         WHERE auth_provider = 'local'
-        ORDER BY CASE WHEN username = 'admin' THEN 0 ELSE 1 END, created_at
+        ORDER BY CASE WHEN username IN ('admin@local', 'admin') OR email = 'admin@local' THEN 0 ELSE 1 END, created_at
     );
 END
 GO

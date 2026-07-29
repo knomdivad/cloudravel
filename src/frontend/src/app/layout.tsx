@@ -141,12 +141,13 @@ function LoginPage() {
 
         <form onSubmit={handleLocalLogin} className="text-left space-y-3">
           <div>
-            <label className="text-xs text-gray-500 block mb-1">Username</label>
+            <label className="text-xs text-gray-500 block mb-1">Email</label>
             <input
-              type="text"
+              type="email"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
+              placeholder="admin@local"
               required
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-azure-500 focus:outline-none"
             />

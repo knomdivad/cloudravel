@@ -37,6 +37,7 @@ MIGRATIONS=(
   010-admin-rbac
   011-ensure-bootstrap-admin
   012-rls-hardening
+  013-email-as-username
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

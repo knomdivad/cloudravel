@@ -49,19 +49,26 @@ WHERE o.status = 'active'
   AND NOT EXISTS (SELECT 1 FROM tenants t WHERE t.tenant_id = o.org_id);
 GO
 
--- Deduplicate empty emails so later creates with a real address are not blocked
--- by lookup ambiguity (assign username@local when email is blank).
+-- Align blank emails / legacy admin username with email-as-login identity.
 UPDATE users
-SET email = COALESCE(NULLIF(LTRIM(RTRIM(username)), '') + '@local', CAST(user_id AS NVARCHAR(36)) + '@local')
-WHERE auth_provider = 'local'
-  AND (email IS NULL OR LTRIM(RTRIM(email)) = '');
+SET email = LOWER(COALESCE(NULLIF(LTRIM(RTRIM(username)), ''), CAST(user_id AS NVARCHAR(36))) + '@local')
+WHERE email IS NULL OR LTRIM(RTRIM(email)) = '';
+
+UPDATE users SET email = LOWER(LTRIM(RTRIM(email)));
+
+UPDATE users
+SET username = 'admin@local', email = 'admin@local'
+WHERE auth_provider = 'local' AND (username = 'admin' OR email IN ('admin', 'admin@local'));
+
+UPDATE users SET username = email
+WHERE auth_provider = 'local' AND (username IS NULL OR username <> email);
 GO
 
 INSERT INTO user_tenant_access (user_id, tenant_id, role, granted_by)
 SELECT u.user_id, o.org_id, 'org_admin', u.user_id
 FROM users u
 CROSS JOIN organizations o
-WHERE u.username = 'admin' AND u.auth_provider = 'local'
+WHERE u.auth_provider = 'local' AND (u.username = 'admin@local' OR u.email = 'admin@local')
   AND o.status = 'active'
   AND NOT EXISTS (
       SELECT 1 FROM user_tenant_access uta

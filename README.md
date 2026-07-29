@@ -9,7 +9,7 @@ management, and gated auto-remediation** from a single control plane, with an AI
 operations assistant (any OpenAI-compatible model — configurable endpoint and API key).
 
 > **Status:** Actively hardened for multi-tenant use. The local Docker/OrbStack stack
-> and Helm chart are the supported run paths. Treat default credentials (`admin` /
+> and Helm chart are the supported run paths. Treat default credentials (`admin@local` /
 > `ChangeMe123!`, OpenBao `root`) as **local-dev only**. See **Known limitations**
 > below before production deployment.
 
@@ -17,7 +17,7 @@ operations assistant (any OpenAI-compatible model — configurable endpoint and 
 
 | Area | Reality today |
 |---|---|
-| Default credentials | Seeded `admin` / `ChangeMe123!` and OpenBao token `root` are for local/dev only |
+| Default credentials | Seeded `admin@local` / `ChangeMe123!` and OpenBao token `root` are for local/dev only |
 | Org SSO UI | Settings are stored; **login federation is not enforced** (`enforcementStatus: not_implemented`) |
 | Live cloud collection | Requires `Platform:Environment=Production` and real cloud credentials |
 | Lighthouse ARM generation | Manual / customer-side process — not fully automated in-app |
@@ -137,7 +137,7 @@ make up          # build + start detached (safe to close the shell)
 - API: http://localhost:7071/api
 - First boot applies schema migrations (`001`–`012`) automatically and creates
   a default local **system admin** only (no demo orgs/clouds):
-  **username `admin`, password `ChangeMe123!`** — change this immediately
+  **email `admin@local`, password `ChangeMe123!`** — change this immediately
   outside of local/dev use; the hash is public (it's in source control).
   Optional Contoso demo rows: run `database/seed-demo-data.sql` manually.
 
@@ -209,7 +209,7 @@ The repo ships a self-contained, **cloud-agnostic** stack — SQL Server, OpenBa
 (secret store), the Azure Storage emulator, the Functions API, and the Next.js
 UI — so `docker compose up` brings everything up with no dependency on any
 Azure-only service. Schema migrations run automatically; the only seed is the
-bootstrap `admin` user (no demo organization or inventory).
+bootstrap `admin@local` user (no demo organization or inventory).
 
 ```bash
 cp .env.example .env
@@ -221,7 +221,7 @@ docker compose up --build
 
 Then open **http://localhost:3000** and sign in with the bootstrap local admin:
 
-> username **`admin`** · password **`ChangeMe123!`**  *(dev default — change it)*
+> email **`admin@local`** · password **`ChangeMe123!`**  *(dev default — change it)*
 
 Create your organization, users, and cloud connections in the UI. Optional
 Contoso demo dataset: apply `database/seed-demo-data.sql` manually after migrate.
@@ -524,7 +524,7 @@ helm install cloudravel oci://ghcr.io/<owner>/charts/cloudravel \
 Out of the box this brings up bundled `mssql` (Azure SQL Edge), `azurite`, and `openbao`
 plus the `api` and `web` deployments; a one-time migration Job creates the schema and the
 API becomes Ready once it completes. Reach the UI at the ingress host (or
-`kubectl port-forward svc/cloudravel-web 8080:80`). Default login: **`admin` /
+`kubectl port-forward svc/cloudravel-web 8080:80`). Default login: **`admin@local` /
 `ChangeMe123!`** — change it immediately.
 
 **Use external managed services** instead of a bundled dependency by disabling it and

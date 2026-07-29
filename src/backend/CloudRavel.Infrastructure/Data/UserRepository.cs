@@ -38,19 +38,18 @@ public sealed class UserRepository : IUserRepository
     public async Task<User?> GetByEmailAsync(string email)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
-        // FirstOrDefault: email is not unique in the schema; Single throws (500) when
-        // multiple rows share an address (common after blank-email creates + retries).
-        var sql = $"{SelectColumns} WHERE email = @Email ORDER BY created_at";
+        var sql = $"{SelectColumns} WHERE LOWER(email) = LOWER(@Email)";
 
-        return await conn.QueryFirstOrDefaultAsync<User>(sql, new { Email = email });
+        return await conn.QueryFirstOrDefaultAsync<User>(sql, new { Email = email.Trim() });
     }
 
     public async Task<User?> GetByUsernameAsync(string username)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
-        var sql = $"{SelectColumns} WHERE username = @Username AND auth_provider = 'local'";
+        // Local login identity is email; username is stored equal to email (case-insensitive).
+        var sql = $"{SelectColumns} WHERE auth_provider = 'local' AND LOWER(username) = LOWER(@Username)";
 
-        return await conn.QuerySingleOrDefaultAsync<User>(sql, new { Username = username });
+        return await conn.QueryFirstOrDefaultAsync<User>(sql, new { Username = username.Trim() });
     }
 
     public async Task<User> UpsertAsync(User user)
@@ -159,6 +158,14 @@ public sealed class UserRepository : IUserRepository
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
         user.UserId = user.UserId == Guid.Empty ? Guid.NewGuid() : user.UserId;
+
+        // Email is the canonical identity; local username always matches (lowercased).
+        var email = (user.Email ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(email))
+            throw new ArgumentException("Email is required.", nameof(user));
+        user.Email = email;
+        user.Username = email;
+
         const string sql = @"
             INSERT INTO users (user_id, display_name, email, global_role, is_active,
                                auth_provider, username, password_hash)
@@ -172,7 +179,7 @@ public sealed class UserRepository : IUserRepository
             user.Username,
             PasswordHash = passwordHash
         });
-        _logger.LogInformation("Created local user {UserId} ({Username})", user.UserId, user.Username);
+        _logger.LogInformation("Created local user {UserId} ({Email})", user.UserId, user.Email);
         return (await GetByIdAsync(user.UserId))!;
     }
 

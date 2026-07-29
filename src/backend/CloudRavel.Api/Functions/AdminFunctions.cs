@@ -118,18 +118,18 @@ public sealed class AdminFunctions
         if (forbid != null) return forbid;
 
         var body = await req.ReadFromJsonAsync<CreateUserRequest>();
-        if (body == null || string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrWhiteSpace(body.Password)
-            || string.IsNullOrWhiteSpace(body.DisplayName))
-            return await BadRequest(req, "INVALID_REQUEST", "displayName, username, and password are required.");
+        if (body == null || string.IsNullOrWhiteSpace(body.Password)
+            || string.IsNullOrWhiteSpace(body.DisplayName)
+            || string.IsNullOrWhiteSpace(body.Email))
+            return await BadRequest(req, "INVALID_REQUEST", "displayName, email, and password are required.");
 
-        var username = body.Username.Trim();
-        var email = string.IsNullOrWhiteSpace(body.Email)
-            ? $"{username}@local"
-            : body.Email.Trim();
+        var email = body.Email.Trim().ToLowerInvariant();
+        if (!email.Contains('@', StringComparison.Ordinal))
+            return await BadRequest(req, "INVALID_EMAIL", "email must be a valid email address (also used as login username).");
 
-        if (await _userRepo.GetByUsernameAsync(username) != null)
-            return await Conflict(req, "USERNAME_TAKEN", "That username is already in use.");
-        if (await _userRepo.GetByEmailAsync(email) != null)
+        // Email is the unique login identity; username is set equal to email.
+        if (await _userRepo.GetByEmailAsync(email) != null
+            || await _userRepo.GetByUsernameAsync(email) != null)
             return await Conflict(req, "EMAIL_TAKEN", "That email is already in use.");
 
         var globalRole = string.Equals(body.GlobalRole, SystemRole.SystemAdmin, StringComparison.OrdinalIgnoreCase)
@@ -143,13 +143,13 @@ public sealed class AdminFunctions
                 UserId = Guid.NewGuid(),
                 DisplayName = body.DisplayName.Trim(),
                 Email = email,
-                Username = username,
+                Username = email,
                 GlobalRole = globalRole
             }, PasswordHasher.Hash(body.Password));
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create user '{Username}'", username);
+            _logger.LogError(ex, "Failed to create user '{Email}'", email);
             return await BadRequest(req, "USER_CREATE_FAILED",
                 $"Could not create user. Detail: {ex.Message}");
         }

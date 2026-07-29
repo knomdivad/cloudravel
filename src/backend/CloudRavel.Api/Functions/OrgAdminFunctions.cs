@@ -85,25 +85,23 @@ public sealed class OrgAdminFunctions
         if (!ValidOrgRoles.Contains(body.Role))
             return await BadRequest(req, "INVALID_ROLE", $"role must be one of: {string.Join(", ", ValidOrgRoles)}");
 
-        // Password present ⇒ create a new local user. Otherwise attach an existing one.
+        // Password present ⇒ create a new local user. Otherwise attach an existing one by email.
         var isCreate = !string.IsNullOrWhiteSpace(body.Password);
         User? user;
 
         if (isCreate)
         {
-            if (string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrWhiteSpace(body.DisplayName))
+            if (string.IsNullOrWhiteSpace(body.DisplayName) || string.IsNullOrWhiteSpace(body.Email))
                 return await BadRequest(req, "INVALID_REQUEST",
-                    "displayName, username, and password are required to create a new local user.");
+                    "displayName, email, and password are required to create a new local user.");
 
-            var username = body.Username.Trim();
-            // Avoid blank emails (NOT NULL + ambiguous lookups). Default username@local.
-            var email = string.IsNullOrWhiteSpace(body.Email)
-                ? $"{username}@local"
-                : body.Email.Trim();
+            var email = body.Email.Trim().ToLowerInvariant();
+            if (!email.Contains('@', StringComparison.Ordinal))
+                return await BadRequest(req, "INVALID_EMAIL",
+                    "email must be a valid email address (also used as login username).");
 
-            if (await _userRepo.GetByUsernameAsync(username) != null)
-                return await Conflict(req, "USERNAME_TAKEN", "That username is already in use.");
-            if (await _userRepo.GetByEmailAsync(email) != null)
+            if (await _userRepo.GetByEmailAsync(email) != null
+                || await _userRepo.GetByUsernameAsync(email) != null)
                 return await Conflict(req, "EMAIL_TAKEN", "That email is already in use.");
 
             try
@@ -113,27 +111,31 @@ public sealed class OrgAdminFunctions
                     UserId = Guid.NewGuid(),
                     DisplayName = body.DisplayName.Trim(),
                     Email = email,
-                    Username = username,
+                    Username = email,
                     GlobalRole = SystemRole.Member
                 }, PasswordHasher.Hash(body.Password!));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to create local user '{Username}'", username);
+                _logger.LogError(ex, "Failed to create local user '{Email}'", email);
                 return await BadRequest(req, "USER_CREATE_FAILED",
                     $"Could not create user. Detail: {ex.Message}");
             }
         }
         else
         {
-            user = null;
-            if (!string.IsNullOrWhiteSpace(body.Username))
-                user = await _userRepo.GetByUsernameAsync(body.Username.Trim());
-            if (user == null && !string.IsNullOrWhiteSpace(body.Email))
-                user = await _userRepo.GetByEmailAsync(body.Email.Trim());
+            // Attach existing user by email (login identity). Username field is treated as email alias.
+            var identity = !string.IsNullOrWhiteSpace(body.Email)
+                ? body.Email.Trim()
+                : body.Username?.Trim();
+            if (string.IsNullOrWhiteSpace(identity))
+                return await BadRequest(req, "INVALID_REQUEST", "email is required to attach an existing user.");
+
+            user = await _userRepo.GetByEmailAsync(identity)
+                ?? await _userRepo.GetByUsernameAsync(identity);
             if (user == null)
                 return await BadRequest(req, "USER_NOT_FOUND",
-                    "No existing user matched username/email. To create a new local user, include a password.");
+                    "No existing user matched that email. To create a new local user, include a password.");
         }
 
         var grantedBy = context.GetUserId() ?? Guid.Empty;
