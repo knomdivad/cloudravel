@@ -29,4 +29,28 @@ public sealed class CloudProviderInferenceTests
         };
         Assert.Equal(CloudProvider.Gcp, CloudProviderInference.FromResources(ids));
     }
+
+    [Fact]
+    public void Correct_rewrites_stuck_azure_when_resource_is_gcp()
+    {
+        var a = new Anomaly
+        {
+            Provider = CloudProvider.Azure,
+            ResourceId = "//compute.googleapis.com/projects/p/zones/z/instances/i",
+            Title = "Security configuration drift"
+        };
+        Assert.Equal(CloudProvider.Gcp, CloudProviderInference.Correct(a));
+    }
+
+    [Fact]
+    public void Correct_uses_estate_default_for_tenant_wide_anomaly()
+    {
+        var a = new Anomaly
+        {
+            Provider = CloudProvider.Azure,
+            Title = "Resource count grew 30% above baseline",
+            Description = "The tenant's resource count grew sharply."
+        };
+        Assert.Equal(CloudProvider.Gcp, CloudProviderInference.Correct(a, CloudProvider.Gcp));
+    }
 }

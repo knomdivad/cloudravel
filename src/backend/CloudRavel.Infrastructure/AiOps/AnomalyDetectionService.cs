@@ -60,6 +60,9 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
         if (tenant == null || !tenant.AiOpsMonitoringEnabled)
             return [];
 
+        // Rewrite stuck Azure labels on open rows (written before multi-cloud inference).
+        await BackfillOpenProvidersAsync(tenantId);
+
         var detected = new List<Anomaly>();
         var now = DateTime.UtcNow;
 
@@ -595,22 +598,52 @@ public sealed class AnomalyDetectionService : IAnomalyDetectionService
                 return fromIds;
         }
 
+        return await EstateDefaultProviderAsync(tenantId);
+    }
+
+    private async Task<CloudProvider> EstateDefaultProviderAsync(Guid tenantId)
+    {
         try
         {
             var sample = await _inventoryRepo.GetResourcesAsync(tenantId, limit: 100);
             if (sample.Count == 0)
                 return CloudProvider.Azure;
-            var byHint = sample
+            return sample
                 .Select(r => CloudProviderInference.FromResource(r.ResourceId, r.Provider))
                 .GroupBy(p => p)
                 .OrderByDescending(g => g.Count())
                 .First()
                 .Key;
-            return byHint;
         }
         catch
         {
             return CloudProvider.Azure;
+        }
+    }
+
+    private async Task BackfillOpenProvidersAsync(Guid tenantId)
+    {
+        try
+        {
+            var open = await _anomalyRepo.GetAnomaliesAsync(tenantId, AnomalyStatus.Open, limit: 200);
+            if (open.Count == 0) return;
+            var estate = await EstateDefaultProviderAsync(tenantId);
+            var fixedCount = 0;
+            foreach (var a in open)
+            {
+                var corrected = CloudProviderInference.Correct(a, estate);
+                if (corrected == a.Provider) continue;
+                await _anomalyRepo.UpdateProviderAsync(tenantId, a.Id, corrected);
+                a.Provider = corrected;
+                fixedCount++;
+            }
+            if (fixedCount > 0)
+                _logger.LogInformation("Backfilled provider on {Count} open anomalies for tenant {TenantId} (estate default {Estate})",
+                    fixedCount, tenantId, estate);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Provider backfill failed for tenant {TenantId}", tenantId);
         }
     }
 }

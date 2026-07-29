@@ -34,11 +34,27 @@ const PROVIDER_BADGES: Record<string, string> = {
 function normalizeProvider(p?: string | null): string {
   const raw = (p ?? '').trim();
   if (!raw) return 'UNKNOWN';
-  const key = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
-  if (key === 'Aws' || key === 'AWS' || raw.toUpperCase() === 'AWS') return 'AWS';
-  if (key === 'Gcp' || key === 'GCP' || raw.toUpperCase() === 'GCP') return 'GCP';
-  if (key === 'Azure') return 'AZURE';
+  if (/^aws$/i.test(raw)) return 'AWS';
+  if (/^gcp$/i.test(raw)) return 'GCP';
+  if (/^azure$/i.test(raw)) return 'AZURE';
   return raw.toUpperCase();
+}
+
+/** Client-side inference so stuck Azure DB labels still display correctly before/without API redeploy. */
+function inferProvider(anomaly: Anomaly): string {
+  const blob = [anomaly.resourceId, anomaly.title, anomaly.description, anomaly.metricName]
+    .filter(Boolean)
+    .join('\n');
+  if (/googleapis\.com|gcp-|Security Command Center|publicAccessPrevention/i.test(blob)) return 'GCP';
+  if (/arn:aws:|aws-s3-|aws-sh:|aws-sg-|Security Hub|Trusted Advisor/i.test(blob)) return 'AWS';
+  if (/\/subscriptions\/|providers\/Microsoft\.|Microsoft Defender|Azure Advisor/i.test(blob)) return 'AZURE';
+  // Tenant-wide anomaly on a non-Azure estate: prefer linked account providers from the page when available
+  const stored = normalizeProvider(anomaly.provider);
+  if (stored === 'AZURE' && anomaly.resourceId && !/\/subscriptions\//i.test(anomaly.resourceId)) {
+    // Unknown non-ARM resource id — don't force Azure in the badge
+    if (anomaly.resourceId.includes('//') || anomaly.resourceId.startsWith('projects/')) return 'GCP';
+  }
+  return stored;
 }
 
 function providerBadge(p?: string | null): string {
@@ -242,8 +258,8 @@ function AnomalyCard({
             <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
               {KIND_LABELS[anomaly.kind] ?? anomaly.kind}
             </span>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${providerBadge(anomaly.provider)}`}>
-              {normalizeProvider(anomaly.provider)}
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${providerBadge(inferProvider(anomaly))}`}>
+              {inferProvider(anomaly)}
             </span>
             {anomaly.score != null && (
               <span className="text-xs text-gray-500">score {anomaly.score.toFixed(1)}</span>
