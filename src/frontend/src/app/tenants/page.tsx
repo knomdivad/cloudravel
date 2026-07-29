@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { useTenantContext } from '@/contexts/TenantContext';
 import type { CloudOrg, CloudAccount } from '@/lib/types';
+import { FieldHelp, CloudHelpLink } from '@/components/FieldHelp';
+import type { CloudHelpKey } from '@/lib/cloud-help';
 
 interface TenantSummary {
   tenantId: string;
@@ -219,12 +221,13 @@ export default function CloudsPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clouds</h1>
           <p className="text-sm text-gray-500 mt-1">
             {currentOrg ? <>Clouds in <strong>{currentOrg.name}</strong></> : 'Clouds in this organization'}
             {' '}&middot; Azure tenant, AWS &amp; GCP organizations as peers &middot; {totalClouds} connected
+            {' '}&middot; <a href="/help/clouds" className="text-azure-600 hover:underline">How to add clouds</a>
           </p>
         </div>
         {canManageClouds && (
@@ -593,7 +596,12 @@ function AddCloudModal({ tenantId, azureConnected, onClose, onAdded }: {
         </div>
 
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium text-gray-700">Provider</label>
+            <CloudHelpLink
+              section={provider === 'azure' ? 'azure' : provider === 'aws' ? 'aws-org' : 'gcp-org'}
+            />
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {(['azure', 'aws', 'gcp'] as const).map(p => (
               <button key={p} type="button" onClick={() => setProvider(p)}
@@ -616,10 +624,12 @@ function AddCloudModal({ tenantId, azureConnected, onClose, onAdded }: {
         <form onSubmit={submit} className="space-y-4">
           {provider === 'azure' ? (
             <>
-              <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Contoso Azure" />
+              <Field label="Display Name" required value={displayName} onChange={setDisplayName} placeholder="Contoso Azure"
+                helpKey="azure.displayName" />
               <Field label="Azure Tenant ID" required mono value={azureTenantId} onChange={setAzureTenantId}
                 placeholder="00000000-0000-0000-0000-000000000000"
-                pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" />
+                pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+                helpKey="azure.tenantId" />
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Onboarding Method</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -630,12 +640,15 @@ function AddCloudModal({ tenantId, azureConnected, onClose, onAdded }: {
                     </button>
                   ))}
                 </div>
+                <FieldHelp helpKey="azure.onboardingMethod" />
               </div>
               {onboardingMethod === 'app_registration' && (
                 <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
                   <Field label="Client ID" required mono value={clientId} onChange={setClientId} placeholder="Application (client) ID"
-                    pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" />
-                  <Field label="Client Secret" type="password" mono value={clientSecret} onChange={setClientSecret} placeholder="Client secret value" />
+                    pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+                    helpKey="azure.clientId" />
+                  <Field label="Client Secret" type="password" mono value={clientSecret} onChange={setClientSecret} placeholder="Client secret value"
+                    helpKey="azure.clientSecret" />
                 </div>
               )}
               <div>
@@ -648,6 +661,7 @@ function AddCloudModal({ tenantId, azureConnected, onClose, onAdded }: {
                     </button>
                   ))}
                 </div>
+                <FieldHelp helpKey="azure.subscriptions" />
                 {subScope === 'specific' && (
                   <textarea value={subscriptions} onChange={e => setSubscriptions(e.target.value)} rows={3}
                     className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -658,9 +672,11 @@ function AddCloudModal({ tenantId, azureConnected, onClose, onAdded }: {
           ) : (
             <>
               <Field label={`${provider.toUpperCase()} Organization Name`} required value={orgName} onChange={setOrgName}
-                placeholder={provider === 'aws' ? 'Contoso AWS Organization' : 'Contoso GCP Organization'} />
+                placeholder={provider === 'aws' ? 'Contoso AWS Organization' : 'Contoso GCP Organization'}
+                helpKey={provider === 'aws' ? 'aws.orgName' : 'gcp.orgName'} />
               <Field label="Organization ID (optional)" mono value={orgExternalId} onChange={setOrgExternalId}
-                placeholder={provider === 'aws' ? 'o-abc123def4' : '849021304719'} />
+                placeholder={provider === 'aws' ? 'o-abc123def4' : '849021304719'}
+                helpKey={provider === 'aws' ? 'aws.orgId' : 'gcp.orgId'} />
             </>
           )}
 
@@ -750,35 +766,50 @@ function AddAccountModal({ tenantId, org, onClose, onAdded }: {
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <p className="text-xs text-gray-500 mb-4">Under organization <strong>{org.name}</strong></p>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs text-gray-500">Under organization <strong>{org.name}</strong></p>
+          <CloudHelpLink section={isAws ? 'aws-account' : 'gcp-project'} />
+        </div>
 
         {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
 
         <form onSubmit={submit} className="space-y-4">
           <Field label={isAws ? 'AWS Account ID' : 'GCP Project ID'} required mono value={externalId} onChange={setExternalId}
-            placeholder={isAws ? '123456789012' : 'my-gcp-project'} />
+            placeholder={isAws ? '123456789012' : 'my-gcp-project'}
+            helpKey={isAws ? 'aws.accountId' : 'gcp.projectId'} />
           <Field label="Display Name" required value={displayName} onChange={setDisplayName}
-            placeholder={isAws ? 'Production account' : 'Production project'} />
+            placeholder={isAws ? 'Production account' : 'Production project'}
+            helpKey={isAws ? 'aws.displayName' : 'gcp.displayName'} />
 
           {isAws ? (
             <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-xs text-gray-500">IAM access keys (read + write for enabled playbooks). Stored only in the secret store.</p>
-              <Field label="Access Key ID" mono value={accessKeyId} onChange={setAccessKeyId} placeholder="AKIA..." />
-              <Field label="Secret Access Key" type="password" mono value={secretAccessKey} onChange={setSecretAccessKey} placeholder="Secret access key" />
-              <Field label="Session Token (optional)" type="password" mono value={sessionToken} onChange={setSessionToken} placeholder="For temporary STS credentials" />
-              <Field label="Default Region" mono value={defaultRegion} onChange={setDefaultRegion} placeholder="us-east-1" />
+              <p className="text-xs text-gray-500">IAM access keys. Stored only in the secret store. <CloudHelpLink section="aws-keys" label="How to create keys" /></p>
+              <Field label="Access Key ID" mono value={accessKeyId} onChange={setAccessKeyId} placeholder="AKIA..."
+                helpKey="aws.accessKeyId" />
+              <Field label="Secret Access Key" type="password" mono value={secretAccessKey} onChange={setSecretAccessKey} placeholder="Secret access key"
+                helpKey="aws.secretAccessKey" />
+              <Field label="Session Token (optional)" type="password" mono value={sessionToken} onChange={setSessionToken} placeholder="For temporary STS credentials"
+                helpKey="aws.sessionToken" />
+              <Field label="Default Region" mono value={defaultRegion} onChange={setDefaultRegion} placeholder="us-east-1"
+                helpKey="aws.defaultRegion" />
             </div>
           ) : (
             <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-xs text-gray-500">Service account key JSON. Stored only in the secret store.</p>
+              <p className="text-xs text-gray-500">
+                Paste the full service account key JSON. Needs Cloud Asset Viewer.{' '}
+                <CloudHelpLink section="gcp-sa-key" label="How to create a key" />
+              </p>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Service account key JSON</label>
               <textarea value={serviceAccountJson} onChange={e => setServiceAccountJson(e.target.value)} rows={5}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder={'{\n  "type": "service_account",\n  "client_email": "...",\n  "private_key": "..."\n}'} />
+              <FieldHelp helpKey="gcp.serviceAccountJson" />
             </div>
           )}
 
           <Field label="Regions to scan" mono value={regions} onChange={setRegions}
-            placeholder={isAws ? 'us-east-1, us-west-2' : 'Leave blank for project-wide'} />
+            placeholder={isAws ? 'us-east-1, us-west-2' : 'Leave blank for project-wide'}
+            helpKey={isAws ? 'aws.regions' : 'gcp.regions'} />
 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
             <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
@@ -793,10 +824,10 @@ function AddAccountModal({ tenantId, org, onClose, onAdded }: {
   );
 }
 
-// Small labeled input helper
-function Field({ label, value, onChange, placeholder, required, mono, type = 'text', pattern }: {
+// Small labeled input helper (+ optional field tip)
+function Field({ label, value, onChange, placeholder, required, mono, type = 'text', pattern, helpKey }: {
   label: string; value: string; onChange: (v: string) => void; placeholder?: string;
-  required?: boolean; mono?: boolean; type?: string; pattern?: string;
+  required?: boolean; mono?: boolean; type?: string; pattern?: string; helpKey?: CloudHelpKey;
 }) {
   return (
     <div>
@@ -808,6 +839,7 @@ function Field({ label, value, onChange, placeholder, required, mono, type = 'te
         onChange={e => onChange(e.target.value)} placeholder={placeholder}
         className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${mono ? 'font-mono' : ''}`}
       />
+      {helpKey && <FieldHelp helpKey={helpKey} />}
     </div>
   );
 }
