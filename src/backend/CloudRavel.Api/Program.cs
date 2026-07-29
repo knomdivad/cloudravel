@@ -139,18 +139,32 @@ var host = new HostBuilder()
         {
             if (string.IsNullOrEmpty(openBaoAddress))
                 throw new InvalidOperationException("SecretStore:Provider=OpenBao requires OpenBao:Address.");
-            // Token may come from env (OpenBao:Token) or a file written by the
-            // persistent OpenBao entrypoint (OpenBao:TokenFile) so restarts keep working.
+            // Prefer TokenFile when present (file-mode OpenBao). A leftover
+            // OPENBAO_TOKEN=root from old .env breaks file mode after recreate.
             var openBaoToken = config["OpenBao:Token"];
             var tokenFile = config["OpenBao:TokenFile"];
-            if (string.IsNullOrWhiteSpace(openBaoToken) && !string.IsNullOrWhiteSpace(tokenFile)
-                && File.Exists(tokenFile))
+            if (!string.IsNullOrWhiteSpace(tokenFile))
             {
-                openBaoToken = File.ReadAllText(tokenFile).Trim();
+                // OpenBao may still be writing the token for a moment after healthy.
+                for (var attempt = 0; attempt < 20; attempt++)
+                {
+                    if (File.Exists(tokenFile))
+                    {
+                        var fromFile = File.ReadAllText(tokenFile).Trim();
+                        if (!string.IsNullOrWhiteSpace(fromFile))
+                        {
+                            openBaoToken = fromFile;
+                            break;
+                        }
+                    }
+                    Thread.Sleep(250);
+                }
             }
             if (string.IsNullOrWhiteSpace(openBaoToken))
                 throw new InvalidOperationException(
-                    "OpenBao requires OpenBao:Token or a readable OpenBao:TokenFile (e.g. /openbao-data/.cloudravel-root-token).");
+                    "OpenBao requires a token. For compose file mode leave OPENBAO_TOKEN empty and ensure " +
+                    "OpenBao__TokenFile is mounted (e.g. /openbao-data/.cloudravel-root-token). " +
+                    "For OPENBAO_MODE=dev set OPENBAO_TOKEN=root.");
             IAuthMethodInfo authMethod = new TokenAuthMethodInfo(openBaoToken);
             var vaultClientSettings = new VaultClientSettings(openBaoAddress, authMethod);
             services.AddSingleton<IVaultClient>(new VaultClient(vaultClientSettings));
