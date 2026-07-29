@@ -94,6 +94,7 @@ var host = new HostBuilder()
         services.AddScoped<ICloudProviderAdapter, GcpProviderAdapter>();
         services.AddScoped<ICloudProviderAdapterFactory, CloudProviderAdapterFactory>();
         services.AddScoped<IMultiCloudInventoryService, MultiCloudInventoryService>();
+        services.AddScoped<IMultiCloudPostureService, MultiCloudPostureService>();
 
         // AIOps engine: proactive anomaly detection + gated remediation
         services.AddScoped<IAnomalyDetectionService, AnomalyDetectionService>();
@@ -137,7 +138,19 @@ var host = new HostBuilder()
         {
             if (string.IsNullOrEmpty(openBaoAddress))
                 throw new InvalidOperationException("SecretStore:Provider=OpenBao requires OpenBao:Address.");
-            IAuthMethodInfo authMethod = new TokenAuthMethodInfo(config["OpenBao:Token"] ?? "");
+            // Token may come from env (OpenBao:Token) or a file written by the
+            // persistent OpenBao entrypoint (OpenBao:TokenFile) so restarts keep working.
+            var openBaoToken = config["OpenBao:Token"];
+            var tokenFile = config["OpenBao:TokenFile"];
+            if (string.IsNullOrWhiteSpace(openBaoToken) && !string.IsNullOrWhiteSpace(tokenFile)
+                && File.Exists(tokenFile))
+            {
+                openBaoToken = File.ReadAllText(tokenFile).Trim();
+            }
+            if (string.IsNullOrWhiteSpace(openBaoToken))
+                throw new InvalidOperationException(
+                    "OpenBao requires OpenBao:Token or a readable OpenBao:TokenFile (e.g. /openbao-data/.cloudravel-root-token).");
+            IAuthMethodInfo authMethod = new TokenAuthMethodInfo(openBaoToken);
             var vaultClientSettings = new VaultClientSettings(openBaoAddress, authMethod);
             services.AddSingleton<IVaultClient>(new VaultClient(vaultClientSettings));
             services.AddSingleton<ISecretStore, OpenBaoSecretStore>();

@@ -230,7 +230,7 @@ Contoso demo dataset: apply `database/seed-demo-data.sql` manually after migrate
 |---|---|---|
 | Web UI | http://localhost:3000 | nginx serves the static export and proxies `/api` → the Functions host (single origin, no CORS) |
 | API (direct) | http://localhost:7071/api/health | The browser reaches the API via `/api` through the UI |
-| OpenBao | http://localhost:8200 | Dev mode, root token `root` — the cloud-agnostic secret store |
+| OpenBao | http://localhost:8200 | File-backed by default (`OPENBAO_MODE=file`); secrets survive restarts |
 | SQL Server | localhost:1433 | `sa` / `MSSQL_SA_PASSWORD` |
 
 Runs anywhere by design:
@@ -249,6 +249,20 @@ Notes:
   `dbo.__migrations`). No Contoso demo seed.
 - Live cloud timers/collection need `PLATFORM_ENVIRONMENT=Production` and real
   credentials in OpenBao. Compose defaults to Development (safe; no live collect).
+- **OpenBao persistence (compose):** default `OPENBAO_MODE=file` stores data in the
+  `openbao-data` volume and writes the API token to
+  `/openbao/data/.cloudravel-root-token` (mounted into the API as
+  `OpenBao__TokenFile`). Leave `OPENBAO_TOKEN` empty in file mode. Use
+  `OPENBAO_MODE=dev` + `OPENBAO_TOKEN=root` only for ephemeral local demos.
+- **OpenBao on Kubernetes:** chart default is file mode + PVC
+  (`openbao.mode=file`, `openbao.persistence.enabled=true`). Set
+  `secrets.openBaoToken` so the entrypoint can mint a stable API token. For HA
+  production set `openbao.enabled=false` and `externalOpenBao.address` to a real
+  Vault/OpenBao cluster.
+- **Security / Governance / Approvals for AWS/GCP:** after multi-cloud inventory
+  collection, inventory posture rules write Security findings and Governance
+  recommendations (and may propose gated remediations). Azure still uses Advisor /
+  Policy / Defender timers when those are enabled.
   AI Insights needs `OPENAI_*` (or Admin → System Settings).
 - To ship an update: `git pull && docker compose up --build` (add `--force-recreate`
   if a container is caching an old image).

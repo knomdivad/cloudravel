@@ -52,6 +52,27 @@ public interface IRemediationService
 }
 
 /// <summary>
+/// Derives multi-cloud Security / Governance signals from collected inventory
+/// (and later external posture APIs). Feeds defender_findings + advisor_recommendations
+/// and can auto-propose gated remediations for Approvals.
+/// </summary>
+public interface IMultiCloudPostureService
+{
+    /// <summary>
+    /// Evaluate posture for one workspace (tenant_id). Safe to call after inventory sync.
+    /// </summary>
+    Task<MultiCloudPostureResult> EvaluateTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Counts produced by a multi-cloud posture evaluation.</summary>
+public sealed class MultiCloudPostureResult
+{
+    public int SecurityFindings { get; set; }
+    public int GovernanceRecommendations { get; set; }
+    public int RemediationProposals { get; set; }
+}
+
+/// <summary>
 /// Uniform surface over a cloud platform: inventory collection and allow-listed
 /// remediation execution. One adapter per provider (Azure, AWS, GCP).
 /// </summary>

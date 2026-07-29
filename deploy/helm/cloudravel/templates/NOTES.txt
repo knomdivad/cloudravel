@@ -23,9 +23,16 @@ SECURITY — change these before any non-local use:
 
 {{- if .Values.openbao.enabled }}
 
-NOTE: the bundled OpenBao runs in dev mode (in-memory) — stored cloud
-credentials are LOST on restart. For production set openbao.enabled=false and
-point externalOpenBao.address at a real Vault/OpenBao.
+NOTE: bundled OpenBao mode={{ .Values.openbao.mode | default "file" }}.
+{{- if eq (.Values.openbao.mode | default "file") "dev" }}
+  Dev mode is in-memory — credentials are LOST on restart.
+{{- else }}
+  File mode persists secrets on a volume when openbao.persistence.enabled=true.
+  Single replica only (not HA). Set secrets.openBaoToken to a stable value so
+  the entrypoint can mint a matching API token (OPENBAO_ROOT_TOKEN).
+{{- end }}
+  For managed HA production set openbao.enabled=false and
+  externalOpenBao.address to a real Vault/OpenBao.
 {{- end }}
 {{- if not .Values.secrets.localAuthJwtSigningKey }}
 {{- if not .Values.secrets.existingSecret }}

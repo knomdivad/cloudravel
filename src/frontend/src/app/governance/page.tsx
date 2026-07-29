@@ -37,7 +37,9 @@ export default function GovernancePage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold">Governance & Compliance</h1>
-        <p className="text-sm text-gray-500 mt-1">Azure Advisor recommendations and Policy compliance</p>
+        <p className="text-sm text-gray-500 mt-1">
+          Azure Advisor and Policy, plus multi-cloud recommendations derived from AWS/GCP inventory (tagging, security hygiene).
+        </p>
       </div>
 
       {/* Summary Cards */}
