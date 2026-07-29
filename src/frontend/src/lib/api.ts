@@ -195,8 +195,8 @@ export async function createUser(request: {
   globalRole?: string;
 }): Promise<AdminUser> {
   const email = request.email.trim().toLowerCase();
-  // Prefer unambiguous route (avoids GET/POST template collisions on some hosts).
-  return apiCall<AdminUser>('/admin/users/create', NO_WORKSPACE, {
+  // Prefer unambiguous route (also available as POST /admin/users and /system/users).
+  return apiCall<AdminUser>('/system/users', NO_WORKSPACE, {
     method: 'POST',
     body: JSON.stringify({
       displayName: request.displayName,

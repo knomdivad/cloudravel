@@ -62,6 +62,8 @@ services:
   # blank estate plus the bootstrap local admin (admin@local / ChangeMe123!) —
   # no Contoso demo seed. Optional: sqlcmd seed-demo-data.sql by hand.
   migrator:
+    # Prefer host-mounted database/ SQL (includes latest migrations). Image is
+    # only the sqlcmd tooling base; scripts always come from ./database.
     image: mcr.microsoft.com/mssql-tools:latest
     platform: linux/amd64
     depends_on:
@@ -77,6 +79,10 @@ services:
     restart: "no"
 
   api:
+    # Pin a local image name so `compose up --build` cannot silently keep an
+    # old ghcr.io/...:latest from a prior image: override (which caused 404s
+    # on routes that only exist in this tree).
+    image: cloudravel-api:local
     # src/backend/Dockerfile builds natively (fast) and pins only the runtime
     # stage to amd64 (the Functions base image is amd64-only), so no service-
     # level platform override is needed here.
@@ -139,6 +145,7 @@ services:
       - "7071:80"
 
   web:
+    image: cloudravel-web:local
     build:
       context: ./src/frontend
       dockerfile: Dockerfile

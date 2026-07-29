@@ -84,6 +84,8 @@ public sealed class HealthFunctions
             timestamp = DateTime.UtcNow,
             version = _platform.Version,
             commit = _platform.Commit,
+            // Lets operators confirm which build is running (create-user routes landed in the email-identity work).
+            buildFeatures = new[] { "admin-users-create", "email-as-username", "system-users-create" },
             checks
         });
         return response;

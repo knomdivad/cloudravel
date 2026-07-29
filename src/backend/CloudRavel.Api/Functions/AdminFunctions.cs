@@ -94,21 +94,6 @@ public sealed class AdminFunctions
     // Global user management
     // ========================================================================
 
-    /// <summary>GET /api/admin/users — all users.</summary>
-    [Function("ListAllUsers")]
-    public async Task<HttpResponseData> ListAllUsers(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/users")] HttpRequestData req,
-        FunctionContext context)
-    {
-        var forbid = await context.RequireSystemAdminAsync(req);
-        if (forbid != null) return forbid;
-
-        var users = await _userRepo.ListAllAsync();
-        var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new AdminUsersResponse { Users = users.Select(ToDto).ToList() });
-        return response;
-    }
-
     private static readonly JsonSerializerOptions AdminJson = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -116,21 +101,42 @@ public sealed class AdminFunctions
     };
 
     /// <summary>
-    /// POST /api/admin/users and POST /api/admin/users/create —
-    /// create a local user (optionally a system admin). Dual routes: some hosts
-    /// only bind one verb on shared route templates with GET list.
+    /// GET  /api/admin/users — list all users.
+    /// POST /api/admin/users — create a local user (email = login identity).
+    /// Single function, multi-method: reliable on Azure Functions isolated worker.
     /// </summary>
-    [Function("CreateUser")]
-    public Task<HttpResponseData> CreateUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/users")] HttpRequestData req,
-        FunctionContext context) =>
-        CreateUserCoreAsync(req, context);
+    [Function("AdminUsers")]
+    public async Task<HttpResponseData> AdminUsers(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = "admin/users")] HttpRequestData req,
+        FunctionContext context)
+    {
+        if (req.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            return await ListAllUsersCoreAsync(req, context);
+        return await CreateUserCoreAsync(req, context);
+    }
 
-    [Function("CreateUserExplicit")]
-    public Task<HttpResponseData> CreateUserExplicit(
+    /// <summary>POST /api/admin/users/create — same as POST /api/admin/users (explicit path).</summary>
+    [Function("CreateUser")]
+    public async Task<HttpResponseData> CreateUser(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/users/create")] HttpRequestData req,
         FunctionContext context) =>
-        CreateUserCoreAsync(req, context);
+        await CreateUserCoreAsync(req, context);
+
+    /// <summary>POST /api/system/users — alternate create path (hard to miss in routing).</summary>
+    [Function("CreateSystemUser")]
+    public async Task<HttpResponseData> CreateSystemUser(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "system/users")] HttpRequestData req,
+        FunctionContext context) =>
+        await CreateUserCoreAsync(req, context);
+
+    private async Task<HttpResponseData> ListAllUsersCoreAsync(HttpRequestData req, FunctionContext context)
+    {
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
+
+        var users = await _userRepo.ListAllAsync();
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new AdminUsersResponse { Users = users.Select(ToDto).ToList() });
+    }
 
     private async Task<HttpResponseData> CreateUserCoreAsync(HttpRequestData req, FunctionContext context)
     {
@@ -140,7 +146,12 @@ public sealed class AdminFunctions
         CreateUserRequest? body;
         try
         {
-            body = await JsonSerializer.DeserializeAsync<CreateUserRequest>(req.Body, AdminJson);
+            // Buffer body — some hosts leave the stream unreadable after middleware.
+            using var reader = new StreamReader(req.Body);
+            var raw = await reader.ReadToEndAsync();
+            body = string.IsNullOrWhiteSpace(raw)
+                ? null
+                : JsonSerializer.Deserialize<CreateUserRequest>(raw, AdminJson);
         }
         catch (Exception ex)
         {
