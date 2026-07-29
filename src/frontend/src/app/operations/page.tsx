@@ -30,6 +30,25 @@ const PROVIDER_BADGES: Record<string, string> = {
   Gcp: 'bg-emerald-100 text-emerald-700',
 };
 
+/** Normalize provider casing from API (Azure | Aws | Gcp | azure | AWS …). */
+function normalizeProvider(p?: string | null): string {
+  const raw = (p ?? '').trim();
+  if (!raw) return 'UNKNOWN';
+  const key = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+  if (key === 'Aws' || key === 'AWS' || raw.toUpperCase() === 'AWS') return 'AWS';
+  if (key === 'Gcp' || key === 'GCP' || raw.toUpperCase() === 'GCP') return 'GCP';
+  if (key === 'Azure') return 'AZURE';
+  return raw.toUpperCase();
+}
+
+function providerBadge(p?: string | null): string {
+  const n = normalizeProvider(p);
+  if (n === 'AWS') return PROVIDER_BADGES.Aws;
+  if (n === 'GCP') return PROVIDER_BADGES.Gcp;
+  if (n === 'AZURE') return PROVIDER_BADGES.Azure;
+  return 'bg-gray-100 text-gray-600';
+}
+
 export default function OperationsPage() {
   const { tenantId } = useTenantContext();
   const { data: summary, isLoading, error, mutate } = useOpsSummary(tenantId);
@@ -159,13 +178,6 @@ export default function OperationsPage() {
               </a>
             </div>
             <div className="space-y-2">
-              <div className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES.Azure}`}>Azure</span>
-                  <span className="text-sm text-gray-700">Tenant subscriptions</span>
-                </div>
-                <span className="text-xs text-green-600 font-medium">via onboarding</span>
-              </div>
               {summary.cloudAccounts.map((a) => (
                 <CloudAccountRow key={a.accountId} account={a} />
               ))}
@@ -174,7 +186,7 @@ export default function OperationsPage() {
                   href="/tenants"
                   className="block w-full bg-white rounded-xl border border-dashed border-gray-300 p-3 text-sm text-gray-500 hover:border-azure-300 hover:text-azure-600 transition-colors text-center"
                 >
-                  Connect an AWS or GCP organization on the Clouds page to extend monitoring.
+                  Connect Azure, AWS, or GCP on the Clouds page to extend monitoring.
                 </a>
               )}
             </div>
@@ -230,8 +242,8 @@ function AnomalyCard({
             <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
               {KIND_LABELS[anomaly.kind] ?? anomaly.kind}
             </span>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[anomaly.provider] ?? PROVIDER_BADGES.Azure}`}>
-              {anomaly.provider.toUpperCase()}
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${providerBadge(anomaly.provider)}`}>
+              {normalizeProvider(anomaly.provider)}
             </span>
             {anomaly.score != null && (
               <span className="text-xs text-gray-500">score {anomaly.score.toFixed(1)}</span>
@@ -343,8 +355,8 @@ function CloudAccountRow({ account }: { account: CloudAccount }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
       <div className="flex items-center gap-2 min-w-0">
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PROVIDER_BADGES[account.provider] ?? ''}`}>
-          {account.provider.toUpperCase()}
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${providerBadge(account.provider)}`}>
+          {normalizeProvider(account.provider)}
         </span>
         <span className="text-sm text-gray-700 truncate">{account.displayName}</span>
       </div>

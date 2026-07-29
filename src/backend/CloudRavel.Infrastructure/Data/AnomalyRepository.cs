@@ -52,7 +52,13 @@ public sealed class AnomalyRepository : IAnomalyRepository
                 baseline_std_dev = @BaselineStdDev,
                 score = @Score,
                 severity = @Severity,
-                details_json = @DetailsJson
+                details_json = @DetailsJson,
+                -- Refresh provider/title/description so multi-cloud estates don't stay
+                -- stuck on a historical Azure default after we improve inference.
+                provider = @Provider,
+                title = @Title,
+                description = @Description,
+                resource_id = COALESCE(@ResourceId, target.resource_id)
             WHEN NOT MATCHED THEN INSERT
                 (tenant_id, fingerprint, kind, severity, status, provider, title, description,
                  resource_id, metric_name, observed_value, baseline_mean, baseline_std_dev,
