@@ -26,6 +26,7 @@ public sealed class OrganizationFunctions
     private readonly IOrganizationRepository _orgRepo;
     private readonly ITenantRepository _tenantRepo;
     private readonly ICloudOrgRepository _cloudOrgRepo;
+    private readonly ICloudAccountRepository _cloudAccountRepo;
     private readonly IUserRepository _userRepo;
     private readonly ISecretStore? _secretStore;
     private readonly ILogger<OrganizationFunctions> _logger;
@@ -34,6 +35,7 @@ public sealed class OrganizationFunctions
         IOrganizationRepository orgRepo,
         ITenantRepository tenantRepo,
         ICloudOrgRepository cloudOrgRepo,
+        ICloudAccountRepository cloudAccountRepo,
         IUserRepository userRepo,
         ILogger<OrganizationFunctions> logger,
         ISecretStore? secretStore = null)
@@ -41,6 +43,7 @@ public sealed class OrganizationFunctions
         _orgRepo = orgRepo;
         _tenantRepo = tenantRepo;
         _cloudOrgRepo = cloudOrgRepo;
+        _cloudAccountRepo = cloudAccountRepo;
         _userRepo = userRepo;
         _secretStore = secretStore;
         _logger = logger;
@@ -143,6 +146,58 @@ public sealed class OrganizationFunctions
         var response = req.CreateCorsResponse(HttpStatusCode.Created);
         await response.WriteAsJsonAsync(await BuildDto(org));
         return response;
+    }
+
+    /// <summary>
+    /// DELETE /api/organizations/{orgId} — soft-delete a workspace (status → suspended).
+    /// Cascades hard-delete of all cloud connections (cloud_orgs + accounts + secrets)
+    /// and marks the workspace tenants shell as offboarded. cloud_admin+ may call.
+    /// </summary>
+    [Function("DeleteOrganization")]
+    public async Task<HttpResponseData> DeleteOrganization(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "organizations/{orgId:guid}")] HttpRequestData req,
+        Guid orgId,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        if (forbid != null) return forbid;
+
+        var mismatch = await context.RequirePathTenantMatchAsync(req, orgId);
+        if (mismatch != null) return mismatch;
+
+        var org = await _orgRepo.GetByIdAsync(orgId);
+        if (org == null)
+            return await NotFound(req, $"Organization {orgId} not found.");
+        if (!string.Equals(org.Status, "active", StringComparison.OrdinalIgnoreCase))
+            return await BadRequest(req, "ALREADY_DELETED", "Organization is already suspended/deleted.");
+
+        // Remove every cloud connection under this workspace first.
+        var cloudOrgs = await _cloudOrgRepo.GetByTenantAsync(orgId);
+        foreach (var cloudOrg in cloudOrgs)
+        {
+            var members = await _cloudAccountRepo.GetByOrgAsync(orgId, cloudOrg.OrgId);
+            foreach (var account in members)
+            {
+                await _cloudAccountRepo.DeleteAsync(orgId, account.AccountId);
+                await TryDeleteSecretAsync(account.CredentialSecretName);
+            }
+            await _cloudOrgRepo.DeleteAsync(orgId, cloudOrg.OrgId);
+            await TryDeleteSecretAsync(cloudOrg.CredentialSecretName);
+        }
+
+        var workspace = await _tenantRepo.GetByIdAsync(orgId);
+        if (workspace != null)
+        {
+            await TryDeleteSecretAsync(workspace.SecretName);
+            await _tenantRepo.UpdateStatusAsync(orgId, TenantStatus.Offboarded);
+        }
+
+        await _orgRepo.SoftDeleteAsync(orgId);
+
+        _logger.LogInformation("Deleted organization {OrgId} ({Name}) with {CloudCount} cloud connection(s)",
+            orgId, org.Name, cloudOrgs.Count);
+
+        return req.CreateCorsResponse(HttpStatusCode.NoContent);
     }
 
     /// <summary>
@@ -288,6 +343,19 @@ public sealed class OrganizationFunctions
             GcpOrgCount = gcp,
             CloudCount = azureOrgs.Count + aws + gcp
         };
+    }
+
+    private async Task TryDeleteSecretAsync(string? secretName)
+    {
+        if (string.IsNullOrWhiteSpace(secretName) || _secretStore == null) return;
+        try
+        {
+            await _secretStore.DeleteSecretAsync(secretName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete secret {SecretName} during org cleanup", secretName);
+        }
     }
 
     private static async Task<HttpResponseData> BadRequest(HttpRequestData req, string code, string message)

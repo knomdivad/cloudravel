@@ -66,6 +66,11 @@ export default function CloudsPage() {
   const [collectingAccount, setCollectingAccount] = useState<string | null>(null);
   const [collectingOrg, setCollectingOrg] = useState<string | null>(null);
   const [isDev, setIsDev] = useState(true);
+  const [deleteOrgTarget, setDeleteOrgTarget] = useState<CloudOrg | null>(null);
+  const [deleteAccountTarget, setDeleteAccountTarget] = useState<{ org: CloudOrg; account: CloudAccount } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [credsOrg, setCredsOrg] = useState<CloudOrg | null>(null);
+  const [credsAccount, setCredsAccount] = useState<{ org: CloudOrg; account: CloudAccount } | null>(null);
 
   useEffect(() => { api.getPlatformInfo().then(p => setIsDev(p.environment.toLowerCase() !== 'production')).catch(() => {}); }, []);
 
@@ -180,6 +185,37 @@ export default function CloudsPage() {
     }
   };
 
+  const handleDeleteCloudOrg = async () => {
+    if (!deleteOrgTarget || !tenantId) return;
+    setDeleting(true);
+    try {
+      await api.deleteCloudOrg(tenantId, deleteOrgTarget.orgId);
+      showToast(`Deleted "${deleteOrgTarget.name}".`, 'success');
+      setDeleteOrgTarget(null);
+      refreshAll();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to delete.', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeleteCloudAccount = async () => {
+    if (!deleteAccountTarget || !tenantId) return;
+    setDeleting(true);
+    try {
+      await api.deleteCloudAccount(tenantId, deleteAccountTarget.account.accountId);
+      const noun = deleteAccountTarget.org.provider.toLowerCase() === 'aws' ? 'Account' : 'Project';
+      showToast(`${noun} "${deleteAccountTarget.account.displayName}" removed.`, 'success');
+      setDeleteAccountTarget(null);
+      fetchOrgs();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to delete.', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const getStatusActions = (status: string): { label: string; value: string; destructive?: boolean }[] => {
     switch (status) {
       case 'active': return [{ label: 'Suspend', value: 'suspended', destructive: true }, { label: 'Offboard', value: 'offboarded', destructive: true }];
@@ -253,6 +289,68 @@ export default function CloudsPage() {
           onClose={() => setAddAccountFor(null)}
           onAdded={(msg) => { showToast(msg, 'success'); setAddAccountFor(null); fetchOrgs(); }}
         />
+      )}
+
+      {credsOrg && (
+        <UpdateAzureCredentialsModal
+          tenantId={tenantId!}
+          org={credsOrg}
+          onClose={() => setCredsOrg(null)}
+          onUpdated={(msg) => { showToast(msg, 'success'); setCredsOrg(null); fetchOrgs(); }}
+        />
+      )}
+
+      {credsAccount && (
+        <UpdateAccountCredentialsModal
+          tenantId={tenantId!}
+          org={credsAccount.org}
+          account={credsAccount.account}
+          onClose={() => setCredsAccount(null)}
+          onUpdated={(msg) => { showToast(msg, 'success'); setCredsAccount(null); fetchOrgs(); }}
+        />
+      )}
+
+      {deleteOrgTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete {deleteOrgTarget.provider} connection</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Permanently remove <strong>{deleteOrgTarget.name}</strong>
+              {deleteOrgTarget.accounts?.length ? ` and its ${deleteOrgTarget.accounts.length} member account(s)/project(s)` : ''}?
+            </p>
+            <p className="text-xs text-gray-400">Stored credentials are deleted. Inventory history for this workspace is kept.</p>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setDeleteOrgTarget(null)} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDeleteCloudOrg} disabled={deleting}
+                className="px-4 py-2 rounded-lg text-sm text-white bg-red-600 hover:bg-red-700 flex items-center gap-2 disabled:opacity-50">
+                {deleting && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteAccountTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              Delete {deleteAccountTarget.org.provider.toLowerCase() === 'aws' ? 'account' : 'project'}
+            </h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Unlink <strong>{deleteAccountTarget.account.displayName}</strong> ({deleteAccountTarget.account.externalId})?
+            </p>
+            <p className="text-xs text-gray-400">Credentials are removed from the secret store.</p>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setDeleteAccountTarget(null)} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDeleteCloudAccount} disabled={deleting}
+                className="px-4 py-2 rounded-lg text-sm text-white bg-red-600 hover:bg-red-700 flex items-center gap-2 disabled:opacity-50">
+                {deleting && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Status change confirm */}
@@ -376,14 +474,24 @@ export default function CloudsPage() {
                     <div><p className="text-lg font-bold text-gray-900">{org.resourceCount ?? '—'}</p><p className="text-xs text-gray-500">Resources</p></div>
                     <div><p className="text-xs text-gray-500 mt-1">{org.lastInventoryAt ? new Date(org.lastInventoryAt).toLocaleDateString() : 'No snapshot'}</p><p className="text-xs text-gray-500">Last Snapshot</p></div>
                   </div>
-                  {canManageClouds && actions.length > 0 && (
-                    <div className="flex gap-2 pt-3 border-t border-gray-100">
+                  {canManageClouds && (
+                    <div className="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
                       {actions.map(action => (
                         <button key={action.value} onClick={() => setOrgStatusAction({ org, newStatus: action.value })}
                           className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${action.destructive ? 'text-red-600 border border-red-200 hover:bg-red-50' : 'text-green-600 border border-green-200 hover:bg-green-50'}`}>
                           {action.label}
                         </button>
                       ))}
+                      {(org.hasCredentials || org.onboardingMethod === 'app_registration') && (
+                        <button onClick={() => setCredsOrg(org)}
+                          className="flex-1 px-3 py-1.5 rounded text-xs font-medium text-gray-700 border border-gray-200 hover:bg-gray-50">
+                          Update credentials
+                        </button>
+                      )}
+                      <button onClick={() => setDeleteOrgTarget(org)}
+                        className="flex-1 px-3 py-1.5 rounded text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50">
+                        Delete
+                      </button>
                     </div>
                   )}
                 </div>
@@ -397,21 +505,30 @@ export default function CloudsPage() {
       <OrgSection label="AWS" emptyHint="No AWS organizations yet." orgs={awsOrgs} onAddAccount={setAddAccountFor}
         onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)}
         onStatusAction={(org, newStatus) => setOrgStatusAction({ org, newStatus })}
-        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} canManage={canManageClouds} />
+        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} canManage={canManageClouds}
+        onDeleteOrg={setDeleteOrgTarget}
+        onDeleteAccount={(org, account) => setDeleteAccountTarget({ org, account })}
+        onUpdateAccountCreds={(org, account) => setCredsAccount({ org, account })} />
 
       {/* GCP orgs */}
       <OrgSection label="Google Cloud" emptyHint="No GCP organizations yet." orgs={gcpOrgs} onAddAccount={setAddAccountFor}
         onCollect={handleCollectAccount} collecting={collectingAccount} isDev={isDev} onAdd={() => setShowAdd(true)}
         onStatusAction={(org, newStatus) => setOrgStatusAction({ org, newStatus })}
-        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} canManage={canManageClouds} />
+        onCollectAll={handleCollectAllInOrg} collectingOrg={collectingOrg} canManage={canManageClouds}
+        onDeleteOrg={setDeleteOrgTarget}
+        onDeleteAccount={(org, account) => setDeleteAccountTarget({ org, account })}
+        onUpdateAccountCreds={(org, account) => setCredsAccount({ org, account })} />
     </div>
   );
 }
 
-function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collecting, isDev, onAdd, onStatusAction, onCollectAll, collectingOrg, canManage }: {
+function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collecting, isDev, onAdd, onStatusAction, onCollectAll, collectingOrg, canManage, onDeleteOrg, onDeleteAccount, onUpdateAccountCreds }: {
   label: string; emptyHint: string; orgs: CloudOrg[]; onAddAccount: (o: CloudOrg) => void;
   onCollect: (a: CloudAccount) => void; collecting: string | null; isDev: boolean; onAdd: () => void; canManage: boolean;
   onStatusAction: (o: CloudOrg, newStatus: string) => void; onCollectAll: (o: CloudOrg) => void; collectingOrg: string | null;
+  onDeleteOrg: (o: CloudOrg) => void;
+  onDeleteAccount: (o: CloudOrg, a: CloudAccount) => void;
+  onUpdateAccountCreds: (o: CloudOrg, a: CloudAccount) => void;
 }) {
   const accountNoun = label === 'AWS' ? 'account' : 'project';
   return (
@@ -479,7 +596,7 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
                           </p>
                           {acct.lastError && <p className="text-xs text-red-600 truncate">{acct.lastError}</p>}
                         </div>
-                        <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="flex items-center gap-2 flex-shrink-0">
                           <div className="text-right">
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(acct.status)}`}>{acct.status}</span>
                             <p className="text-xs text-gray-400 mt-1">
@@ -487,15 +604,25 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
                             </p>
                           </div>
                           {canManage && (
-                            <button
-                              onClick={() => onCollect(acct)}
-                              disabled={isDev || collecting === acct.accountId}
-                              title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
-                              className="px-3 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
-                            >
-                              {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
-                              {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
-                            </button>
+                            <>
+                              <button
+                                onClick={() => onCollect(acct)}
+                                disabled={isDev || collecting === acct.accountId}
+                                title={isDev ? 'Inventory collection is disabled in development' : 'Collect inventory now'}
+                                className="px-2.5 py-1.5 rounded text-xs font-medium text-blue-600 border border-blue-200 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
+                              >
+                                {collecting === acct.accountId && <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />}
+                                {collecting === acct.accountId ? 'Collecting...' : 'Collect'}
+                              </button>
+                              <button onClick={() => onUpdateAccountCreds(org, acct)}
+                                className="px-2.5 py-1.5 rounded text-xs font-medium text-gray-700 border border-gray-200 hover:bg-gray-50 whitespace-nowrap">
+                                Credentials
+                              </button>
+                              <button onClick={() => onDeleteAccount(org, acct)}
+                                className="px-2.5 py-1.5 rounded text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 whitespace-nowrap">
+                                Delete
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -503,9 +630,9 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
                   </div>
                 )}
 
-                {/* Footer: org-level status actions + collect-all — parity with Azure */}
-                {canManage && (actions.length > 0 || org.accounts.length > 0) && (
-                  <div className="flex gap-2 pt-3 mt-3 border-t border-gray-100">
+                {/* Footer: org-level status actions + collect-all + delete — parity with Azure */}
+                {canManage && (
+                  <div className="flex flex-wrap gap-2 pt-3 mt-3 border-t border-gray-100">
                     {actions.map(action => (
                       <button key={action.value} onClick={() => onStatusAction(org, action.value)}
                         className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${action.destructive ? 'text-red-600 border border-red-200 hover:bg-red-50' : 'text-green-600 border border-green-200 hover:bg-green-50'}`}>
@@ -520,6 +647,10 @@ function OrgSection({ label, emptyHint, orgs, onAddAccount, onCollect, collectin
                         {busyCollectingAll ? 'Collecting...' : 'Collect all'}
                       </button>
                     )}
+                    <button onClick={() => onDeleteOrg(org)}
+                      className="flex-1 px-3 py-1.5 rounded text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50">
+                      Delete org
+                    </button>
                   </div>
                 )}
               </div>
@@ -816,6 +947,171 @@ function AddAccountModal({ tenantId, org, onClose, onAdded }: {
             <button type="submit" disabled={busy} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
               {busy && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
               {busy ? 'Adding...' : `Add ${noun}`}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Update credentials — Azure app registration
+// ============================================================================
+
+function UpdateAzureCredentialsModal({ tenantId, org, onClose, onUpdated }: {
+  tenantId: string;
+  org: CloudOrg;
+  onClose: () => void;
+  onUpdated: (message: string) => void;
+}) {
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      await api.updateCloudOrgCredentials(tenantId, org.orgId, {
+        clientId: clientId.trim(),
+        clientSecret,
+      });
+      onUpdated(`Credentials updated for "${org.name}".`);
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to update credentials.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">Update Azure credentials</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">Rotate the app registration secret for <strong>{org.name}</strong>. The previous secret is overwritten in the store.</p>
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+        <form onSubmit={submit} className="space-y-4">
+          <Field label="Client ID" required mono value={clientId} onChange={setClientId} placeholder="Application (client) ID"
+            pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+            helpKey="azure.clientId" />
+          <Field label="Client Secret" required type="password" mono value={clientSecret} onChange={setClientSecret} placeholder="New client secret value"
+            helpKey="azure.clientSecret" />
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={busy} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+              {busy && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
+              {busy ? 'Saving...' : 'Update credentials'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Update credentials — AWS account / GCP project
+// ============================================================================
+
+function UpdateAccountCredentialsModal({ tenantId, org, account, onClose, onUpdated }: {
+  tenantId: string;
+  org: CloudOrg;
+  account: CloudAccount;
+  onClose: () => void;
+  onUpdated: (message: string) => void;
+}) {
+  const isAws = org.provider.toLowerCase() === 'aws';
+  const noun = isAws ? 'account' : 'project';
+  const [accessKeyId, setAccessKeyId] = useState('');
+  const [secretAccessKey, setSecretAccessKey] = useState('');
+  const [sessionToken, setSessionToken] = useState('');
+  const [defaultRegion, setDefaultRegion] = useState(account.regions?.[0] ?? 'us-east-1');
+  const [serviceAccountJson, setServiceAccountJson] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    let credentialJson: string;
+    try {
+      if (isAws) {
+        if (!accessKeyId.trim() || !secretAccessKey.trim()) {
+          setError('Access Key ID and Secret Access Key are required.'); setBusy(false); return;
+        }
+        credentialJson = JSON.stringify({
+          accessKeyId: accessKeyId.trim(),
+          secretAccessKey: secretAccessKey.trim(),
+          sessionToken: sessionToken.trim() || undefined,
+          defaultRegion: defaultRegion.trim() || 'us-east-1',
+        });
+      } else {
+        if (!serviceAccountJson.trim()) {
+          setError('Service account key JSON is required.'); setBusy(false); return;
+        }
+        JSON.parse(serviceAccountJson);
+        credentialJson = serviceAccountJson.trim();
+      }
+    } catch {
+      setError('The GCP service account key must be valid JSON.'); setBusy(false); return;
+    }
+
+    try {
+      await api.updateCloudAccountCredentials(tenantId, account.accountId, credentialJson);
+      onUpdated(`Credentials updated for ${noun} "${account.displayName}".`);
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to update credentials.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">Update {noun} credentials</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          Rotate credentials for <strong>{account.displayName}</strong> ({account.externalId}). Previous secret is overwritten.
+        </p>
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+        <form onSubmit={submit} className="space-y-4">
+          {isAws ? (
+            <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <Field label="Access Key ID" required mono value={accessKeyId} onChange={setAccessKeyId} placeholder="AKIA..."
+                helpKey="aws.accessKeyId" />
+              <Field label="Secret Access Key" required type="password" mono value={secretAccessKey} onChange={setSecretAccessKey} placeholder="Secret access key"
+                helpKey="aws.secretAccessKey" />
+              <Field label="Session Token (optional)" type="password" mono value={sessionToken} onChange={setSessionToken} placeholder="For temporary STS credentials"
+                helpKey="aws.sessionToken" />
+              <Field label="Default Region" mono value={defaultRegion} onChange={setDefaultRegion} placeholder="us-east-1"
+                helpKey="aws.defaultRegion" />
+            </div>
+          ) : (
+            <div className="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Service account key JSON <span className="text-red-500">*</span></label>
+              <textarea value={serviceAccountJson} onChange={e => setServiceAccountJson(e.target.value)} rows={6} required
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder={'{\n  "type": "service_account",\n  "client_email": "...",\n  "private_key": "..."\n}'} />
+              <FieldHelp helpKey="gcp.serviceAccountJson" />
+            </div>
+          )}
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={busy} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+              {busy && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
+              {busy ? 'Saving...' : 'Update credentials'}
             </button>
           </div>
         </form>

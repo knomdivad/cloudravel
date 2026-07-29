@@ -8,4 +8,8 @@ public interface ISecretStore
 {
     Task<string?> GetSecretAsync(string name);
     Task SetSecretAsync(string name, string value);
+    /// <summary>
+    /// Best-effort delete. Missing secrets are not an error (idempotent cleanup).
+    /// </summary>
+    Task DeleteSecretAsync(string name);
 }

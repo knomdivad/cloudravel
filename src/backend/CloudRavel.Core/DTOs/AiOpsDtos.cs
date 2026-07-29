@@ -167,6 +167,10 @@ public sealed class CloudOrgDto
     public IReadOnlyList<CloudAccountDto> Accounts { get; set; } = [];
     /// <summary>Azure connections only: "all" | "specific".</summary>
     public string? SubscriptionScope { get; set; }
+    /// <summary>Azure connections only: "lighthouse" | "app_registration".</summary>
+    public string? OnboardingMethod { get; set; }
+    /// <summary>True when this connection stores credentials that can be rotated.</summary>
+    public bool HasCredentials { get; set; }
 }
 
 public sealed class UpdateCloudOrgStatusRequest
@@ -217,6 +221,23 @@ public sealed class LinkCloudAccountRequest
     /// <summary>Credential payload stored in the secret store; never persisted in SQL.</summary>
     public string? CredentialJson { get; set; }
     public List<string>? Regions { get; set; }
+}
+
+/// <summary>Rotate credentials for an AWS account or GCP project.</summary>
+public sealed class UpdateCloudAccountCredentialsRequest
+{
+    /// <summary>Credential payload stored in the secret store; never persisted in SQL.</summary>
+    public string CredentialJson { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Rotate credentials for an Azure cloud_orgs connection (app_registration).
+/// Lighthouse connections have no client secret to rotate.
+/// </summary>
+public sealed class UpdateCloudOrgCredentialsRequest
+{
+    public string? ClientId { get; set; }
+    public string? ClientSecret { get; set; }
 }
 
 // --- Operations summary (AIOps dashboard) ---

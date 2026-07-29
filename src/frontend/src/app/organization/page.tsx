@@ -9,7 +9,7 @@ import { Field, ModalShell, ModalActions, Spinner, ErrorBox, Toast, AccessDenied
 const ORG_ROLES = ['org_admin', 'cloud_admin', 'read_only'];
 
 export default function OrganizationPage() {
-  const { currentOrg, tenantId, isOrgAdmin } = useTenantContext();
+  const { currentOrg, tenantId, isOrgAdmin, canManageClouds, refreshOrganizations } = useTenantContext();
   const { isSystemAdmin, systemRole } = useAuth();
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const showToast = useCallback((message: string, type: ToastType) => {
@@ -21,8 +21,10 @@ export default function OrganizationPage() {
       <p className="text-gray-500">Select an organization from the sidebar to manage it.</p></div>;
   }
   // Wait for role resolution before denying (currentOrg carries callerRole; systemRole from /me).
+  // Members/SSO require org_admin; cloud_admin can still delete the workspace (with confirmation).
   const canManage = isOrgAdmin || isSystemAdmin;
-  if (currentOrg && systemRole !== null && !canManage) return <AccessDenied />;
+  const canDelete = canManage || canManageClouds;
+  if (currentOrg && systemRole !== null && !canManage && !canDelete) return <AccessDenied />;
 
   return (
     <div className="space-y-8 max-w-5xl">
@@ -31,9 +33,74 @@ export default function OrganizationPage() {
         <h1 className="text-2xl font-bold text-gray-900">Organization</h1>
         <p className="text-sm text-gray-500 mt-1">Manage <strong>{currentOrg?.name}</strong> — members and single sign-on.</p>
       </div>
-      <MembersCard orgId={tenantId} showToast={showToast} />
-      <SsoCard orgId={tenantId} showToast={showToast} />
+      {canManage && (
+        <>
+          <MembersCard orgId={tenantId} showToast={showToast} />
+          <SsoCard orgId={tenantId} showToast={showToast} />
+        </>
+      )}
+      {canDelete && (
+        <DangerZoneCard
+          orgId={tenantId}
+          orgName={currentOrg?.name ?? 'this organization'}
+          showToast={showToast}
+          onDeleted={refreshOrganizations}
+        />
+      )}
     </div>
+  );
+}
+
+function DangerZoneCard({ orgId, orgName, showToast, onDeleted }: {
+  orgId: string;
+  orgName: string;
+  showToast: (m: string, t: ToastType) => void;
+  onDeleted: () => void;
+}) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await api.deleteOrganization(orgId);
+      showToast(`Organization "${orgName}" deleted (suspended) and clouds removed.`, 'success');
+      setConfirm(false);
+      onDeleted();
+    } catch (err: any) {
+      showToast(err?.message ?? 'Failed to delete organization.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="bg-white rounded-lg border border-red-200 p-6">
+      <h2 className="text-lg font-semibold text-red-800">Danger zone</h2>
+      <p className="text-sm text-gray-600 mt-1 mb-4">
+        Delete this workspace organization. All cloud connections (Azure tenants, AWS/GCP orgs, accounts/projects)
+        and their stored credentials are removed. The workspace is soft-deleted (status suspended) so history rows remain.
+      </p>
+      {!confirm ? (
+        <button onClick={() => setConfirm(true)}
+          className="px-4 py-2 text-sm font-medium text-red-700 border border-red-300 rounded-lg hover:bg-red-50">
+          Delete organization…
+        </button>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3 p-4 bg-red-50 border border-red-100 rounded-lg">
+          <p className="text-sm text-red-800 flex-1 min-w-[12rem]">
+            Permanently remove clouds for <strong>{orgName}</strong> and suspend this organization?
+          </p>
+          <button onClick={() => setConfirm(false)} disabled={busy}
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-white">Cancel</button>
+          <button onClick={remove} disabled={busy}
+            className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2">
+            {busy && <Spinner />}
+            {busy ? 'Deleting…' : 'Confirm delete'}
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

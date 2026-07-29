@@ -154,6 +154,11 @@ export async function connectAzureTenant(
   });
 }
 
+/** Soft-delete a workspace organization (status → suspended) and remove all its clouds. */
+export async function deleteOrganization(orgId: string): Promise<void> {
+  await apiCall<void>(`/organizations/${orgId}`, orgId, { method: 'DELETE' });
+}
+
 // ============================================================================
 // Auth / identity
 // ============================================================================
@@ -677,6 +682,40 @@ export async function linkCloudAccount(
   });
 }
 
+/** Unlink an AWS account / GCP project and delete its stored credentials. */
+export async function deleteCloudAccount(tenantId: string, accountId: string): Promise<void> {
+  await apiCall<void>(`/cloud-accounts/${accountId}`, tenantId, { method: 'DELETE' });
+}
+
+/** Rotate credentials for an AWS account / GCP project. */
+export async function updateCloudAccountCredentials(
+  tenantId: string,
+  accountId: string,
+  credentialJson: string
+): Promise<CloudAccount> {
+  return apiCall<CloudAccount>(`/cloud-accounts/${accountId}/credentials`, tenantId, {
+    method: 'PUT',
+    body: JSON.stringify({ credentialJson }),
+  });
+}
+
+/** Delete an Azure tenant connection or AWS/GCP organization (and member accounts). */
+export async function deleteCloudOrg(tenantId: string, orgId: string): Promise<void> {
+  await apiCall<void>(`/cloud-orgs/${orgId}`, tenantId, { method: 'DELETE' });
+}
+
+/** Rotate Azure app-registration credentials for a cloud_orgs connection. */
+export async function updateCloudOrgCredentials(
+  tenantId: string,
+  orgId: string,
+  request: { clientId: string; clientSecret: string }
+): Promise<{ orgId: string; updated: boolean }> {
+  return apiCall(`/cloud-orgs/${orgId}/credentials`, tenantId, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
 // ============================================================================
 // Namespace export for convenient usage: import { api } from '@/lib/api'
 // ============================================================================
@@ -685,6 +724,7 @@ export const api = {
   getOrganizations,
   createOrganization,
   connectAzureTenant,
+  deleteOrganization,
   getTenants,
   onboardTenant,
   updateTenantStatus,
@@ -714,7 +754,11 @@ export const api = {
   getCloudOrgs,
   createCloudOrg,
   updateCloudOrgStatus,
+  deleteCloudOrg,
+  updateCloudOrgCredentials,
   linkCloudAccount,
+  deleteCloudAccount,
+  updateCloudAccountCredentials,
   collectCloudAccount,
   getPlatformInfo,
   getMe,

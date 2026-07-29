@@ -87,6 +87,11 @@ public interface IOrganizationRepository
     Task<IReadOnlyList<Organization>> GetAllAsync();
     Task<Organization?> GetByIdAsync(Guid orgId);
     Task<Organization> CreateAsync(Organization org);
+    /// <summary>
+    /// Soft-delete: status → suspended. Active cloud connections should be
+    /// removed by the caller first. Workspace shell rows (tenants) stay for FK safety.
+    /// </summary>
+    Task SoftDeleteAsync(Guid orgId);
 }
 
 /// <summary>Repository for per-organization SSO settings.</summary>
@@ -106,6 +111,13 @@ public interface ICloudOrgRepository
     Task<CloudOrg?> GetByIdAsync(Guid tenantId, Guid orgId);
     Task<IReadOnlyList<CloudOrg>> GetByTenantAsync(Guid tenantId);
     Task UpdateStatusAsync(Guid tenantId, Guid orgId, CloudOrgStatus status);
+    /// <summary>
+    /// Hard-delete a cloud connection and its children (azure_org_subscriptions for Azure;
+    /// member accounts must be deleted first by the caller).
+    /// </summary>
+    Task DeleteAsync(Guid tenantId, Guid orgId);
+    /// <summary>Point the org at a (new or rotated) secret-store credential name.</summary>
+    Task UpdateCredentialSecretNameAsync(Guid tenantId, Guid orgId, string? credentialSecretName);
 
     /// <summary>Pin subscriptions to an Azure connection (subscription_scope='specific'). No-op if empty.</summary>
     Task AddAzureSubscriptionsAsync(Guid tenantId, Guid orgId, IReadOnlyList<string> subscriptionIds);
@@ -125,4 +137,8 @@ public interface ICloudAccountRepository
     Task<IReadOnlyList<CloudAccount>> GetAllActiveAsync();
     Task UpdateStatusAsync(Guid accountId, CloudAccountStatus status, string? lastError);
     Task TouchInventoryAsync(Guid accountId, DateTime inventoryAt);
+    /// <summary>Hard-delete an AWS account / GCP project link. Caller cleans up the secret.</summary>
+    Task DeleteAsync(Guid tenantId, Guid accountId);
+    /// <summary>Point the account at a (new or rotated) secret-store credential name.</summary>
+    Task UpdateCredentialSecretNameAsync(Guid tenantId, Guid accountId, string? credentialSecretName);
 }

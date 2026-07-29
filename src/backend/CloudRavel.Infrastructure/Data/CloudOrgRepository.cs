@@ -90,6 +90,36 @@ public sealed class CloudOrgRepository : ICloudOrgRepository
             orgId, status, tenantId);
     }
 
+    public async Task DeleteAsync(Guid tenantId, Guid orgId)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+
+        // azure_org_subscriptions FK → cloud_orgs without ON DELETE CASCADE
+        await conn.ExecuteAsync(
+            "DELETE FROM azure_org_subscriptions WHERE tenant_id = @TenantId AND org_id = @OrgId",
+            new { TenantId = tenantId, OrgId = orgId });
+
+        var affected = await conn.ExecuteAsync(
+            "DELETE FROM cloud_orgs WHERE tenant_id = @TenantId AND org_id = @OrgId",
+            new { TenantId = tenantId, OrgId = orgId });
+
+        if (affected == 0)
+            throw new KeyNotFoundException($"Cloud org {orgId} not found.");
+
+        _logger.LogInformation("Deleted cloud org {OrgId} from workspace {TenantId}", orgId, tenantId);
+    }
+
+    public async Task UpdateCredentialSecretNameAsync(Guid tenantId, Guid orgId, string? credentialSecretName)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var affected = await conn.ExecuteAsync(
+            "UPDATE cloud_orgs SET credential_secret_name = @SecretName WHERE tenant_id = @TenantId AND org_id = @OrgId",
+            new { TenantId = tenantId, OrgId = orgId, SecretName = credentialSecretName });
+
+        if (affected == 0)
+            throw new KeyNotFoundException($"Cloud org {orgId} not found.");
+    }
+
     public async Task AddAzureSubscriptionsAsync(Guid tenantId, Guid orgId, IReadOnlyList<string> subscriptionIds)
     {
         if (subscriptionIds.Count == 0) return;

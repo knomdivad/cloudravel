@@ -337,6 +337,10 @@ export interface CloudOrg {
   accounts: CloudAccount[];
   /** Azure connections only: "all" | "specific". */
   subscriptionScope?: 'all' | 'specific';
+  /** Azure connections only: "lighthouse" | "app_registration". */
+  onboardingMethod?: string;
+  /** True when credentials can be rotated (Azure app reg, or always for accounts). */
+  hasCredentials?: boolean;
 }
 
 export interface OpsSummary {
