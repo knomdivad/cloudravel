@@ -88,14 +88,21 @@ async function apiCall<T>(
   });
 
   if (!response.ok) {
-    const error: ApiError = await response.json().catch(() => ({
-      code: 'UNKNOWN',
-      message: `API error: ${response.status} ${response.statusText}`,
-    }));
-    throw new Error(error.message);
+    const raw = await response.text();
+    let message = `API error: ${response.status} ${response.statusText}`;
+    try {
+      const error = JSON.parse(raw) as ApiError & { Message?: string; code?: string; Code?: string };
+      message = error.message || error.Message || message;
+      if (error.code || error.Code) message = `[${error.code || error.Code}] ${message}`;
+    } catch {
+      if (raw?.trim()) message = `${message} — ${raw.trim().slice(0, 200)}`;
+    }
+    throw new Error(message);
   }
 
-  return response.json();
+  const text = await response.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 // A sentinel used for workspace-registry endpoints (list/create) that aren't
@@ -175,22 +182,52 @@ export async function updateSystemSettings(request: {
   });
 }
 
+function normalizeAdminUser(raw: Record<string, unknown>): AdminUser {
+  return {
+    userId: String(raw.userId ?? raw.UserId ?? ''),
+    displayName: String(raw.displayName ?? raw.DisplayName ?? ''),
+    email: String(raw.email ?? raw.Email ?? ''),
+    globalRole: String(raw.globalRole ?? raw.GlobalRole ?? 'member'),
+    isActive: Boolean(raw.isActive ?? raw.IsActive ?? true),
+    authProvider: String(raw.authProvider ?? raw.AuthProvider ?? 'local'),
+    username: (raw.username ?? raw.Username ?? null) as string | null,
+    lastLoginAt: (raw.lastLoginAt ?? raw.LastLoginAt ?? null) as string | null,
+    orgRole: (raw.orgRole ?? raw.OrgRole ?? null) as string | null,
+  };
+}
+
 export async function getAllUsers(): Promise<AdminUser[]> {
-  const res = await apiCall<{ users: AdminUser[] }>('/admin/users', NO_WORKSPACE);
-  return res.users ?? [];
+  // Prefer dedicated list route; fall back to multi-method admin/users.
+  let res: { users?: unknown[]; Users?: unknown[] };
+  try {
+    res = await apiCall('/system/users', NO_WORKSPACE);
+  } catch {
+    res = await apiCall('/admin/users', NO_WORKSPACE);
+  }
+  const list = res.users ?? res.Users ?? [];
+  return list.map((u) => normalizeAdminUser(u as Record<string, unknown>));
 }
 
 export async function createUser(request: {
   displayName: string;
   email: string;
-  username: string;
+  username?: string;
   password: string;
   globalRole?: string;
 }): Promise<AdminUser> {
-  return apiCall<AdminUser>('/admin/users', NO_WORKSPACE, {
+  const email = request.email.trim().toLowerCase();
+  // Prefer unambiguous route (also available as POST /admin/users and /system/users).
+  const raw = await apiCall<Record<string, unknown>>('/system/users', NO_WORKSPACE, {
     method: 'POST',
-    body: JSON.stringify(request),
+    body: JSON.stringify({
+      displayName: request.displayName,
+      email,
+      username: email,
+      password: request.password,
+      globalRole: request.globalRole,
+    }),
   });
+  return normalizeAdminUser(raw);
 }
 
 export async function updateUser(
@@ -208,8 +245,9 @@ export async function updateUser(
 // ============================================================================
 
 export async function getOrgUsers(orgId: string): Promise<AdminUser[]> {
-  const res = await apiCall<{ users: AdminUser[] }>(`/organizations/${orgId}/users`, orgId);
-  return res.users ?? [];
+  const res = await apiCall<{ users?: unknown[]; Users?: unknown[] }>(`/organizations/${orgId}/users`, orgId);
+  const list = res.users ?? res.Users ?? [];
+  return list.map((u) => normalizeAdminUser(u as Record<string, unknown>));
 }
 
 export async function addOrgUser(

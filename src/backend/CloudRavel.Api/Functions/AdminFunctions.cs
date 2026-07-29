@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.Auth;
 using CloudRavel.Core.DTOs;
@@ -93,44 +94,95 @@ public sealed class AdminFunctions
     // Global user management
     // ========================================================================
 
-    /// <summary>GET /api/admin/users — all users.</summary>
-    [Function("ListAllUsers")]
-    public async Task<HttpResponseData> ListAllUsers(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/users")] HttpRequestData req,
+    private static readonly JsonSerializerOptions AdminJson = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
+    /// <summary>
+    /// GET  /api/admin/users — list all users.
+    /// POST /api/admin/users — create a local user (email = login identity).
+    /// Single function, multi-method: reliable on Azure Functions isolated worker.
+    /// </summary>
+    [Function("AdminUsers")]
+    public async Task<HttpResponseData> AdminUsers(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = "admin/users")] HttpRequestData req,
         FunctionContext context)
+    {
+        if (req.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            return await ListAllUsersCoreAsync(req, context);
+        return await CreateUserCoreAsync(req, context);
+    }
+
+    /// <summary>POST /api/admin/users/create — same as POST /api/admin/users (explicit path).</summary>
+    [Function("CreateUser")]
+    public async Task<HttpResponseData> CreateUser(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/users/create")] HttpRequestData req,
+        FunctionContext context) =>
+        await CreateUserCoreAsync(req, context);
+
+    /// <summary>
+    /// GET  /api/system/users — list all users.
+    /// POST /api/system/users — create user.
+    /// Dedicated path used by the SPA (avoids shared-route GET/POST issues).
+    /// </summary>
+    [Function("SystemUsers")]
+    public async Task<HttpResponseData> SystemUsers(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = "system/users")] HttpRequestData req,
+        FunctionContext context)
+    {
+        if (req.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+            return await ListAllUsersCoreAsync(req, context);
+        return await CreateUserCoreAsync(req, context);
+    }
+
+    private async Task<HttpResponseData> ListAllUsersCoreAsync(HttpRequestData req, FunctionContext context)
     {
         var forbid = await context.RequireSystemAdminAsync(req);
         if (forbid != null) return forbid;
 
         var users = await _userRepo.ListAllAsync();
-        var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new AdminUsersResponse { Users = users.Select(ToDto).ToList() });
-        return response;
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new AdminUsersResponse { Users = users.Select(ToDto).ToList() });
     }
 
-    /// <summary>POST /api/admin/users — create a local user (optionally a system admin).</summary>
-    [Function("CreateUser")]
-    public async Task<HttpResponseData> CreateUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/users")] HttpRequestData req,
-        FunctionContext context)
+    private async Task<HttpResponseData> CreateUserCoreAsync(HttpRequestData req, FunctionContext context)
     {
         var forbid = await context.RequireSystemAdminAsync(req);
         if (forbid != null) return forbid;
 
-        var body = await req.ReadFromJsonAsync<CreateUserRequest>();
+        CreateUserRequest? body;
+        try
+        {
+            // Buffer body — some hosts leave the stream unreadable after middleware.
+            using var reader = new StreamReader(req.Body);
+            var raw = await reader.ReadToEndAsync();
+            body = string.IsNullOrWhiteSpace(raw)
+                ? null
+                : JsonSerializer.Deserialize<CreateUserRequest>(raw, AdminJson);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse CreateUser body");
+            body = null;
+        }
+
         if (body == null || string.IsNullOrWhiteSpace(body.Password)
             || string.IsNullOrWhiteSpace(body.DisplayName)
             || string.IsNullOrWhiteSpace(body.Email))
-            return await BadRequest(req, "INVALID_REQUEST", "displayName, email, and password are required.");
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest,
+                new ErrorResponse { Code = "INVALID_REQUEST", Message = "displayName, email, and password are required." });
 
         var email = body.Email.Trim().ToLowerInvariant();
         if (!email.Contains('@', StringComparison.Ordinal))
-            return await BadRequest(req, "INVALID_EMAIL", "email must be a valid email address (also used as login username).");
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest,
+                new ErrorResponse { Code = "INVALID_EMAIL", Message = "email must be a valid email address (also used as login username)." });
 
         // Email is the unique login identity; username is set equal to email.
         if (await _userRepo.GetByEmailAsync(email) != null
             || await _userRepo.GetByUsernameAsync(email) != null)
-            return await Conflict(req, "EMAIL_TAKEN", "That email is already in use.");
+            return await WriteJsonAsync(req, HttpStatusCode.Conflict,
+                new ErrorResponse { Code = "EMAIL_TAKEN", Message = "That email is already in use." });
 
         var globalRole = string.Equals(body.GlobalRole, SystemRole.SystemAdmin, StringComparison.OrdinalIgnoreCase)
             ? SystemRole.SystemAdmin : SystemRole.Member;
@@ -150,12 +202,19 @@ public sealed class AdminFunctions
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create user '{Email}'", email);
-            return await BadRequest(req, "USER_CREATE_FAILED",
-                $"Could not create user. Detail: {ex.Message}");
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest,
+                new ErrorResponse { Code = "USER_CREATE_FAILED", Message = $"Could not create user. Detail: {ex.Message}" });
         }
 
-        var response = req.CreateCorsResponse(HttpStatusCode.Created);
-        await response.WriteAsJsonAsync(ToDto(created));
+        _logger.LogInformation("Created user {UserId} ({Email}) role={Role}", created.UserId, created.Email, created.GlobalRole);
+        return await WriteJsonAsync(req, HttpStatusCode.Created, ToDto(created));
+    }
+
+    private static async Task<HttpResponseData> WriteJsonAsync<T>(HttpRequestData req, HttpStatusCode status, T body)
+    {
+        var response = req.CreateCorsResponse(status);
+        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        await response.WriteStringAsync(JsonSerializer.Serialize(body, AdminJson));
         return response;
     }
 
