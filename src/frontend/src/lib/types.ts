@@ -134,6 +134,8 @@ export interface ResourceChange {
   changeId: string;
   resourceId: string;
   resourceType: string;
+  /** Cloud provider (azure / aws / gcp), inferred from resource id when omitted. */
+  provider?: string;
   changeType: 'Create' | 'Update' | 'Delete';
   detectedAt: string;
   changedProperties?: PropertyChange[];

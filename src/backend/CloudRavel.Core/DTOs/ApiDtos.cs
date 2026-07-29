@@ -174,6 +174,8 @@ public sealed class ResourceChangeDto
     public string ChangeId { get; set; } = string.Empty;
     public string ResourceId { get; set; } = string.Empty;
     public string ResourceType { get; set; } = string.Empty;
+    /// <summary>Inferred cloud provider (azure / aws / gcp) for UI badges.</summary>
+    public string Provider { get; set; } = "azure";
     public string ChangeType { get; set; } = string.Empty;
     public DateTime DetectedAt { get; set; }
     public IReadOnlyList<PropertyChangeDto>? ChangedProperties { get; set; }

@@ -11,6 +11,11 @@ import {
 } from '../lib/hooks';
 import { useTenantContext } from '../contexts/TenantContext';
 import {
+  ProviderBadge,
+  inferProviderFromResourceId,
+  changeResourceLeafName,
+} from '../lib/cloud-scope';
+import {
   BarChart,
   Bar,
   XAxis,
@@ -253,6 +258,7 @@ export default function DashboardPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 text-left text-gray-500">
+                <th className="pb-2 font-medium">Cloud</th>
                 <th className="pb-2 font-medium">Resource</th>
                 <th className="pb-2 font-medium">Type</th>
                 <th className="pb-2 font-medium">Change</th>
@@ -264,8 +270,13 @@ export default function DashboardPage() {
             <tbody>
               {(recentChanges?.changes ?? []).map((c) => (
                 <tr key={c.changeId} className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="py-2 pr-2">
+                    <ProviderBadge
+                      provider={inferProviderFromResourceId(c.resourceId, c.provider)}
+                    />
+                  </td>
                   <td className="py-2 font-mono text-xs truncate max-w-xs" title={c.resourceId}>
-                    {c.resourceId.split('/').pop()}
+                    {changeResourceLeafName(c.resourceId)}
                   </td>
                   <td className="py-2 text-gray-600">{c.resourceType.split('/').pop()}</td>
                   <td className="py-2">
@@ -286,7 +297,7 @@ export default function DashboardPage() {
               ))}
               {totalChanges === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-gray-400">
+                  <td colSpan={7} className="py-8 text-center text-gray-400">
                     No changes detected in the last 24 hours.
                   </td>
                 </tr>

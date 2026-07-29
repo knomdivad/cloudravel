@@ -16,6 +16,53 @@ export function normalizeCloudProvider(p?: string | null): 'azure' | 'aws' | 'gc
   return 'azure';
 }
 
+/**
+ * Infer cloud provider from a resource id (ARN, ARM path, GCP asset name).
+ * Prefer an explicit API `provider` hint when present.
+ */
+export function inferProviderFromResourceId(
+  resourceId?: string | null,
+  providerHint?: string | null,
+): 'azure' | 'aws' | 'gcp' {
+  if (providerHint && providerHint.trim()) {
+    return normalizeCloudProvider(providerHint);
+  }
+  const id = (resourceId ?? '').trim();
+  if (!id) return 'azure';
+
+  if (
+    id.startsWith('arn:aws:') ||
+    id.startsWith('aws-') ||
+    id.startsWith('aws:') ||
+    /^aws/i.test(id)
+  ) {
+    return 'aws';
+  }
+  if (
+    id.includes('googleapis.com') ||
+    id.startsWith('gcp-') ||
+    id.startsWith('gcp:') ||
+    (id.startsWith('projects/') &&
+      (id.includes('/instances/') || id.includes('/buckets/') || id.includes('/zones/')))
+  ) {
+    return 'gcp';
+  }
+  if (
+    id.includes('/subscriptions/') ||
+    id.startsWith('/subscriptions') ||
+    id.includes('providers/Microsoft.')
+  ) {
+    return 'azure';
+  }
+  return 'azure';
+}
+
+/** Short display name for a change row (leaf of resource id / ARN). */
+export function changeResourceLeafName(resourceId?: string | null): string {
+  if (!resourceId) return '—';
+  return leafName(resourceId) || resourceId;
+}
+
 export function cloudLabel(p?: string | null): string {
   const n = normalizeCloudProvider(p);
   if (n === 'aws') return 'AWS';
