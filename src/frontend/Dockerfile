@@ -46,6 +46,11 @@ FROM docker.io/library/nginx:alpine
 # The nginx image runs envsubst over /etc/nginx/templates/*.template at startup
 # and writes the result to /etc/nginx/conf.d/. API_UPSTREAM defaults to the
 # compose service `api:80`; Kubernetes overrides it with the api Service name.
+# DNS_RESOLVER is filled from /etc/resolv.conf by docker-entrypoint.d so nginx
+# re-resolves the API host after container recreate (avoids sticky 502s).
 ENV API_UPSTREAM=api:80
+ENV DNS_RESOLVER=
 COPY default.conf.template /etc/nginx/templates/default.conf.template
+COPY docker-entrypoint.d/15-dns-resolver.sh /docker-entrypoint.d/15-dns-resolver.sh
+RUN chmod +x /docker-entrypoint.d/15-dns-resolver.sh
 COPY --from=build /app/out /usr/share/nginx/html
