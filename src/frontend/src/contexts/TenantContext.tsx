@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import type { Organization } from '../lib/types';
 import { useOrganizations } from '../lib/hooks';
 
@@ -59,7 +59,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     return null;
   });
 
-  const activeOrgs = organizations?.filter((o) => o.status === 'active') ?? [];
+  const activeOrgs = useMemo(
+    () => organizations?.filter((o) => o.status === 'active') ?? [],
+    [organizations]
+  );
 
   // Auto-select the first organization if none is selected (or the stored one is gone)
   useEffect(() => {
