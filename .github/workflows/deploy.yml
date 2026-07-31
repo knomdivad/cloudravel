@@ -334,14 +334,8 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Run SQL migrations
+      - name: Run SQL schema
         uses: azure/sql-action@v2
         with:
           connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=cloudraveldb;User ID=cloudraveladmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
           path: database/001-schema.sql
-
-      - name: Run AIOps + multi-cloud migration
-        uses: azure/sql-action@v2
-        with:
-          connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=cloudraveldb;User ID=cloudraveladmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
-          path: database/003-aiops-multicloud.sql

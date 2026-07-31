@@ -21,24 +21,11 @@ SERVER=${DB_HOST:-mssql}
 DB_USER=${DB_USER:-sa}
 DB=cloudraveldb
 LEGACY_DB=aimdb
-# Schema/RBAC migrations only. The bootstrap local admin is created by
-# 004-local-auth (+ 011 ensures system_admin). Demo data is NOT applied —
-# load seed-demo-data.sql manually if you want Contoso sample rows.
+# Schema/RBAC migrations only. The bootstrap local admin is seeded by
+# 001-schema. Demo data is NOT applied — load seed-demo-data.sql manually if
+# you want Contoso sample rows.
 MIGRATIONS=(
   001-schema
-  002-fix-rls-bypass
-  003-aiops-multicloud
-  004-local-auth
-  005-job-queue
-  006-rename-secret-column
-  007-cloud-orgs
-  008-organizations
-  009-azure-multi-tenant
-  010-admin-rbac
-  011-ensure-bootstrap-admin
-  012-rls-hardening
-  013-email-as-username
-  014-ensure-system-settings
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

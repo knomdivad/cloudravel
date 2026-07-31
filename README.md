@@ -135,7 +135,7 @@ make up          # build + start detached (safe to close the shell)
 
 - Frontend: http://localhost:3000
 - API: http://localhost:7071/api
-- First boot applies schema migrations (`001`–`012`) automatically and creates
+- First boot applies the schema (`001-schema.sql`) automatically and creates
   a default local **system admin** only (no demo orgs/clouds):
   **email `admin@local`, password `ChangeMe123!`** — change this immediately
   outside of local/dev use; the hash is public (it's in source control).
@@ -194,13 +194,9 @@ npm run dev
 #### Database
 
 ```bash
-# Apply migrations in order to a local or Azure SQL instance
+# Apply the schema to a local or Azure SQL instance
 cd database
-sqlcmd -S localhost -d cloudraveldb -i 001-schema.sql
-sqlcmd -S localhost -d cloudraveldb -i 002-fix-rls-bypass.sql
-sqlcmd -S localhost -d cloudraveldb -i 003-aiops-multicloud.sql
-sqlcmd -S localhost -d cloudraveldb -i 004-local-auth.sql
-sqlcmd -S localhost -d cloudraveldb -i 005-job-queue.sql
+sqlcmd -S localhost -d cloudraveldb -I -i 001-schema.sql
 ```
 
 ### Run the full stack with Docker (local / OrbStack)
@@ -245,7 +241,7 @@ Notes:
   Azure Functions base image is amd64-only) run under `linux/amd64` emulation,
   handled transparently by OrbStack. The API build stage and the `web` container
   are native arm64.
-- The `migrator` service applies `database/001`–`012` once each (ledger
+- The `migrator` service applies `database/001-schema.sql` once (ledger
   `dbo.__migrations`). No Contoso demo seed.
 - Live cloud timers/collection need `PLATFORM_ENVIRONMENT=Production` and real
   credentials in OpenBao. Compose defaults to Development (safe; no live collect).
