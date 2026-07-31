@@ -633,4 +633,4 @@ Key features:
 
 ## License
 
-Proprietary — MSP Internal Use
+[GNU Affero General Public License v3.0](LICENSE) (AGPLv3) — free to use, modify, and self-host, including internally. If a modified version is made available to users over a network, the modified source must be offered to those users.
