@@ -1,0 +1,105 @@
+# Dependabot keeps the four ecosystems CloudRavel ships from moving forward on
+# their own. Without it, the only signal that a dependency has a known CVE is
+# somebody happening to read an npm install warning.
+#
+# Updates are grouped so a week's patches arrive as a handful of reviewable pull
+# requests rather than dozens of single-package ones that nobody merges.
+version: 2
+
+updates:
+  # --- Backend ---------------------------------------------------------------
+  - package-ecosystem: nuget
+    directory: /src/backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - backend
+    groups:
+      azure-sdk:
+        patterns:
+          - 'Azure.*'
+          - 'Microsoft.Azure.*'
+      microsoft-extensions:
+        patterns:
+          - 'Microsoft.Extensions.*'
+          - 'Microsoft.Identity.*'
+      test-tooling:
+        patterns:
+          - 'xunit*'
+          - 'Microsoft.NET.Test.Sdk'
+          - 'NSubstitute'
+          - 'coverlet.*'
+    ignore:
+      # Major .NET bumps are a deliberate migration, not a weekly patch: they
+      # have to move with global.json, the Dockerfile, and CI together.
+      - dependency-name: 'Microsoft.NET.Sdk'
+        update-types: ['version-update:semver-major']
+
+  # --- Frontend --------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /src/frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+    groups:
+      react:
+        patterns:
+          - 'react'
+          - 'react-dom'
+          - '@types/react'
+          - '@types/react-dom'
+      next:
+        patterns:
+          - 'next'
+          - 'eslint-config-next'
+      tooling:
+        patterns:
+          - 'eslint*'
+          - 'typescript'
+          - 'tailwindcss'
+          - 'postcss'
+          - 'autoprefixer'
+          - '@types/node'
+
+  # --- CI ---------------------------------------------------------------------
+  # Actions are pinned to commit SHAs, which Dependabot understands and bumps
+  # while keeping the human-readable version comment accurate. Pinning without
+  # this would just mean silently rotting at a fixed commit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    groups:
+      actions:
+        patterns:
+          - '*'
+
+  # --- Container base images ---------------------------------------------------
+  - package-ecosystem: docker
+    directories:
+      - /src/backend
+      - /src/frontend
+      - /database
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker

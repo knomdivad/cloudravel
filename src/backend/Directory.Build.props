@@ -1,5 +1,10 @@
 <Project>
   <PropertyGroup>
     <Version>1.0.0</Version>
+    <!-- Pins the whole transitive graph, not just the direct references written
+         in each csproj. CI restores in locked mode, so a dependency cannot change
+         underneath a build without the lock file changing in the same commit.
+         Regenerate with: dotnet restore CloudRavel.sln -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>
