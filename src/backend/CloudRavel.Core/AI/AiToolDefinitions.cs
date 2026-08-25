@@ -16,6 +16,14 @@ namespace CloudRavel.Core.AI;
 public static class AiToolDefinitions
 {
     /// <summary>
+    /// The only tool in the catalog that mutates state. Callers without the
+    /// cloud_admin role never receive it in their tool list, and the dispatcher
+    /// re-checks it by this name. Declared here so the definition and the
+    /// authorization guard cannot drift apart.
+    /// </summary>
+    public const string ProposeRemediationTool = "propose_remediation";
+
+    /// <summary>
     /// Returns the OpenAI function definitions for all available tools.
     /// These are passed to the chat completion API as the 'tools' parameter.
     /// </summary>
@@ -162,7 +170,7 @@ public static class AiToolDefinitions
             },
             new()
             {
-                Name = "propose_remediation",
+                Name = ProposeRemediationTool,
                 Description = "Propose a remediation action from the playbook catalog. The action is subject to the tenant's approval gate: it will require human approval unless tenant policy auto-approves low-risk playbooks. This tool NEVER executes changes directly. Use only after diagnosing a concrete problem, with a clear evidence-based reason.",
                 Parameters = new Dictionary<string, AiToolParameter>
                 {
