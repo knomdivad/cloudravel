@@ -2,6 +2,9 @@ name: CloudRavel — Build & Test
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -13,6 +16,12 @@ permissions:
   contents: read
   id-token: write
   packages: write
+
+# One run per ref. Superseded pull request pushes are cancelled; runs on main and
+# on tags are not, because their images and charts get published.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOTNET_VERSION: '8.0.x'
@@ -30,6 +39,7 @@ jobs:
   backend:
     name: Backend (.NET 8)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -41,11 +51,29 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore CloudRavel.sln
 
+      # Checked against .editorconfig, which encodes the style already in use.
+      - name: Format check
+        run: dotnet format CloudRavel.sln --verify-no-changes --verbosity minimal
+
       - name: Build
         run: dotnet build CloudRavel.sln --configuration Release --no-restore -p:SourceRevisionId=${{ github.sha }}
 
       - name: Test
-        run: dotnet test CloudRavel.sln --configuration Release --no-build --verbosity normal
+        run: >-
+          dotnet test CloudRavel.sln --configuration Release --no-build --verbosity normal
+          --collect:"XPlat Code Coverage" --results-directory ./.coverage
+
+      # No threshold yet: establish a baseline before it can be ratcheted.
+      # Reports appear once coverlet.collector is referenced by the test project;
+      # without it the collector emits nothing, hence warn rather than error.
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: ./.coverage/**/coverage.cobertura.xml
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Publish API
         run: dotnet publish ${{ env.BACKEND_PATH }}/CloudRavel.Api/CloudRavel.Api.csproj --configuration Release --output ./publish/api --no-build
@@ -64,6 +92,7 @@ jobs:
   frontend:
     name: Frontend (Next.js)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +100,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
 
       - name: Install dependencies
         working-directory: ${{ env.FRONTEND_PATH }}
@@ -79,6 +110,16 @@ jobs:
       - name: Lint
         working-directory: ${{ env.FRONTEND_PATH }}
         run: npm run lint
+
+      # next build reports type errors, but only for files it reaches. A standalone
+      # tsc covers the whole project, including anything the bundler prunes.
+      - name: Typecheck
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm run typecheck
+
+      - name: Content checks
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm run test:help
 
       - name: Build
         working-directory: ${{ env.FRONTEND_PATH }}
@@ -102,6 +143,7 @@ jobs:
   infra-validate:
     name: Validate Terraform
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -136,6 +178,10 @@ jobs:
     name: Build & Push Images
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    # Publishing is not a merge gate. A pull request must never push to GHCR, and
+    # a fork's token has no packages:write to push with anyway.
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -190,10 +236,13 @@ jobs:
   # ============================================================================
   # Helm chart → GHCR (OCI) + workflow artifact
   # ============================================================================
+  # Linting the chart IS a merge gate, so it runs on pull requests; only the
+  # publish steps below are skipped there.
   chart:
     name: Package & Publish Helm Chart
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
@@ -208,6 +257,9 @@ jobs:
       - name: Helm lint
         run: helm lint deploy/helm/cloudravel --set secrets.mssqlSaPassword=x --set secrets.localAuthJwtSigningKey=y
 
+      - name: Helm template
+        run: helm template cloudravel deploy/helm/cloudravel --set secrets.mssqlSaPassword=x --set secrets.localAuthJwtSigningKey=y > /dev/null
+
       - name: Helm package
         run: helm package deploy/helm/cloudravel --destination ./.chart
 
@@ -219,7 +271,9 @@ jobs:
           retention-days: 7
 
       - name: Log in to GHCR (Helm OCI)
+        if: github.event_name != 'pull_request'
         run: helm registry login ${{ env.REGISTRY }} --username ${{ github.actor }} --password ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push chart to GHCR
+        if: github.event_name != 'pull_request'
         run: helm push ./.chart/*.tgz oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/charts

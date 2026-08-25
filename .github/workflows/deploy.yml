@@ -22,6 +22,13 @@ permissions:
   id-token: write
   actions: read
 
+# Serialize per target environment. Two concurrent applies against the same
+# Terraform state is the failure this prevents; in-flight deploys are never
+# cancelled, since a half-applied environment is worse than a queued one.
+concurrency:
+  group: deploy-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
 env:
   AZURE_RESOURCE_GROUP: rg-cloudravel-${{ inputs.environment || 'dev' }}
   ENVIRONMENT: ${{ inputs.environment || 'dev' }}
@@ -33,6 +40,7 @@ jobs:
   resolve-build:
     name: Resolve Build Run
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       run_id: ${{ steps.resolve.outputs.run_id }}
     steps:
@@ -62,6 +70,7 @@ jobs:
   plan-infra:
     name: Terraform Plan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -177,6 +186,7 @@ jobs:
   deploy-infra:
     name: Terraform Apply
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: plan-infra
     environment: ${{ inputs.environment || 'dev' }}
     outputs:
@@ -238,6 +248,7 @@ jobs:
   deploy-backend:
     name: Deploy Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [deploy-infra, resolve-build]
     environment: ${{ inputs.environment || 'dev' }}
     steps:
@@ -268,6 +279,7 @@ jobs:
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [deploy-infra, resolve-build]
     environment: ${{ inputs.environment || 'dev' }}
     steps:
@@ -322,6 +334,7 @@ jobs:
   deploy-database:
     name: Apply Database Schema
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: deploy-infra
     environment: ${{ inputs.environment || 'dev' }}
     steps:
