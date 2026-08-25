@@ -1,5 +1,5 @@
-using Dapper;
 using CloudRavel.Core.Interfaces;
+using Dapper;
 using Microsoft.Extensions.Logging;
 
 namespace CloudRavel.Infrastructure.Data;

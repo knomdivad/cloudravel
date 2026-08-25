@@ -1,6 +1,5 @@
-using Xunit;
-
 using CloudRavel.Core.Auth;
+using Xunit;
 
 namespace CloudRavel.Tests.Auth;
 

@@ -1,6 +1,5 @@
-using Xunit;
-
 using CloudRavel.Infrastructure.Secrets;
+using Xunit;
 
 namespace CloudRavel.Tests.Secrets;
 

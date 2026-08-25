@@ -1,16 +1,16 @@
+using System.ClientModel;
 using System.Net;
 using System.Text.Json;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.AI;
 using CloudRavel.Core.DTOs;
 using CloudRavel.Core.Interfaces;
-using System.ClientModel;
-using OpenAI;
-using OpenAI.Chat;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using OpenAI;
+using OpenAI.Chat;
 
 namespace CloudRavel.Api.Functions;
 

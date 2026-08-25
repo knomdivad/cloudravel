@@ -1,6 +1,5 @@
-using Xunit;
-
 using CloudRavel.Api.Middleware;
+using Xunit;
 
 namespace CloudRavel.Tests.Tenancy;
 
