@@ -1,0 +1,113 @@
+name: Bug report
+description: Something behaves differently than it should
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not for security problems.** If this could be exploited, close this and
+        open a [private advisory](https://github.com/knomdivad/cloudravel/security/advisories/new)
+        instead. See [SECURITY.md](../blob/main/SECURITY.md).
+
+        Please redact credentials, tenant identifiers, subscription IDs, and
+        resource IDs from anything you paste below.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in as a user with the ... role
+        2. Go to ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How is it deployed?
+      options:
+        - Docker Compose (make up)
+        - Kubernetes (Helm chart)
+        - Azure (Terraform)
+        - Running from source
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      description: Best guess is fine.
+      options:
+        - Authentication / login
+        - Authorization / roles
+        - Multi-tenancy / workspace switching
+        - Inventory collection
+        - Change detection
+        - Security and governance findings
+        - AIOps (anomalies, incidents)
+        - Remediation and approvals
+        - AI assistant
+        - Admin and system settings
+        - Deployment (Compose, Helm, Terraform)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The commit SHA, image tag, or chart version.
+      placeholder: "sha-1a2b3c4 / v1.0.0 / main@899e78a"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cloud
+    attributes:
+      label: Which cloud, if the bug involves one?
+      multiple: true
+      options:
+        - Azure
+        - AWS
+        - GCP
+        - Not cloud-specific
+
+  - type: input
+    id: role
+    attributes:
+      label: What role was the affected user?
+      description: Relevant for anything permission-related.
+      placeholder: "read_only / cloud_admin / org_admin / system_admin"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error output
+      description: >-
+        API logs, browser console, or the response body. Include the error
+        `code` if the API returned one. Rendered as a code block, no backticks
+        needed.
+      render: shell
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this
+          required: true
+        - label: I removed credentials and tenant identifiers from what I pasted
+          required: true

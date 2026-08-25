@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/knomdivad/cloudravel/security/advisories/new
+    about: >-
+      Never report a security problem in a public issue. This opens a private
+      advisory visible only to maintainers. See SECURITY.md for scope.
+
+  - name: Ask a question or discuss an idea
+    url: https://github.com/knomdivad/cloudravel/discussions
+    about: >-
+      For usage questions, deployment help, and design discussion. Use an issue
+      once there is a specific bug or a concrete change to make.

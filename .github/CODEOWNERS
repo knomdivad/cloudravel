@@ -1,0 +1,34 @@
+# Code owners are requested for review automatically on any pull request that
+# touches the paths below. See:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Later rules win, so the security-sensitive paths at the bottom override the
+# catch-all at the top.
+
+* @knomdivad
+
+# --- Security boundary -------------------------------------------------------
+# Authorization helpers, the auth and tenant-context middleware, and the RLS
+# session plumbing. A mistake in any of these is a cross-tenant incident.
+/src/backend/CloudRavel.Api/Middleware/          @knomdivad
+/src/backend/CloudRavel.Core/Auth/               @knomdivad
+/src/backend/CloudRavel.Infrastructure/Data/TenantDbConnectionFactory.cs @knomdivad
+/src/backend/CloudRavel.Infrastructure/Secrets/  @knomdivad
+
+# The remediation engine and the AI write path both reach live cloud resources.
+/src/backend/CloudRavel.Infrastructure/AiOps/    @knomdivad
+/src/backend/CloudRavel.Api/Functions/AiFunctions.cs @knomdivad
+
+# Row-level security policies live in the schema.
+/database/                                       @knomdivad
+
+# --- Build, deploy, and supply chain -----------------------------------------
+/.github/                                        @knomdivad
+/infra/                                          @knomdivad
+/deploy/                                         @knomdivad
+/.cursor/                                        @knomdivad
+
+# --- Policy documents ---------------------------------------------------------
+/SECURITY.md                                     @knomdivad
+/LICENSE                                         @knomdivad
+/CODE_OF_CONDUCT.md                              @knomdivad

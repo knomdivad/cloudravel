@@ -6,8 +6,8 @@ type: application
 version: 0.1.0
 appVersion: "1.0.0"
 kubeVersion: ">=1.23.0-0"
-home: https://github.com/knomdivad/azureinventorymanager
+home: https://github.com/knomdivad/cloudravel
 sources:
-  - https://github.com/knomdivad/azureinventorymanager
+  - https://github.com/knomdivad/cloudravel
 maintainers:
   - name: CloudRavel
