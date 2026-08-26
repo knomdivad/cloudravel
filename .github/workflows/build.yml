@@ -191,6 +191,7 @@ jobs:
       id-token: write      # cosign keyless signing via OIDC
       attestations: write  # build provenance
     strategy:
+      fail-fast: false
       matrix:
         include:
           - component: api
@@ -261,6 +262,10 @@ jobs:
           format: spdx-json
           artifact-name: sbom-${{ matrix.component }}.spdx.json
           output-file: sbom-${{ matrix.component }}.spdx.json
+          # Keep the SPDX file as a workflow artifact and attach it to the image
+          # via cosign below. Uploading it onto the GitHub Release needs
+          # contents:write, which this job deliberately does not hold.
+          upload-release-assets: false
 
       # Keyless: identity comes from the workflow's OIDC token and is recorded in
       # the public transparency log, so there is no signing key to store or leak.
