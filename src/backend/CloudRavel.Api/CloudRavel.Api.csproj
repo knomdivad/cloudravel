@@ -12,6 +12,11 @@
     <ProjectReference Include="..\CloudRavel.Infrastructure\CloudRavel.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Lets tests reach the tool-catalog and dispatch seams without widening the
+         public surface of a Functions host that has no library consumers. -->
+    <InternalsVisibleTo Include="CloudRavel.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="2.22.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.0.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.ApplicationInsights" Version="2.0.0" />

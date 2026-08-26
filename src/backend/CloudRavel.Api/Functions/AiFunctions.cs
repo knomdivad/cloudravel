@@ -23,9 +23,14 @@ namespace CloudRavel.Api.Functions;
 ///   - Can only retrieve data via defined tools
 ///   - All tool calls execute against the tenant-scoped database (RLS enforced)
 ///   - AI cannot fabricate resource states or findings
-///   - The ONLY write path is propose_remediation, which respects the tenant's
-///     approval gate — the model never executes changes directly
+///   - The ONLY write path is propose_remediation, which requires the caller to
+///     hold cloud_admin — the same role POST /api/remediations demands — and then
+///     respects the tenant's approval gate. The model never executes changes directly.
 ///   - All responses must cite which tool provided each data point
+///
+/// Read access is deliberately open to any member of the workspace: the assistant
+/// is most useful to the people who cannot change anything. Authorization therefore
+/// gates the individual write tool rather than the endpoint.
 /// </summary>
 public sealed class AiFunctions
 {
@@ -88,6 +93,13 @@ public sealed class AiFunctions
         FunctionContext context)
     {
         var tenantId = context.GetTenantId();
+
+        // Proposing a remediation through the model must cost the same role as
+        // proposing one through POST /api/remediations. Without this the assistant
+        // is an escalation path around that gate.
+        var canPropose = context.IsSystemAdmin() || context.HasOrgRole(OrgRole.CloudAdmin);
+        var actor = context.GetActor();
+
         var request = await req.ReadFromJsonAsync<AiQueryRequest>();
         if (request == null || string.IsNullOrWhiteSpace(request.Query))
         {
@@ -135,8 +147,10 @@ public sealed class AiFunctions
         var client = new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions);
         var chatClient = client.GetChatClient(model);
 
-        // Build native tool definitions for the SDK
-        var toolDefinitions = BuildChatTools();
+        // Build native tool definitions for the SDK. A caller who cannot propose is
+        // never offered the tool, so the model does not plan around a capability the
+        // request would only reject later.
+        var toolDefinitions = BuildChatTools(canPropose);
 
         var toolInvocations = new List<AiToolInvocationDto>();
 
@@ -171,7 +185,8 @@ public sealed class AiFunctions
                         var sw = System.Diagnostics.Stopwatch.StartNew();
                         _logger.LogDebug("AI tool call: {Tool}({Args})", toolCall.FunctionName, toolCall.FunctionArguments);
 
-                        var toolResult = await ExecuteToolAsync(tenantId, toolCall.FunctionName, toolCall.FunctionArguments.ToString());
+                        var toolResult = await ExecuteToolAsync(
+                            tenantId, toolCall.FunctionName, toolCall.FunctionArguments.ToString(), canPropose, actor);
                         sw.Stop();
 
                         toolInvocations.Add(new AiToolInvocationDto
@@ -322,13 +337,17 @@ public sealed class AiFunctions
         value.Length <= max ? value : value[..max] + "…";
 
     /// <summary>
-    /// Builds ChatTool definitions from our AiToolDefinitions for the OpenAI SDK.
+    /// Builds ChatTool definitions from our AiToolDefinitions for the OpenAI SDK,
+    /// omitting the write tool when <paramref name="canPropose"/> is false.
     /// </summary>
-    private static List<ChatTool> BuildChatTools()
+    internal static List<ChatTool> BuildChatTools(bool canPropose)
     {
         var tools = new List<ChatTool>();
         foreach (var def in AiToolDefinitions.GetToolDefinitions())
         {
+            if (!canPropose && def.Name == AiToolDefinitions.ProposeRemediationTool)
+                continue;
+
             var properties = new Dictionary<string, object>();
             var required = new List<string>();
 
@@ -360,8 +379,23 @@ public sealed class AiFunctions
     /// Executes a tool call and returns the result as a JSON string.
     /// All tool executions go through tenant-scoped repositories (RLS enforced).
     /// </summary>
-    private async Task<string> ExecuteToolAsync(Guid tenantId, string toolName, string argumentsJson)
+    internal async Task<string> ExecuteToolAsync(
+        Guid tenantId, string toolName, string argumentsJson, bool canPropose, string actor)
     {
+        // Omitting the tool from the catalog is a hint to the model, not a control:
+        // nothing stops a completion from naming a tool it was never offered.
+        if (!canPropose && toolName == AiToolDefinitions.ProposeRemediationTool)
+        {
+            _logger.LogWarning(
+                "Blocked propose_remediation from {Actor} on tenant {TenantId}: caller lacks the {Role} role",
+                actor, tenantId, OrgRole.CloudAdmin);
+            return JsonSerializer.Serialize(new
+            {
+                error = $"You do not have permission to propose remediations. This requires the '{OrgRole.CloudAdmin}' role in this organization.",
+                permission_denied = true
+            });
+        }
+
         try
         {
             var args = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(argumentsJson) ?? new();
@@ -382,7 +416,7 @@ public sealed class AiFunctions
                 "get_incidents" => await ExecuteGetIncidents(tenantId, args),
                 "get_remediation_actions" => await ExecuteGetRemediationActions(tenantId, args),
                 "get_remediation_playbooks" => await ExecuteGetRemediationPlaybooks(args),
-                "propose_remediation" => await ExecuteProposeRemediation(tenantId, args),
+                AiToolDefinitions.ProposeRemediationTool => await ExecuteProposeRemediation(tenantId, args, actor),
                 "get_cloud_accounts" => await ExecuteGetCloudAccounts(tenantId),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown tool: {toolName}" })
             };
@@ -784,7 +818,7 @@ public sealed class AiFunctions
         });
     }
 
-    private async Task<string> ExecuteProposeRemediation(Guid tenantId, Dictionary<string, JsonElement> args)
+    private async Task<string> ExecuteProposeRemediation(Guid tenantId, Dictionary<string, JsonElement> args, string actor)
     {
         var playbookKey = args.TryGetValue("playbook_key", out var pk) ? pk.GetString() : null;
         var title = args.TryGetValue("title", out var t) ? t.GetString() : null;
@@ -797,8 +831,10 @@ public sealed class AiFunctions
 
         try
         {
+            // Carry the human through: "ai:query" alone attributes every model-driven
+            // action to the same string, leaving the approver with no idea who asked.
             var action = await _remediationService.ProposeAsync(
-                tenantId, playbookKey, resourceId, title, reason, parametersJson, requestedBy: "ai:query");
+                tenantId, playbookKey, resourceId, title, reason, parametersJson, requestedBy: $"ai:query:{actor}");
 
             return JsonSerializer.Serialize(new
             {
