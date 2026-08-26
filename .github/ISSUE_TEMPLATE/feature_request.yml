@@ -1,0 +1,66 @@
+name: Feature request
+description: Suggest a capability or an improvement
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: >-
+        Describe the situation you are in, not the feature you have in mind.
+        Understanding the problem usually surfaces options the requester had
+        not considered.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried or considered?
+      description: >-
+        Including whether an existing feature nearly does this. If something is
+        close but falls short, say where.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Inventory and resource collection
+        - Change detection and drift
+        - Security and governance
+        - AIOps (anomalies, incidents)
+        - Remediation playbooks and approvals
+        - AI assistant
+        - Multi-tenancy and RBAC
+        - Multi-cloud provider support
+        - Deployment and operations
+        - Developer experience
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cloud
+    attributes:
+      label: Which clouds would this apply to?
+      multiple: true
+      options:
+        - Azure
+        - AWS
+        - GCP
+        - Provider-independent
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Would you be willing to work on this?
+      options:
+        - label: I would be interested in opening a pull request for it
