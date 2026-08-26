@@ -36,11 +36,27 @@ spec:
       labels:
         {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "azurite") | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "cloudravel.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      {{- with (include "cloudravel.podSecurityContext" (dict "ctx" . "component" "azurite")) }}
+      securityContext:
+        {{- . | nindent 8 }}
+      {{- end }}
       containers:
         - name: azurite
           image: {{ .Values.azurite.image }}
+          {{- with (include "cloudravel.containerSecurityContext" (dict "ctx" . "component" "azurite")) }}
+          securityContext:
+            {{- . | nindent 12 }}
+          {{- end }}
           args:
             - azurite
+            # -l is what the image's own CMD passes and this args list was
+            # overriding. Without it Azurite writes its database to the image
+            # working directory instead of the mounted volume, so the PVC below
+            # held nothing and storage did not survive a restart.
+            - -l
+            - /data
             - --blobHost
             - 0.0.0.0
             - --queueHost

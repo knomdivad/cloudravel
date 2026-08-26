@@ -37,9 +37,19 @@ spec:
       labels:
         {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "mssql") | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "cloudravel.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      {{- with (include "cloudravel.podSecurityContext" (dict "ctx" . "component" "mssql")) }}
+      securityContext:
+        {{- . | nindent 8 }}
+      {{- end }}
       containers:
         - name: mssql
           image: {{ .Values.mssql.image }}
+          {{- with (include "cloudravel.containerSecurityContext" (dict "ctx" . "component" "mssql")) }}
+          securityContext:
+            {{- . | nindent 12 }}
+          {{- end }}
           ports:
             - name: mssql
               containerPort: 1433

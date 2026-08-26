@@ -41,6 +41,51 @@ app.kubernetes.io/component: {{ .component }}
 {{- define "cloudravel.openbao.fullname" -}}{{ include "cloudravel.fullname" . }}-openbao{{- end -}}
 {{- define "cloudravel.migrator.fullname" -}}{{ include "cloudravel.fullname" . }}-migrator{{- end -}}
 
+{{/*
+ServiceAccount name. One account per release rather than `default`, so the
+workloads can be named in RBAC and admission policy. None of the components
+talk to the Kubernetes API, hence automountServiceAccountToken: false below.
+*/}}
+{{- define "cloudravel.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "cloudravel.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Pod-level security context, merged from the chart-wide default and the
+component override:
+  include "cloudravel.podSecurityContext" (dict "ctx" . "component" "api")
+*/}}
+{{- define "cloudravel.podSecurityContext" -}}
+{{- $default := .ctx.Values.podSecurityContext | default dict -}}
+{{- $override := (index .ctx.Values .component).podSecurityContext | default dict -}}
+{{- $merged := mergeOverwrite (deepCopy $default) $override -}}
+{{- if $merged -}}
+{{- toYaml $merged -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Container-level security context, same merge.
+
+A note on capabilities: dropping ALL also removes CAP_NET_BIND_SERVICE, and
+without it nothing can listen below port 1024 — not even root. The api and web
+containers listen on :80, so their values add it back explicitly. Dropping ALL
+alone would leave them unable to bind, which surfaces as a crashloop rather
+than a permissions error.
+*/}}
+{{- define "cloudravel.containerSecurityContext" -}}
+{{- $default := .ctx.Values.containerSecurityContext | default dict -}}
+{{- $override := (index .ctx.Values .component).containerSecurityContext | default dict -}}
+{{- $merged := mergeOverwrite (deepCopy $default) $override -}}
+{{- if $merged -}}
+{{- toYaml $merged -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Secret name: the managed secret, or the caller-provided existingSecret */}}
 {{- define "cloudravel.secretName" -}}
 {{- if .Values.secrets.existingSecret -}}

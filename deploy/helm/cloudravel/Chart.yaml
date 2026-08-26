@@ -3,7 +3,7 @@ name: cloudravel
 description: CloudRavel — multi-cloud AIOps operating platform (API + web + bundled SQL/storage/secret-store)
 type: application
 # Chart version — bump on chart changes. appVersion tracks the app image tag default.
-version: 0.1.0
+version: 0.2.0
 appVersion: "1.0.0"
 kubeVersion: ">=1.23.0-0"
 home: https://github.com/knomdivad/cloudravel
