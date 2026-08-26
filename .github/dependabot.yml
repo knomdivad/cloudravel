@@ -70,6 +70,33 @@ updates:
           - 'autoprefixer'
           - '@types/node'
 
+    ignore:
+      # Framework and auth majors are deliberate migrations; patch/minor still flow.
+      - dependency-name: 'next'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'eslint-config-next'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react-dom'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/react-dom'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@azure/msal-browser'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@azure/msal-react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'eslint'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'tailwindcss'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
   # --- CI ---------------------------------------------------------------------
   # Actions are pinned to commit SHAs, which Dependabot understands and bumps
   # while keeping the human-readable version comment accurate. Pinning without
@@ -103,3 +130,12 @@ updates:
     labels:
       - dependencies
       - docker
+
+    ignore:
+      # Base-image majors move with the app runtime (Node 20, .NET 8) as a unit.
+      - dependency-name: 'library/node'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'dotnet/sdk'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'mcr.microsoft.com/dotnet/sdk'
+        update-types: ['version-update:semver-major']
