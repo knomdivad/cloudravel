@@ -76,11 +76,30 @@ export async function loginLocal(username: string, password: string): Promise<Lo
   // Send both username and email — login identity is the email string.
   // (Older servers only read username; UI labels the field Email.)
   const identity = username.trim();
-  const response = await fetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: identity, email: identity, password }),
-  });
+
+  // fetch() has no built-in timeout — an API that accepts the connection but
+  // never responds (e.g. still starting up) would otherwise hang indefinitely,
+  // leaving the sign-in button stuck disabled (which also blocks Enter-to-submit,
+  // since a disabled button isn't a valid default for implicit form submission).
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: identity, email: identity, password }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('The server took too long to respond. Please try again.');
+    }
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const payload = await response.json().catch(() => ({} as Record<string, unknown>));
 

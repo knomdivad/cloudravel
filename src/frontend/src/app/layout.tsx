@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 import './globals.css';
 import React, { useEffect, useMemo, useState } from 'react';
+import { usePathname } from 'next/navigation';
 
 const entraConfigured = Boolean(process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID);
 
@@ -215,6 +216,11 @@ const navItems: NavItem[] = [
 function AppShell({ children }: { children: React.ReactNode }) {
   const { userName, logout, isSystemAdmin, systemRole } = useAuth();
   const { organizations, currentOrg, currentTenant, selectTenant, refreshOrganizations, isOrgAdmin } = useTenantContext();
+  const pathname = usePathname();
+  // /admin is system-wide (not scoped to the selected organization), so the
+  // top bar shouldn't show the currently-selected org's name/status there —
+  // it would misleadingly imply the page is about that one org.
+  const isSystemWidePage = pathname === '/admin';
 
   const visibleNav = navItems.filter((i) =>
     !i.require ||
@@ -348,7 +354,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             className="border-t border-gray-700 px-3 py-2 text-xs text-gray-500 truncate"
             title={commit ? `Commit ${commit}` : undefined}
           >
-            {!sidebarCollapsed ? `v${version}` : 'v'}
+            {!sidebarCollapsed ? `v${version}${commit ? ` (${commit})` : ''}` : 'v'}
           </div>
         )}
 
@@ -366,7 +372,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
         {/* Top bar */}
         <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-10">
           <div>
-            {currentTenant && (
+            {currentTenant && !isSystemWidePage && (
               <h2 className="text-lg font-semibold text-gray-900">{currentTenant.displayName}</h2>
             )}
           </div>
@@ -379,7 +385,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
                 {environment}
               </span>
             )}
-            {currentTenant && (
+            {currentTenant && !isSystemWidePage && (
               <span
                 className={`text-xs font-medium px-2 py-1 rounded-full ${
                   currentTenant.status === 'active'
