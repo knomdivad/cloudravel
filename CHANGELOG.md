@@ -11,6 +11,12 @@ behaviour someone may already depend on.
 
 ## [Unreleased]
 
+### Fixed
+
+- Image publish no longer fails on tag builds when generating SBOMs: release
+  asset upload is disabled (SBOM stays as a workflow artifact and a cosign
+  attestation on the image digest).
+
 ## [1.0.0] — 2026-08-26
 
 First versioned release. Marks the security, CI, test, governance, and Helm
