@@ -11,6 +11,11 @@ behaviour someone may already depend on.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-08-26
+
+First versioned release. Marks the security, CI, test, governance, and Helm
+hardening stack as the baseline for anyone deploying or forking from here.
+
 ### Security
 
 - Proposing a remediation through the AI assistant now requires the
@@ -26,10 +31,16 @@ behaviour someone may already depend on.
 - Added a security scanning pipeline: CodeQL, dependency audits, gitleaks,
   Checkov, and Trivy. Findings report to the Security tab rather than failing
   builds while the existing backlog is worked down.
+- Helm chart defaults now include restricted `securityContext`, a chart
+  ServiceAccount, NetworkPolicy, and PodDisruptionBudget; OpenBao token
+  handling fails closed when the token is missing.
 - Documented in [SECURITY.md](SECURITY.md): `infra/terraform/tfplan.json` was
   committed in `f746912` and removed in `d85450f`, but the blob remains
   reachable from git history and contains a real SQL administrator password.
-  **Anyone who has deployed from this repository should rotate that credential.**
+  Rotate that credential before any production deploy that ever used it.
+- Frontend dependency patches (lodash, flatted, js-yaml, brace-expansion,
+  picomatch, postcss) and Next.js `14.2.28` → `14.2.35`. Remaining Next 14
+  advisories that only clear on a major upgrade are deferred.
 
 ### Added
 
@@ -38,13 +49,15 @@ behaviour someone may already depend on.
 - Test foundation: NSubstitute, coverlet, and doubles for the isolated-worker
   HTTP types, followed by coverage of the authorization ladder, the remediation
   approval gate and execution state machine, and AWS SigV4 signing. 23 tests to 96.
-- Dependabot for NuGet, npm, GitHub Actions, and Docker.
+- Dependabot for NuGet, npm, GitHub Actions, and Docker, with semver-major
+  ignores for framework and runtime base-image migrations.
 - Container images are signed with keyless cosign and carry SPDX SBOM
   attestations, both addressed by digest.
 - `.cursor/environment.json` and an install script pinning the .NET, Node,
   Terraform, and Helm versions the project builds with.
 - Project governance: this changelog, `SECURITY.md`, `CONTRIBUTING.md`,
   `CODE_OF_CONDUCT.md`, `CODEOWNERS`, and issue and pull request templates.
+- Helm `values.schema.json`, chart README, and connection smoke tests.
 
 ### Changed
 
@@ -53,11 +66,17 @@ behaviour someone may already depend on.
   so a transitive dependency cannot change without the lock file changing too.
 - `.editorconfig` added and using directives normalized, so `dotnet format`
   can be enforced in CI.
+- Local login aborts after 20s so a slow API cannot wedge the sign-in button.
+- Sidebar version label shows the commit hash; `/admin` hides org-scoped chrome;
+  `make` auto-exports `GIT_SHA` for local image stamps.
+- Helm chart version bumped to `0.3.0` (app `1.0.0`).
 
 ### Fixed
 
 - Corrected the stale `home` and `sources` URLs in the Helm chart, which still
   pointed at the project's former name.
+- Regenerated `CloudRavel.Tests/packages.lock.json` so locked-mode restore
+  includes NSubstitute and coverlet.
 
 ### Removed
 
@@ -98,4 +117,5 @@ repository up to that point, reconstructed from git history:
 - Database migrations collapsed into a single schema file.
 - AGPLv3 license added.
 
-[Unreleased]: https://github.com/knomdivad/cloudravel/commits/main
+[Unreleased]: https://github.com/knomdivad/cloudravel/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/knomdivad/cloudravel/releases/tag/v1.0.0
