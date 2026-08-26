@@ -12,6 +12,7 @@ node_modules/
 .next/
 out/
 .env.local
+*.tsbuildinfo
 
 # Azure Functions
 local.settings.json

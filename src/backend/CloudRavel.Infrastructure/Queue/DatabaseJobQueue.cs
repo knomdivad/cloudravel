@@ -1,6 +1,6 @@
-using Dapper;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
+using Dapper;
 
 namespace CloudRavel.Infrastructure.Queue;
 

@@ -22,6 +22,13 @@ permissions:
   id-token: write
   actions: read
 
+# Serialize per target environment. Two concurrent applies against the same
+# Terraform state is the failure this prevents; in-flight deploys are never
+# cancelled, since a half-applied environment is worse than a queued one.
+concurrency:
+  group: deploy-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
 env:
   AZURE_RESOURCE_GROUP: rg-cloudravel-${{ inputs.environment || 'dev' }}
   ENVIRONMENT: ${{ inputs.environment || 'dev' }}
@@ -33,6 +40,7 @@ jobs:
   resolve-build:
     name: Resolve Build Run
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       run_id: ${{ steps.resolve.outputs.run_id }}
     steps:
@@ -62,6 +70,7 @@ jobs:
   plan-infra:
     name: Terraform Plan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -72,16 +81,16 @@ jobs:
       TF_VAR_sql_admin_password: ${{ secrets.SQL_ADMIN_PASSWORD }}
       TF_VAR_alert_email: ${{ vars.ALERT_EMAIL || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: '~> 1.9'
           terraform_wrapper: false
 
       - name: Azure Login (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -156,7 +165,7 @@ jobs:
           terraform show -no-color tfplan > tfplan.txt
 
       - name: Upload plan artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tfplan-${{ inputs.environment || 'dev' }}
           path: |
@@ -177,6 +186,7 @@ jobs:
   deploy-infra:
     name: Terraform Apply
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: plan-infra
     environment: ${{ inputs.environment || 'dev' }}
     outputs:
@@ -194,16 +204,16 @@ jobs:
       TF_VAR_sql_admin_password: ${{ secrets.SQL_ADMIN_PASSWORD }}
       TF_VAR_alert_email: ${{ vars.ALERT_EMAIL || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: '~> 1.9'
           terraform_wrapper: false
 
       - name: Azure Login (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -214,7 +224,7 @@ jobs:
         run: terraform init
 
       - name: Download plan artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: tfplan-${{ inputs.environment || 'dev' }}
           path: infra/terraform
@@ -238,11 +248,12 @@ jobs:
   deploy-backend:
     name: Deploy Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [deploy-infra, resolve-build]
     environment: ${{ inputs.environment || 'dev' }}
     steps:
       - name: Download API artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: api-package
           path: ./api-package
@@ -250,14 +261,14 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Azure Login (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy to Azure Functions
-        uses: Azure/functions-action@v1
+        uses: Azure/functions-action@c5060b3b8bb1ebbcb531abd00c822ecbaa8ea656 # v1.5.7
         with:
           app-name: ${{ needs.deploy-infra.outputs.functionAppName }}
           package: ./api-package
@@ -268,6 +279,7 @@ jobs:
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [deploy-infra, resolve-build]
     environment: ${{ inputs.environment || 'dev' }}
     steps:
@@ -284,7 +296,7 @@ jobs:
           fi
 
       - name: Download frontend artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: frontend-package
           path: ./frontend-package
@@ -292,7 +304,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Azure Login (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -309,7 +321,7 @@ jobs:
           echo "token=${TOKEN}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Static Web App
-        uses: Azure/static-web-apps-deploy@v1
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
         with:
           azure_static_web_apps_api_token: ${{ steps.swa-token.outputs.token }}
           action: upload
@@ -322,20 +334,21 @@ jobs:
   deploy-database:
     name: Apply Database Schema
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: deploy-infra
     environment: ${{ inputs.environment || 'dev' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Azure Login (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Run SQL schema
-        uses: azure/sql-action@v2
+        uses: azure/sql-action@b62786fa729f2688a1969b868c1fd243003d3d58 # v2
         with:
           connection-string: Server=tcp:${{ needs.deploy-infra.outputs.sqlServerFqdn }},1433;Initial Catalog=cloudraveldb;User ID=cloudraveladmin;Password=${{ secrets.SQL_ADMIN_PASSWORD }};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
           path: database/001-schema.sql
