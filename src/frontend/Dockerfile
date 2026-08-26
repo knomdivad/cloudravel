@@ -8,7 +8,7 @@
 # args (docker compose does this from the .env file).
 # ============================================================================
 
-FROM docker.io/library/node:20-alpine AS build
+FROM docker.io/library/node:26-alpine AS build
 WORKDIR /app
 
 # Prefer IPv4 for outbound DNS lookups. Some networks resolve registry hosts
