@@ -5,7 +5,7 @@
 # Build natively on whatever host arch (dotnet/sdk has arm64 + amd64) — a
 # `dotnet publish` without -r is portable IL, so the build stage's arch
 # doesn't need to match the runtime stage's.
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Optional short git SHA, passed by docker-compose.yml from the host — the build
