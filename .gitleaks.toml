@@ -1,0 +1,31 @@
+# gitleaks configuration for CloudRavel.
+#
+# Extends the default ruleset; this file only records values that are published
+# constants rather than credentials. Allowlisting is keyed to the literal values,
+# never to a file path alone, so a genuine secret committed to one of these files
+# would still be reported.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Published constants and specification test vectors"
+regexTarget = "match"
+
+regexes = [
+  # Azurite emulator account key: published by Microsoft and identical in every
+  # install. Matching the literal value keeps this from hiding a real storage key
+  # that happens to appear in the same connection string.
+  '''Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==''',
+
+  # AWS SigV4 specification test-suite credentials, used by AwsSigV4Tests.
+  '''AKIDEXAMPLE''',
+  '''wJalrXUtnFEMI/K7MDENG\+bPxRfiCYEXAMPLEKEY''',
+]
+
+paths = [
+  # Lock files record package integrity hashes, which trip entropy rules.
+  '''.*package-lock\.json$''',
+  '''.*packages\.lock\.json$''',
+  '''.*\.terraform\.lock\.hcl$''',
+]
