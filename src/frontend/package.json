@@ -21,7 +21,7 @@
     "react-markdown": "^10.1.0",
     "recharts": "^2.15.0",
     "remark-gfm": "^4.0.1",
-    "swr": "^2.2.5"
+    "swr": "^2.5.1"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
