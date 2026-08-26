@@ -1,0 +1,135 @@
+{{/*
+`helm test cloudravel` runs these after an install or upgrade.
+
+They check reachability, not correctness: that the web pod serves, that the API
+reports ready (which means it reached the database and found a schema), and
+that the backing services accept TCP. That is enough to distinguish "the
+release is wired up" from "something is quietly not talking to something else",
+which is the question a deployer actually has.
+
+The pods inherit the release's own security contexts so a test failure means
+the workload is broken, not that the test container was configured differently.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cloudravel.fullname" . }}-test-web
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "cloudravel.serviceAccountName" . }}
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: web
+      image: busybox:1.37
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      command:
+        - wget
+        - -q
+        - -O-
+        - --timeout=10
+        - "http://{{ include "cloudravel.web.fullname" . }}:{{ .Values.web.service.port }}/"
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { cpu: 100m, memory: 32Mi }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cloudravel.fullname" . }}-test-api
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "cloudravel.serviceAccountName" . }}
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: api
+      image: busybox:1.37
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      # /api/health/ready returns 200 only once the migration Job has created
+      # the schema, so this covers the API, the database, and the migration.
+      command:
+        - wget
+        - -q
+        - -O-
+        - --timeout=10
+        - "http://{{ include "cloudravel.api.fullname" . }}:{{ .Values.api.service.port }}/api/health/ready"
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { cpu: 100m, memory: 32Mi }
+{{- if or .Values.mssql.enabled .Values.azurite.enabled .Values.openbao.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cloudravel.fullname" . }}-test-backends
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "cloudravel.serviceAccountName" . }}
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: backends
+      image: busybox:1.37
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          {{- if .Values.mssql.enabled }}
+          echo "mssql..."   && nc -z -w 10 {{ include "cloudravel.mssql.fullname" . }} {{ .Values.mssql.service.port }}
+          {{- end }}
+          {{- if .Values.azurite.enabled }}
+          echo "azurite..." && nc -z -w 10 {{ include "cloudravel.azurite.fullname" . }} 10000
+          {{- end }}
+          {{- if .Values.openbao.enabled }}
+          echo "openbao..." && nc -z -w 10 {{ include "cloudravel.openbao.fullname" . }} {{ .Values.openbao.service.port }}
+          {{- end }}
+          echo "all backends reachable"
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { cpu: 100m, memory: 32Mi }
+{{- end }}

@@ -53,6 +53,12 @@ spec:
       labels:
         {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "openbao") | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "cloudravel.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      {{- with (include "cloudravel.podSecurityContext" (dict "ctx" . "component" "openbao")) }}
+      securityContext:
+        {{- . | nindent 8 }}
+      {{- end }}
       containers:
         - name: openbao
           image: {{ .Values.openbao.image }}
@@ -95,9 +101,10 @@ spec:
           ports:
             - name: http
               containerPort: 8200
+          {{- with (include "cloudravel.containerSecurityContext" (dict "ctx" . "component" "openbao")) }}
           securityContext:
-            capabilities:
-              add: ["IPC_LOCK"]
+            {{- . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             exec:
               command:

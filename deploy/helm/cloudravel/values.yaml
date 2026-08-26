@@ -33,6 +33,49 @@ imagePullSecrets: []
 # - name: ghcr-pull
 
 # ---------------------------------------------------------------------------
+# Service account. One per release instead of `default`, so these workloads can
+# be named in RBAC and admission policy. Nothing here calls the Kubernetes API,
+# so the token is not mounted.
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  automount: false
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Security contexts.
+#
+# These are the chart-wide defaults; every component below can override them
+# under its own `podSecurityContext` / `containerSecurityContext` key, and the
+# two are merged with the component winning.
+#
+# The defaults are the settings that hold for every image here. Two are left to
+# the components deliberately:
+#
+#   runAsNonRoot          Not all bundled images support it. Where a component
+#                         sets it, the image is known to run unprivileged.
+#   readOnlyRootFilesystem
+#                         Requires knowing every path a container writes to.
+#                         Enabled per component, each with the emptyDir mounts
+#                         that make it work.
+#
+# Dropping ALL capabilities also removes CAP_NET_BIND_SERVICE, so a container
+# listening below port 1024 must add it back. api and web do.
+# ---------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: false
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+# ---------------------------------------------------------------------------
 # Secrets — the chart creates a Secret from these values. To use your own
 # Secret instead, set `existingSecret` to its name; it must contain keys:
 #   mssql-sa-password, local-auth-jwt-signing-key, openbao-token, openai-api-key
@@ -65,7 +108,19 @@ api:
     clientId: ""
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits: { memory: 1Gi }
+    limits: { cpu: "1", memory: 1Gi }
+  # Listens on :80, so it needs NET_BIND_SERVICE back after the ALL drop.
+  # The Functions host writes to /tmp; readOnlyRootFilesystem would need that
+  # and the host's own writable paths mapped first.
+  containerSecurityContext:
+    capabilities:
+      drop: ["ALL"]
+      add: ["NET_BIND_SERVICE"]
+  podSecurityContext: {}
+  # Spread replicas across nodes when scaled past one.
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -79,7 +134,39 @@ web:
     port: 80
   resources:
     requests: { cpu: 50m, memory: 64Mi }
-    limits: { memory: 256Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  # Runs as the image's own nginx user (101) rather than root. Doing that is what
+  # makes dropping capabilities viable: as root, nginx chowns its cache directory
+  # at startup and fails without CAP_CHOWN, so keeping root would mean handing
+  # back CHOWN, SETUID, SETGID, and DAC_OVERRIDE — most of what the drop was for.
+  #
+  # fsGroup 101 is load-bearing: the emptyDir volumes below are root-owned
+  # without it, and nginx cannot write its rendered config or its pid file.
+  #
+  # On binding :80 as uid 101 — this works because kubelet defaults
+  # net.ipv4.ip_unprivileged_port_start to 0, not because of the capability
+  # below. A non-root process gets no effective capabilities from
+  # capabilities.add (measured: CapEff is 0), so NET_BIND_SERVICE only matters
+  # if someone overrides runAsUser to 0. On a cluster that raises that sysctl,
+  # move nginx to :8080 and repoint the Service rather than granting the
+  # capability, which would not help here.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+  # readOnlyRootFilesystem is on, with every path nginx writes to mounted as
+  # emptyDir in web.yaml. /etc/nginx/conf.d is one of them because the official
+  # entrypoint runs envsubst over the template at startup and writes the result
+  # there, so a read-only /etc/nginx fails before nginx starts.
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+      add: ["NET_BIND_SERVICE"]
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -99,7 +186,9 @@ ingress:
 # ---------------------------------------------------------------------------
 mssql:
   enabled: true
-  image: mcr.microsoft.com/azure-sql-edge:latest
+  # Pinned rather than :latest so a redeploy cannot silently change the database
+  # engine under a running install.
+  image: mcr.microsoft.com/azure-sql-edge:1.0.7
   service:
     port: 1433
   persistence:
@@ -108,7 +197,29 @@ mssql:
     storageClass: ""
   resources:
     requests: { cpu: 250m, memory: 1Gi }
-    limits: { memory: 2Gi }
+    limits: { cpu: "2", memory: 2Gi }
+  # The image already runs unprivileged as mssql; this asserts it rather than
+  # trusting the image not to change. Note the group: mssql is uid 10001 but
+  # gid 0, and /var/opt/mssql is drwxrwx--- root root, so the engine reaches its
+  # own data directory through group root. Overriding runAsGroup to 10001 locks
+  # it out of that directory.
+  #
+  # The engine writes throughout /var/opt/mssql, so the root filesystem stays
+  # writable.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 0
+    fsGroup: 0
+  # NET_BIND_SERVICE is not about binding a port here. /opt/mssql/bin/sqlservr
+  # carries the file capability cap_net_bind_service+ep, and the kernel refuses
+  # to exec a binary whose effective file capability cannot be raised. Dropping
+  # ALL without adding this back fails at startup with a bare
+  # "sqlservr: Operation not permitted".
+  containerSecurityContext:
+    capabilities:
+      drop: ["ALL"]
+      add: ["NET_BIND_SERVICE"]
 
 # Used only when mssql.enabled=false. The chart builds the api connection
 # string and the migrator DB_HOST from these.
@@ -120,14 +231,20 @@ externalMssql:
 
 azurite:
   enabled: true
-  image: mcr.microsoft.com/azure-storage/azurite
+  image: mcr.microsoft.com/azure-storage/azurite:3.36.0
   persistence:
     enabled: true
     size: 1Gi
     storageClass: ""
   resources:
     requests: { cpu: 50m, memory: 64Mi }
-    limits: { memory: 256Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  # Listens on 10000-10002, all unprivileged, so no capabilities are needed.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  containerSecurityContext: {}
 
 # Used only when azurite.enabled=false. Full AzureWebJobsStorage connection
 # string for the Functions host (real Azure Storage or another emulator).
@@ -136,7 +253,7 @@ externalStorage:
 
 openbao:
   enabled: true
-  image: docker.io/openbao/openbao:latest
+  image: docker.io/openbao/openbao:2.4.1
   service:
     port: 8200
   # mode: file (default) = file storage + auto-init/unseal entrypoint (persistent when
@@ -149,7 +266,14 @@ openbao:
     storageClass: ""
   resources:
     requests: { cpu: 50m, memory: 64Mi }
-    limits: { memory: 256Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  # IPC_LOCK lets OpenBao mlock its memory so secrets are not paged to disk;
+  # it is the one capability added back after the ALL drop.
+  podSecurityContext: {}
+  containerSecurityContext:
+    capabilities:
+      drop: ["ALL"]
+      add: ["IPC_LOCK"]
 
 # Used only when openbao.enabled=false.
 externalOpenBao:
@@ -159,6 +283,26 @@ externalOpenBao:
 
 # Migration Job (runs as a Helm post-install/post-upgrade hook).
 migrator:
+  image: mcr.microsoft.com/mssql-tools:latest
   resources:
     requests: { cpu: 50m, memory: 64Mi }
-    limits: { memory: 256Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  podSecurityContext: {}
+  containerSecurityContext: {}
+
+# ---------------------------------------------------------------------------
+# NetworkPolicy. Off by default because it silently breaks traffic on clusters
+# with no CNI that enforces it, which is worse than not having it. Turn it on
+# where the CNI does enforce (Calico, Cilium, and similar).
+#
+# When enabled: the database, storage, and secret store accept connections only
+# from this release's own pods, and the api and web pods accept ingress-controller
+# traffic. Everything keeps unrestricted egress, since the api must reach Azure,
+# AWS, GCP, and the AI provider.
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  # Namespaces allowed to reach api and web. Empty means any namespace, which
+  # is the right default for an ingress controller in a namespace nobody can
+  # name ahead of time.
+  ingressNamespaceSelector: {}

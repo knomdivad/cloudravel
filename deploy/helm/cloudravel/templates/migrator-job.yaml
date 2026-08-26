@@ -23,10 +23,20 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      serviceAccountName: {{ include "cloudravel.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      {{- with (include "cloudravel.podSecurityContext" (dict "ctx" . "component" "migrator")) }}
+      securityContext:
+        {{- . | nindent 8 }}
+      {{- end }}
       containers:
         - name: migrator
           image: {{ include "cloudravel.image" (dict "ctx" . "component" "migrator") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with (include "cloudravel.containerSecurityContext" (dict "ctx" . "component" "migrator")) }}
+          securityContext:
+            {{- . | nindent 12 }}
+          {{- end }}
           env:
             - name: DB_HOST
               value: {{ include "cloudravel.dbHost" . | quote }}

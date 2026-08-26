@@ -1,0 +1,40 @@
+{{/*
+Disruption budgets for the two stateless components.
+
+Off by default and deliberately so: with replicaCount 1, a budget of
+minAvailable 1 makes the pod undrainable and blocks every node drain and cluster
+upgrade. Enable it once the component runs more than one replica.
+
+The stateful components get none. mssql, azurite, and openbao are single-replica
+with ReadWriteOnce volumes and a Recreate strategy, so a budget could only
+prevent maintenance, never preserve availability.
+*/}}
+{{- if and .Values.api.podDisruptionBudget.enabled (gt (int .Values.api.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cloudravel.api.fullname" . }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: {{ .Values.api.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+{{- end }}
+{{- if and .Values.web.podDisruptionBudget.enabled (gt (int .Values.web.replicaCount) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cloudravel.web.fullname" . }}
+  labels:
+    {{- include "cloudravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  minAvailable: {{ .Values.web.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "cloudravel.selectorLabels" (dict "ctx" . "component" "web") | nindent 6 }}
+{{- end }}
