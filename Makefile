@@ -16,6 +16,12 @@
 
 COMPOSE ?= docker compose
 
+# Short commit SHA, passed to the api build so the version shown in the UI
+# includes it (see docker-compose.yml's api.build.args.GIT_SHA and
+# src/backend/Dockerfile). Falls back to empty if git isn't available —
+# the version just shows the bare semver in that case.
+export GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null)
+
 .PHONY: up start build down restart logs ps
 
 up:            ## Build images and start the stack detached
