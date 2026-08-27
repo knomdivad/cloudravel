@@ -71,6 +71,7 @@ function SystemSettingsCard({ showToast }: { showToast: (m: string, t: ToastType
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -103,11 +104,25 @@ function SystemSettingsCard({ showToast }: { showToast: (m: string, t: ToastType
     }
   };
 
+  const test = async () => {
+    setTesting(true);
+    try {
+      const result = await api.testAiConnection();
+      showToast(result.message ?? 'Connected.', 'success');
+    } catch (err: any) {
+      showToast(err?.message ?? 'Connection test failed.', 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <section className="bg-white rounded-lg border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-1">AI Model (OpenAI-compatible)</h2>
       <p className="text-sm text-gray-500 mb-4">
         Used by AI Insights. Any OpenAI-compatible endpoint. The API key is stored in the secret store, never in the database.
+        A 429 on the first prompt is usually billing quota or a 0 TPM project limit at platform.openai.com — not traffic.
+        Save, then use Test connection (a tiny no-tools ping) before asking Insights.
       </p>
       <form onSubmit={save} className="space-y-4">
         <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} mono placeholder="https://api.openai.com/v1 (blank = OpenAI default)" />
@@ -120,7 +135,11 @@ function SystemSettingsCard({ showToast }: { showToast: (m: string, t: ToastType
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-azure-500 focus:border-azure-500"
           />
         </div>
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <button type="button" disabled={testing || saving} onClick={test}
+            className="px-4 py-2 border border-gray-300 text-gray-800 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
+            {testing && <Spinner />}{testing ? 'Testing...' : 'Test connection'}
+          </button>
           <button type="submit" disabled={saving}
             className="px-4 py-2 bg-azure-600 text-white rounded-lg text-sm hover:bg-azure-700 disabled:opacity-50 flex items-center gap-2">
             {saving && <Spinner />}{saving ? 'Saving...' : 'Save Settings'}

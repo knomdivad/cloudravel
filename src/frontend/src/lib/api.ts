@@ -188,6 +188,10 @@ export async function updateSystemSettings(request: {
   });
 }
 
+export async function testAiConnection(): Promise<{ ok: boolean; model: string; message: string }> {
+  return apiCall('/system/ai/test', NO_WORKSPACE, { method: 'POST' });
+}
+
 function normalizeAdminUser(raw: Record<string, unknown>): AdminUser {
   return {
     userId: String(raw.userId ?? raw.UserId ?? ''),
@@ -783,6 +787,7 @@ export const api = {
   getMe,
   getSystemSettings,
   updateSystemSettings,
+  testAiConnection,
   getAllUsers,
   createUser,
   updateUser,

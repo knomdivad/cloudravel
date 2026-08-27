@@ -13,6 +13,12 @@ behaviour someone may already depend on.
 
 ### Fixed
 
+- AI Insights no longer reports every HTTP 429 as a traffic rate limit.
+  OpenAI returns 429 for exhausted billing quota, inactive billing, and a 0 TPM
+  project cap; those now map to `AI_QUOTA_EXCEEDED` and the provider's message
+  is included. Previously the SDK exception text often omitted the JSON body,
+  so a key with no credits looked like "wait a moment and try again" on every
+  prompt. Admin → System Settings also has a no-tools Test connection ping.
 - Image publish no longer fails on tag builds when generating SBOMs: release
   asset upload is disabled (SBOM stays as a workflow artifact and a cosign
   attestation on the image digest).
