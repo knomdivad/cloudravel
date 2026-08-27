@@ -1,6 +1,7 @@
 using System.ClientModel;
 using System.Net;
 using System.Text.Json;
+using CloudRavel.Api.AI;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.AI;
 using CloudRavel.Core.DTOs;
@@ -110,42 +111,10 @@ public sealed class AiFunctions
 
         _logger.LogInformation("AI query for tenant {TenantId}: {Query}", tenantId, request.Query);
 
-        // Any OpenAI-compatible endpoint: the official OpenAI API by default,
-        // or a self-hosted/compatible server via a configured base URL. Settings
-        // configured at runtime through the system-admin UI (system_settings +
-        // secret store) take precedence over the OpenAI:* env vars, so the key/
-        // URL/model can be changed without a restart (the client is built here,
-        // per-request). Env vars remain the fallback for headless deployments.
-        var settings = await _systemSettings.GetAllAsync();
-        var baseUrl = Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiBaseUrl)) ?? _config["OpenAI:BaseUrl"];
-        var model = Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiModel)) ?? _config["OpenAI:Model"] ?? "gpt-4o-mini";
+        var (apiKey, baseUrl, model, notConfigured) = await ResolveAiConfigAsync(req);
+        if (notConfigured != null) return notConfigured;
 
-        string? apiKey = null;
-        var secretName = Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiApiKeySecretName));
-        if (secretName != null && _secretStore != null)
-            apiKey = await _secretStore.GetSecretAsync(secretName);
-        apiKey ??= _config["OpenAI:ApiKey"];
-
-        if (string.IsNullOrEmpty(apiKey))
-        {
-            var notConfigured = req.CreateCorsResponse(HttpStatusCode.ServiceUnavailable);
-            await notConfigured.WriteAsJsonAsync(new ErrorResponse
-            {
-                Code = "AI_NOT_CONFIGURED",
-                Message = "The AI model is not configured. A system administrator can set the OpenAI endpoint, key, and model under Admin → System Settings."
-            });
-            return notConfigured;
-        }
-
-        // Official OpenAI + most gateways expect a .../v1 base. Normalize trailing slash.
-        if (!string.IsNullOrEmpty(baseUrl))
-            baseUrl = baseUrl.TrimEnd('/');
-
-        var clientOptions = string.IsNullOrEmpty(baseUrl)
-            ? new OpenAIClientOptions()
-            : new OpenAIClientOptions { Endpoint = new Uri(baseUrl) };
-        var client = new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions);
-        var chatClient = client.GetChatClient(model);
+        var chatClient = CreateChatClient(apiKey!, baseUrl, model);
 
         // Build native tool definitions for the SDK. A caller who cannot propose is
         // never offered the tool, so the model does not plan around a capability the
@@ -232,9 +201,11 @@ public sealed class AiFunctions
         {
             // Surface OpenAI / compatible-provider errors (quota, auth, model, rate limit)
             // instead of an opaque Functions 500 with an empty body.
-            _logger.LogWarning(ex, "AI provider error for tenant {TenantId} model {Model}: {Status} {Message}",
-                tenantId, model, (int)ex.Status, ex.Message);
-            var (status, code, message) = MapProviderError(ex, model, baseUrl);
+            var body = AiProviderErrorMapper.TryGetResponseBody(ex);
+            _logger.LogWarning(ex,
+                "AI provider error for tenant {TenantId} model {Model}: {Status} {Message} Body {Body}",
+                tenantId, model, ex.Status, ex.Message, Truncate(body ?? string.Empty, 500));
+            var (status, code, message) = AiProviderErrorMapper.Map(ex, model, baseUrl);
             var err = req.CreateCorsResponse(status);
             await err.WriteAsJsonAsync(new ErrorResponse { Code = code, Message = message });
             return err;
@@ -263,74 +234,120 @@ public sealed class AiFunctions
         }
     }
 
-    /// <summary>Map provider HTTP errors into actionable admin-facing messages.</summary>
-    private static (HttpStatusCode Status, string Code, string Message) MapProviderError(
-        ClientResultException ex, string model, string? baseUrl)
+    /// <summary>
+    /// POST /api/system/ai/test — system-admin only. Sends a tiny no-tools ping so
+    /// a bad key, empty quota, or wrong model is diagnosed without the Insights
+    /// tool catalog inflating token use.
+    /// </summary>
+    [Function("AiConnectionTest")]
+    public async Task<HttpResponseData> TestConnection(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "system/ai/test")] HttpRequestData req,
+        FunctionContext context)
     {
-        var status = ex.Status;
-        var raw = ex.Message ?? string.Empty;
-        var body = raw;
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
 
-        // Prefer structured body when present (OpenAI returns JSON with error.message / error.code).
+        var (apiKey, baseUrl, model, notConfigured) = await ResolveAiConfigAsync(req);
+        if (notConfigured != null) return notConfigured;
+
+        var chatClient = CreateChatClient(apiKey!, baseUrl, model);
         try
         {
-            // ClientResultException.Message often includes the body; also try Response content.
-            var jsonStart = raw.IndexOf('{');
-            if (jsonStart >= 0)
+            var result = await chatClient.CompleteChatAsync(
+            [
+                new SystemChatMessage("Reply with the single word pong."),
+                new UserChatMessage("ping")
+            ]);
+            var text = result.Value.Content.Count > 0 ? result.Value.Content[0].Text : string.Empty;
+            var ok = req.CreateCorsResponse(HttpStatusCode.OK);
+            await ok.WriteAsJsonAsync(new
             {
-                using var doc = JsonDocument.Parse(raw[jsonStart..]);
-                if (doc.RootElement.TryGetProperty("error", out var errEl))
-                {
-                    var msg = errEl.TryGetProperty("message", out var m) ? m.GetString() : null;
-                    var code = errEl.TryGetProperty("code", out var c) ? c.GetString() : null;
-                    if (!string.IsNullOrWhiteSpace(msg))
-                        body = msg!;
-                    if (string.Equals(code, "insufficient_quota", StringComparison.OrdinalIgnoreCase)
-                        || body.Contains("exceeded your current quota", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return (HttpStatusCode.PaymentRequired, "AI_QUOTA_EXCEEDED",
-                            "The OpenAI API key has no remaining quota (billing). Add credits or use a key with available usage at platform.openai.com, then retry.");
-                    }
-                    if (string.Equals(code, "invalid_api_key", StringComparison.OrdinalIgnoreCase)
-                        || body.Contains("Incorrect API key", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return (HttpStatusCode.Unauthorized, "AI_INVALID_API_KEY",
-                            "The configured OpenAI API key was rejected. Update it under Admin → System Settings.");
-                    }
-                    if (string.Equals(code, "model_not_found", StringComparison.OrdinalIgnoreCase)
-                        || body.Contains("model", StringComparison.OrdinalIgnoreCase)
-                           && body.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return (HttpStatusCode.BadRequest, "AI_MODEL_NOT_FOUND",
-                            $"Model '{model}' is not available for this key/endpoint. Choose a model your account can use (e.g. gpt-4o-mini, gpt-5.5).");
-                    }
-                    if (status == 429)
-                    {
-                        return (HttpStatusCode.TooManyRequests, "AI_RATE_LIMITED",
-                            "The AI provider rate-limited this request. Wait a moment and try again.");
-                    }
-                }
-            }
+                ok = true,
+                model,
+                message = string.IsNullOrWhiteSpace(text)
+                    ? $"Connected to model '{model}'."
+                    : $"Connected to model '{model}'. Provider replied: {Truncate(text.Trim(), 120)}"
+            });
+            return ok;
         }
-        catch
+        catch (ClientResultException ex)
         {
-            // fall through to generic mapping
+            var body = AiProviderErrorMapper.TryGetResponseBody(ex);
+            _logger.LogWarning(ex, "AI connection test failed model {Model}: {Status} {Message} Body {Body}",
+                model, ex.Status, ex.Message, Truncate(body ?? string.Empty, 500));
+            var (status, code, message) = AiProviderErrorMapper.Map(ex, model, baseUrl);
+            var err = req.CreateCorsResponse(status);
+            await err.WriteAsJsonAsync(new ErrorResponse { Code = code, Message = message });
+            return err;
+        }
+        catch (UriFormatException ex)
+        {
+            _logger.LogWarning(ex, "Invalid AI base URL: {BaseUrl}", baseUrl);
+            var err = req.CreateCorsResponse(HttpStatusCode.BadRequest);
+            await err.WriteAsJsonAsync(new ErrorResponse
+            {
+                Code = "AI_INVALID_BASE_URL",
+                Message = $"The configured AI base URL is invalid: {baseUrl}"
+            });
+            return err;
+        }
+    }
+
+    private async Task<(string? ApiKey, string? BaseUrl, string Model, HttpResponseData? NotConfigured)>
+        ResolveAiConfigAsync(HttpRequestData req)
+    {
+        // Settings configured at runtime through the system-admin UI take
+        // precedence over OpenAI:* env vars. Env vars remain the fallback
+        // for headless deployments.
+        var settings = await _systemSettings.GetAllAsync();
+        var baseUrl = NormalizeAiBaseUrl(
+            Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiBaseUrl)) ?? _config["OpenAI:BaseUrl"]);
+        var model = Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiModel))
+            ?? _config["OpenAI:Model"] ?? "gpt-4o-mini";
+
+        string? apiKey = null;
+        var secretName = Nz(settings.GetValueOrDefault(SystemSettingKeys.OpenAiApiKeySecretName));
+        if (secretName != null && _secretStore != null)
+            apiKey = await _secretStore.GetSecretAsync(secretName);
+        apiKey ??= _config["OpenAI:ApiKey"];
+
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            var notConfigured = req.CreateCorsResponse(HttpStatusCode.ServiceUnavailable);
+            await notConfigured.WriteAsJsonAsync(new ErrorResponse
+            {
+                Code = "AI_NOT_CONFIGURED",
+                Message = "The AI model is not configured. A system administrator can set the OpenAI endpoint, key, and model under Admin → System Settings."
+            });
+            return (null, baseUrl, model, notConfigured);
         }
 
-        if (status == 401 || status == 403)
-            return (HttpStatusCode.Unauthorized, "AI_PROVIDER_AUTH",
-                "The AI provider rejected authentication. Check the API key under Admin → System Settings.");
-        if (status == 404)
-            return (HttpStatusCode.BadRequest, "AI_PROVIDER_NOT_FOUND",
-                $"The AI endpoint or model was not found (model '{model}', base '{baseUrl ?? "default"}'). Check Base URL and Model.");
-        if (status == 429)
-            return (HttpStatusCode.TooManyRequests, "AI_RATE_LIMITED",
-                "The AI provider rate-limited this request. Wait a moment and try again.");
+        return (apiKey, baseUrl, model, null);
+    }
 
-        return (HttpStatusCode.BadGateway, "AI_PROVIDER_ERROR",
-            string.IsNullOrWhiteSpace(body)
-                ? $"The AI provider returned HTTP {(int)status}."
-                : $"The AI provider returned an error: {Truncate(body, 400)}");
+    internal static ChatClient CreateChatClient(string apiKey, string? baseUrl, string model)
+    {
+        var clientOptions = string.IsNullOrEmpty(baseUrl)
+            ? new OpenAIClientOptions()
+            : new OpenAIClientOptions { Endpoint = new Uri(baseUrl) };
+        return new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions).GetChatClient(model);
+    }
+
+    /// <summary>
+    /// Official OpenAI + most gateways expect a .../v1 base. Blank stays blank
+    /// (SDK default). A bare https://api.openai.com gets /v1 appended.
+    /// </summary>
+    internal static string? NormalizeAiBaseUrl(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl)) return null;
+        baseUrl = baseUrl.Trim().TrimEnd('/');
+        if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
+            && uri.Host.Equals("api.openai.com", StringComparison.OrdinalIgnoreCase)
+            && (uri.AbsolutePath is "" or "/"))
+        {
+            return $"{uri.GetLeftPart(UriPartial.Authority)}/v1";
+        }
+        return baseUrl;
     }
 
     private static string Truncate(string value, int max) =>
