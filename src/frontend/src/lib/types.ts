@@ -207,6 +207,19 @@ export interface AiUsage {
   totalTokens: number;
 }
 
+// --- Customer chat (chat-only, no tools) ---
+
+export interface CustomerChatRequest {
+  message: string;
+  conversationId?: string;
+}
+
+export interface CustomerChatResponse {
+  response: string;
+  refused: boolean;
+  usage: AiUsage;
+}
+
 // --- Dashboard ---
 
 export interface TenantDashboard {

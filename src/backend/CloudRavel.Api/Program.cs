@@ -6,6 +6,7 @@ using CloudRavel.Infrastructure;
 using CloudRavel.Infrastructure.AiOps;
 using CloudRavel.Infrastructure.Auth;
 using CloudRavel.Infrastructure.Azure;
+using CloudRavel.Infrastructure.Chat;
 using CloudRavel.Infrastructure.Data;
 using CloudRavel.Infrastructure.MultiCloud;
 using CloudRavel.Infrastructure.Queue;
@@ -100,6 +101,18 @@ var host = new HostBuilder()
         // AIOps engine: proactive anomaly detection + gated remediation
         services.AddScoped<IAnomalyDetectionService, AnomalyDetectionService>();
         services.AddScoped<IRemediationService, RemediationService>();
+
+        // Customer chat: tenant-scoped grounding gateway + in-process rate
+        // limiter (per-user/per-tenant windows, daily token cap).
+        services.AddScoped<ChatContextGateway>();
+        services.AddSingleton<ChatRateLimiter>(sp =>
+        {
+            var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+            return new ChatRateLimiter(
+                perUserMax: int.TryParse(cfg["Chat:PerUserPerHour"], out var u) ? u : 20,
+                perTenantMax: int.TryParse(cfg["Chat:PerTenantPerHour"], out var t) ? t : 100,
+                dailyTokenCap: int.TryParse(cfg["Chat:DailyTokenCap"], out var c) ? c : 200_000);
+        });
 
         // Local username/password auth — the non-Entra login path
         services.AddScoped<ILocalAuthService, LocalAuthService>();
