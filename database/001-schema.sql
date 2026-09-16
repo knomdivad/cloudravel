@@ -557,6 +557,17 @@ CREATE TABLE org_sso_settings (
     updated_at         DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
     updated_by         NVARCHAR(256)    NOT NULL DEFAULT 'system'
 );
+
+-- Customer-chat abuse caps (rate windows + daily token usage). Shared by ALL
+-- API instances so caps hold on scaled deployments. Keys embed tenant/user ids
+-- as opaque strings; no tenant data rows, hence NOT RLS-scoped (same class as
+-- system_settings). Rows turn over naturally as windows reset.
+CREATE TABLE chat_usage_counters (
+    counter_key   NVARCHAR(200) NOT NULL PRIMARY KEY,
+    window_start  DATETIME2     NOT NULL,
+    counter_count BIGINT        NOT NULL DEFAULT 0,
+    updated_at    DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()
+);
 GO
 
 -- ============================================================================

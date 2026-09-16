@@ -45,21 +45,79 @@ Client is built per-request (OpenAI-compatible `OpenAIClient`), same pattern as
   JSON `{"name": ...}` tool-call shapes, "ignore previous instructions") and
   replaced with a fixed refusal text.
 
-## Abuse prevention
-- `ChatRateLimiter` (in-process sliding window, mirrors `LoginRateLimiter`):
-  per-user 20/hour, per-tenant 100/hour, concurrent-key independent.
-- Daily token cap per tenant: 200k tokens/day, in-process counter keyed by
-  (tenant, UTC date); requests denied once cumulative usage exceeds cap.
-- Message length cap: 4,000 chars → 400 `MESSAGE_TOO_LONG`; empty → 400.
-- Limits configurable via `Chat:PerUserPerHour`, `Chat:PerTenantPerHour`,
-  `Chat:DailyTokenCap`.
-- Response logs a row in `ai_query_log` (RLS-scoped) with tokens + refusal flag.
+## Server-side grounding gate (chat rework — t_331e0542)
+The system prompt makes grounding a request, not a guarantee: a model asked
+about an out-of-context entity can emit plausible figures that pass the
+tool-call guard. `ChatGroundingGate` (Infrastructure/Chat) is the enforceable
+layer, run server-side on every draft answer BEFORE it reaches the customer:
+- It extracts the specific claims in the answer — figure-like numbers
+  (counts, dollar figures, percentages, decimals), resource-id shapes
+  (`vm-prod-01`), and multi-word proper nouns — and requires them to resolve
+  against the exact `RenderWorkspaceContext` block injected for that request
+  (bare figures may also come from the user's own message: echoing a
+  user-supplied number is not fabrication).
+- Any unresolvable figure grounds the answer out; entity references that ALL
+  fail to resolve ground it out. Grounded-out answers are replaced with a
+  fixed "I don't have that in your workspace data." and flagged refused:true.
+- Deliberately conservative: paraphrased/derived figures not in the snapshot
+  are grounded out rather than passed. For a no-tools customer chat a false
+  refusal is the safe failure mode; a fabricated figure is the unsafe one.
+  A rounded anchor within ~2% of the claim ("about 500" for 499) resolves.
+- What it does NOT do: it is not a semantic fact checker. Claim-free generic
+  advice passes; the tool-call/injection guard is unchanged and still runs
+  first.
+
+## Abuse prevention (chat rework — scale-safe)
+- Counters live in the SQL database (`chat_usage_counters`, unglamorous but
+  zero new infrastructure — same tradeoff as the SQL job queue), behind
+  `IChatUsageStore` (Core) / `SqlChatUsageStore` (Infrastructure). One atomic
+  upsert per request, shared by ALL API instances: per-user/per-tenant limits
+  and the daily token cap are NOT multiplied by instance count. Keys embed
+  tenant/user ids as opaque strings; the table holds no tenant data, so it is
+  outside the RLS policy (same class as system_settings) and is accessed via
+  the admin connection.
+- `ChatRateLimiter` keeps the policy (per-user 20/hour, per-tenant 100/hour,
+  daily token cap 200k, message cap 4,000 chars) and delegates accounting to
+  the store. Configurable via `Chat:PerUserPerHour`, `Chat:PerTenantPerHour`,
+  `Chat:DailyTokenCap`, plus `Chat:MaxOutputTokens` (output headroom, below).
+- Token accounting fixed: the pre-check reserves estimated input PLUS a
+  minimum-output headroom (default 4k tokens), so a single request cannot
+  push the tenant past the cap with its completion; actual input+output
+  tokens are recorded after the call, and usage beyond the cap blocks all
+  subsequent requests for the UTC day. Residual: one in-flight request can
+  still overshoot the cap by its output length (bounding that would require
+  max_output_tokens + streaming enforcement); it cannot happen twice, because
+  post-call accounting lands before the next request's pre-check.
+- The chat endpoint fails CLOSED when the counter store is unavailable
+  (503 `CHAT_USAGE_STORE_UNAVAILABLE`): chat outage over unbounded usage.
+- If chat volume ever outgrows SQL, `IChatUsageStore` is the swap-point
+  (Redis implementing the same four methods).
+
+## Chat model config surface (chat rework — t_331e0542)
+Customer chat model/provider resolution is DEPLOYMENT-CONFIG ONLY
+(`ChatInference:ModelName` / `BaseUri` / `ApiKey` / `ApiKeySecretName`). The
+previously-read `chat.model` / `chat.base_url` / `chat.api_key_secret_name`
+system_settings keys are REMOVED: no code path ever wrote them (the runtime,
+system-admin-gated override surface writes `openai.*` for the analyst
+endpoint only), so the read path was dead config. To retarget customer chat,
+set the ChatInference values at deploy; a runtime admin-UI override for
+customer chat is deliberately NOT added (no privilege expansion, no second
+admin surface to audit). The analyst endpoint's `openai.*` settings surface
+is unchanged.
 
 ## Tests (xUnit, mirrors LoginRateLimiterTests style)
 - ChatRateLimiterTests: per-user limit trips, per-tenant independent, window
-  reset semantics.
+  reset semantics, shared-store scale-safety (two limiter instances over one
+  store), input+output token accounting, output-headroom pre-check, UTC-day
+  reset (in-memory store implements the IChatUsageStore contract).
 - CustomerChatRefusalTests: injection/tool-call-shaped model output → refusal
   text; benign output → passthrough.
+- ChatGroundingGateTests: fabricated figures with no context overlap →
+  grounded out (incl. the audit's "Company B" scenario); answers citing
+  context figures/entities pass; user-supplied numbers, years/dates
+  and claim-free advice pass; resource-id match/mismatch.
+- CustomerChatGroundingPolicyTests: gate failure substitutes the fixed
+  grounded-out text and classifies refused:true (endpoint rule).
 - ChatContextGatewayTests: SQL statements issued contain explicit
   `tenant_id = @TenantId` filter and use the tenant connection factory
   (fake factory verifies the tenantId passed through).

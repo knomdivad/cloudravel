@@ -43,7 +43,6 @@ public sealed partial class CustomerChatFunctions
 
     private readonly ChatContextGateway _gateway;
     private readonly ChatRateLimiter _limiter;
-    private readonly ISystemSettingsRepository _systemSettings;
     private readonly ISecretStore? _secretStore;
     private readonly IConfiguration _config;
     private readonly IAuditRepository _auditRepo;
@@ -52,7 +51,6 @@ public sealed partial class CustomerChatFunctions
     public CustomerChatFunctions(
         ChatContextGateway gateway,
         ChatRateLimiter limiter,
-        ISystemSettingsRepository systemSettings,
         IAuditRepository auditRepo,
         IConfiguration config,
         ILogger<CustomerChatFunctions> logger,
@@ -60,7 +58,6 @@ public sealed partial class CustomerChatFunctions
     {
         _gateway = gateway;
         _limiter = limiter;
-        _systemSettings = systemSettings;
         _auditRepo = auditRepo;
         _config = config;
         _secretStore = secretStore;
@@ -104,8 +101,21 @@ public sealed partial class CustomerChatFunctions
         }
 
         // Abuse prevention: per-user and per-tenant windows, then the daily
-        // token budget for the tenant.
-        var limitReason = _limiter.CheckAndIncrement(tenantId, userId);
+        // token budget for the tenant (counters shared via SQL — see
+        // ChatRateLimiter). Fail closed: if the counter store is unavailable,
+        // refuse the request rather than run unbounded.
+        string? limitReason;
+        try
+        {
+            limitReason = await _limiter.CheckAndIncrementAsync(tenantId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Chat usage store unavailable for tenant {TenantId}", tenantId);
+            return await ErrorAsync(req, HttpStatusCode.ServiceUnavailable, "CHAT_USAGE_STORE_UNAVAILABLE",
+                "Chat usage accounting is temporarily unavailable. Please try again shortly.");
+        }
+
         if (limitReason != null)
         {
             _logger.LogWarning("Chat rate limit ({Reason}) tripped for tenant {TenantId} user {UserId}",
@@ -114,21 +124,21 @@ public sealed partial class CustomerChatFunctions
                 "You've sent a lot of messages recently. Please wait a bit before trying again.");
         }
 
-        if (!_limiter.IsUnderTokenCap(tenantId, estimatedTokens: message.Length / 4))
+        if (!await _limiter.IsUnderTokenCapAsync(tenantId, estimatedTokens: message.Length / 4))
         {
             return await ErrorAsync(req, HttpStatusCode.TooManyRequests, "CHAT_TOKEN_CAP",
                 "The daily AI usage allowance for this workspace has been reached. Try again tomorrow.");
         }
 
-        // Resolve provider settings: system_settings (runtime, admin UI) may
-        // override the ChatInference:* deployment config.
-        var settings = await _systemSettings.GetAllAsync();
-        var model = Nz(settings.GetValueOrDefault("chat.model")) ?? _config["ChatInference:ModelName"] ?? "gpt-oss-120b";
-        var baseUrl = Nz(settings.GetValueOrDefault("chat.base_url")) ?? _config["ChatInference:BaseUri"] ?? "https://api.fireworks.ai/inference/v1";
+        // Resolve provider settings. Customer chat is deployment-config only
+        // (DESIGN-chat.md): the runtime system_settings override surface
+        // (openai.*, system-admin gated) belongs to the analyst endpoint; no
+        // admin path writes chat.* keys, so none are read here.
+        var model = _config["ChatInference:ModelName"] ?? "gpt-oss-120b";
+        var baseUrl = _config["ChatInference:BaseUri"] ?? "https://api.fireworks.ai/inference/v1";
 
         string? apiKey = null;
-        var secretName = Nz(settings.GetValueOrDefault("chat.api_key_secret_name"))
-            ?? Nz(_config["ChatInference:ApiKeySecretName"]);
+        var secretName = Nz(_config["ChatInference:ApiKeySecretName"]);
         if (secretName != null && _secretStore != null)
             apiKey = await _secretStore.GetSecretAsync(secretName);
         apiKey ??= _config["ChatInference:ApiKey"];
@@ -166,10 +176,17 @@ public sealed partial class CustomerChatFunctions
 
             var usage = completion.Usage;
             if (usage is { TotalTokenCount: > 0 })
-                _limiter.RecordTokens(tenantId, usage.TotalTokenCount);
+                await _limiter.RecordTokensAsync(tenantId, usage.TotalTokenCount);
 
             var rawText = completion.Content.Count > 0 ? completion.Content[0].Text : string.Empty;
             var answer = CustomerChatGuard.Sanitize(rawText);
+
+            // Grounding gate (server-side DoD): the sanitized answer must map
+            // to the WORKSPACE CONTEXT that was injected, or it is replaced
+            // with a grounded "I don't have that" — regardless of what the
+            // model emitted.
+            answer = ApplyGroundingGate(answer, ChatGroundingGate.Evaluate(answer, RenderWorkspaceContext(workspace), message));
+
             var refused = !ReferenceEquals(answer, rawText) ||
                           answer.StartsWith("I don't know", StringComparison.OrdinalIgnoreCase);
 
@@ -256,6 +273,15 @@ public sealed partial class CustomerChatFunctions
         sb.AppendLine("END WORKSPACE CONTEXT. Answer only from the data above.");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Substitute the fixed grounded-out answer when the gate rejects the
+    /// model's draft. Public static + pure (same style as
+    /// CustomerChatGuard.Sanitize) so the endpoint policy is unit-testable
+    /// without an HTTP round-trip.
+    /// </summary>
+    public static string ApplyGroundingGate(string answer, ChatGroundingVerdict verdict) =>
+        verdict.Passed ? answer : ChatGroundingGate.GroundedOutText;
 
     private async Task LogChatAsync(
         FunctionContext context, Guid tenantId, Guid userId, string question, string answer, string model, ChatCompletion? completion)
