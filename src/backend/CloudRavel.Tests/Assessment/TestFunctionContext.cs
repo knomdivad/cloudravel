@@ -44,7 +44,6 @@ public sealed class TestFunctionContext : FunctionContext
         .GetMethods(BindingFlags.Public | BindingFlags.Instance)
         .Single(m => m.Name == "Set" && m.IsGenericMethod);
 
-    private readonly IDictionary<object, object> _items = new Dictionary<object, object>();
     private readonly object _features; // real worker InvocationFeatures (internal), driven via reflection
 
     public TestFunctionContext()
