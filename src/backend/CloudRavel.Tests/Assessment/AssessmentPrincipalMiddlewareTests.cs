@@ -1,10 +1,10 @@
 using System.Net;
-using Microsoft.Azure.Functions.Worker;
-using Microsoft.Azure.Functions.Worker.Middleware;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Azure.Functions.Worker.Middleware;
 using Xunit;
 
 namespace CloudRavel.Tests.Assessment;
