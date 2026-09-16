@@ -38,6 +38,9 @@ var host = new HostBuilder()
         // then TenantContextMiddleware checks the authenticated user's tenant access.
         builder.UseMiddleware<AuthEnforcementMiddleware>();
         builder.UseMiddleware<TenantContextMiddleware>();
+        // Read-only service credentials (the standalone assessment tool) get
+        // single-tenant scope + mutation refusal + audit + rate limiting.
+        builder.UseMiddleware<AssessmentPrincipalMiddleware>();
     })
     .ConfigureServices((context, services) =>
     {
@@ -103,6 +106,7 @@ var host = new HostBuilder()
 
         // Local username/password auth — the non-Entra login path
         services.AddScoped<ILocalAuthService, LocalAuthService>();
+        services.AddSingleton<AssessmentPrincipalRateLimiter>();
 
         // Job queue: Service Bus when configured (default on Azure), otherwise
         // the SQL-table-backed queue — needs no infra beyond the database, so
