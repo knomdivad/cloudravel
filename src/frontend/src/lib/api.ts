@@ -13,6 +13,8 @@ import type {
   Recommendation,
   AiQueryRequest,
   AiQueryResponse,
+  CustomerChatRequest,
+  CustomerChatResponse,
   ApiError,
   Anomaly,
   Incident,
@@ -455,6 +457,20 @@ export async function queryAi(tenantId: string, request: AiQueryRequest): Promis
 }
 
 // ============================================================================
+// Customer chat API (chat-only, no tools)
+// ============================================================================
+
+export async function askCustomerChat(
+  tenantId: string,
+  request: CustomerChatRequest
+): Promise<CustomerChatResponse> {
+  return apiCall<CustomerChatResponse>('/ai/chat', tenantId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// ============================================================================
 // Tenant Management API
 // ============================================================================
 
@@ -760,6 +776,7 @@ export const api = {
   getDefenderFindings,
   getPolicyCompliance,
   queryAi,
+  askCustomerChat,
   getDashboard,
   getOpsSummary,
   getAnomalies,

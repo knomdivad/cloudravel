@@ -9,6 +9,7 @@ using CloudRavel.Infrastructure;
 using CloudRavel.Infrastructure.AiOps;
 using CloudRavel.Infrastructure.Auth;
 using CloudRavel.Infrastructure.Azure;
+using CloudRavel.Infrastructure.Chat;
 using CloudRavel.Infrastructure.Data;
 using CloudRavel.Infrastructure.MultiCloud;
 using CloudRavel.Infrastructure.Queue;
@@ -103,6 +104,23 @@ var host = new HostBuilder()
         // AIOps engine: proactive anomaly detection + gated remediation
         services.AddScoped<IAnomalyDetectionService, AnomalyDetectionService>();
         services.AddScoped<IRemediationService, RemediationService>();
+
+        // Customer chat: tenant-scoped grounding gateway + shared-store abuse
+        // caps (per-user/per-tenant windows, daily token cap with output
+        // headroom) — counters live in the SQL DB so limits hold on scaled
+        // deployments, not just single-instance.
+        services.AddScoped<ChatContextGateway>();
+        services.AddSingleton<IChatUsageStore, SqlChatUsageStore>();
+        services.AddSingleton<ChatRateLimiter>(sp =>
+        {
+            var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+            return new ChatRateLimiter(
+                sp.GetRequiredService<IChatUsageStore>(),
+                perUserMax: int.TryParse(cfg["Chat:PerUserPerHour"], out var u) ? u : 20,
+                perTenantMax: int.TryParse(cfg["Chat:PerTenantPerHour"], out var t) ? t : 100,
+                dailyTokenCap: int.TryParse(cfg["Chat:DailyTokenCap"], out var c) ? c : 200_000,
+                minOutputTokenHeadroom: int.TryParse(cfg["Chat:MaxOutputTokens"], out var o) ? o : 4_000);
+        });
 
         // Local username/password auth — the non-Entra login path
         services.AddScoped<ILocalAuthService, LocalAuthService>();

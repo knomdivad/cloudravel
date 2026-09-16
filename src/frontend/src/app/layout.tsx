@@ -207,6 +207,7 @@ const navItems: NavItem[] = [
   { label: 'Security', href: '/security', icon: SecurityIcon },
   { label: 'Governance', href: '/governance', icon: GovernanceIcon },
   { label: 'AI Insights', href: '/ai', icon: AiIcon },
+  { label: 'Assistant', href: '/chat', icon: ChatIcon },
   { label: 'Clouds', href: '/tenants', icon: TenantsIcon },
   { label: 'Cloud help', href: '/help/clouds', icon: HelpIcon },
   { label: 'Organization', href: '/organization', icon: OrgAdminIcon, require: 'org_admin' },
@@ -470,6 +471,15 @@ function AiIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
+    </svg>
+  );
+}
+
+function ChatIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-1.236c-.366-.53-.975-.856-1.605-.856-1.507 0-3.004-.06-4.492-.182a2.114 2.114 0 0 0-1.728.583l-1.335 1.335c-.29.29-.467.67-.506 1.078-.066.69-.11 1.386-.135 2.086" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6.75a3 3 0 0 0-3-3h-7.5a3 3 0 0 0-3 3v4.5a3 3 0 0 0 3 3h.75v3.75l3.75-3.75h3a3 3 0 0 0 3-3v-4.5Z" />
     </svg>
   );
 }

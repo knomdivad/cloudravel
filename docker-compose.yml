@@ -31,7 +31,7 @@ services:
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
       MSSQL_PID: Developer
     ports:
-      - "1433:1433"
+      - "${MSSQL_HOST_PORT:-1433}:1433"
     volumes:
       - mssql-data:/var/opt/mssql
 
@@ -59,7 +59,7 @@ services:
     cap_add:
       - IPC_LOCK
     ports:
-      - "8200:8200"
+      - "${OPENBAO_HOST_PORT:-8200}:8200"
     volumes:
       - openbao-data:/openbao/data
       - ./deploy/openbao:/openbao/config:ro
@@ -153,6 +153,15 @@ services:
       OpenAI__BaseUrl: ${OPENAI_BASE_URL:-}
       OpenAI__ApiKey: ${OPENAI_API_KEY:-}
       OpenAI__Model: ${OPENAI_MODEL:-gpt-5.5}
+      # --- Customer chat model: any OpenAI-compatible endpoint (optional).
+      #     Same pattern as above; default is gpt-oss-120b on Fireworks.
+      #     Keys match what the code reads (ChatInference:BaseUri/ApiKey/Model). ---
+      ChatInference__BaseUri: ${CHAT_INFERENCE_BASE_URL:-https://api.fireworks.ai/inference/v1}
+      ChatInference__ApiKey: ${CHAT_INFERENCE_API_KEY:-}
+      ChatInference__ModelName: ${CHAT_INFERENCE_MODEL:-accounts/fireworks/models/gpt-oss-120b}
+      Chat__PerUserPerHour: ${CHAT_PER_USER_PER_HOUR:-20}
+      Chat__PerTenantPerHour: ${CHAT_PER_TENANT_PER_HOUR:-100}
+      Chat__DailyTokenCap: ${CHAT_DAILY_TOKEN_CAP:-200000}
       # --- Entra ID SSO (optional — local login works without it) ---
       AzureAd__TenantId: ${AZURE_AD_TENANT_ID:-}
       AzureAd__ClientId: ${AZURE_AD_CLIENT_ID:-}
@@ -169,7 +178,7 @@ services:
       # Root token written by persistent OpenBao entrypoint (file mode).
       - openbao-data:/openbao-data:ro
     ports:
-      - "7071:80"
+      - "${API_HOST_PORT:-7071}:80"
 
   web:
     image: cloudravel-web:local
@@ -192,7 +201,7 @@ services:
       # service. Matches the image default, set explicitly for clarity.
       API_UPSTREAM: api:80
     ports:
-      - "3000:80"
+      - "${WEB_HOST_PORT:-3000}:80"
 
 volumes:
   mssql-data:

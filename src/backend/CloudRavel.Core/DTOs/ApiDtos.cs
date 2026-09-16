@@ -226,6 +226,21 @@ public sealed class AiQueryRequest
     public string? Mode { get; set; }
 }
 
+// --- Customer chat (chat-only, no tools) ---
+
+public sealed class CustomerChatRequest
+{
+    public string Message { get; set; } = string.Empty;
+    public string? ConversationId { get; set; }
+}
+
+public sealed class CustomerChatResponse
+{
+    public string Response { get; set; } = string.Empty;
+    public bool Refused { get; set; }
+    public AiUsageDto Usage { get; set; } = new();
+}
+
 public sealed class AiQueryResponse
 {
     public string Response { get; set; } = string.Empty;
