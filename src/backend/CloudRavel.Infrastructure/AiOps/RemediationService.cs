@@ -109,6 +109,11 @@ public sealed class RemediationService : IRemediationService
 
     public async Task<RemediationAction> ApproveAsync(Guid tenantId, long actionId, string approvedBy)
     {
+        var tenant = await _tenantRepo.GetByIdAsync(tenantId)
+            ?? throw new KeyNotFoundException($"Tenant {tenantId} not found.");
+        if (AssessmentPolicy.BlocksActions(tenant))
+            throw AssessmentPolicy.BlockedError(tenant);
+
         var action = await _remediationRepo.GetActionByIdAsync(tenantId, actionId)
             ?? throw new KeyNotFoundException($"Remediation action {actionId} not found.");
 
@@ -147,6 +152,11 @@ public sealed class RemediationService : IRemediationService
 
     public async Task<RemediationAction> ExecuteAsync(Guid tenantId, long actionId)
     {
+        var tenant = await _tenantRepo.GetByIdAsync(tenantId)
+            ?? throw new KeyNotFoundException($"Tenant {tenantId} not found.");
+        if (AssessmentPolicy.BlocksActions(tenant))
+            throw AssessmentPolicy.BlockedError(tenant);
+
         var action = await _remediationRepo.GetActionByIdAsync(tenantId, actionId)
             ?? throw new KeyNotFoundException($"Remediation action {actionId} not found.");
 

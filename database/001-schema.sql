@@ -27,10 +27,19 @@ CREATE TABLE tenants (
         CHECK (auto_remediation_mode IN ('disabled', 'gated', 'auto')),
     aiops_monitoring_enabled BIT            NOT NULL
         CONSTRAINT DF_tenants_aiops_monitoring DEFAULT 1,
+    -- Engagement lifecycle: 'standard' monitoring vs a time-boxed, read-only
+    -- fixed-fee assessment (see 002-assessment.sql / AssessmentPolicy).
+    engagement_kind     NVARCHAR(20)        NOT NULL
+        CONSTRAINT DF_tenants_engagement_kind DEFAULT 'standard'
+        CHECK (engagement_kind IN ('standard', 'assessment')),
+    assessment_started_at   DATETIME2       NULL,  -- when the watch window opened
+    assessment_ends_at      DATETIME2       NULL,  -- started_at + configured window
+    assessment_completed_at DATETIME2       NULL,  -- when the assessment was closed out
     created_at          DATETIME2           NOT NULL DEFAULT SYSUTCDATETIME(),
     updated_at          DATETIME2           NOT NULL DEFAULT SYSUTCDATETIME(),
     created_by          NVARCHAR(128)       NOT NULL,
-    INDEX IX_tenants_azure_tid (azure_tenant_id)
+    INDEX IX_tenants_azure_tid (azure_tenant_id),
+    INDEX IX_tenants_engagement (engagement_kind, assessment_started_at)
 );
 
 CREATE TABLE tenant_subscriptions (

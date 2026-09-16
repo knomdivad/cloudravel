@@ -735,6 +735,80 @@ export async function updateCloudOrgCredentials(
 }
 
 // ============================================================================
+// Assessment engagement API (10-day fixed-fee assessment)
+// ============================================================================
+
+export interface AssessmentState {
+  tenantId: string;
+  workspaceName: string;
+  engagementKind: 'standard' | 'assessment';
+  state: 'standard' | 'not_started' | 'watching' | 'completed';
+  assessmentStartedAt?: string | null;
+  assessmentEndsAt?: string | null;
+  assessmentCompletedAt?: string | null;
+  autoRemediationMode: string;
+  readOnly: boolean;
+}
+
+export interface AssessmentFixListItem {
+  rank: number;
+  tier: number;
+  source: string;
+  title: string;
+  resourceId?: string;
+  detail?: string;
+  remediation?: string;
+  estimatedAnnualSavings?: number | null;
+  severity: string;
+  firstSeenAt: string;
+}
+
+export interface AssessmentReport {
+  workspaceName: string;
+  generatedAt: string;
+  windowStart?: string | null;
+  windowEnd?: string | null;
+  engagementState: string;
+  estate: { resourceCount: number; lastSnapshotAt?: string | null; changesInWindow: number };
+  savings: {
+    identifiedAnnual: number;
+    identifiedMonthly: number;
+    fee: number;
+    targetSavings: number;
+    meetsGuarantee: boolean;
+    feeMultiple: number;
+  };
+  fixList: AssessmentFixListItem[];
+}
+
+export async function getAssessment(tenantId: string): Promise<AssessmentState> {
+  return apiCall<AssessmentState>('/assessment', tenantId);
+}
+
+export async function startAssessment(
+  tenantId: string,
+  request: { windowDays?: number; fee?: number }
+): Promise<AssessmentState> {
+  return apiCall<AssessmentState>('/assessment/start', tenantId, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function completeAssessment(tenantId: string): Promise<AssessmentState> {
+  return apiCall<AssessmentState>('/assessment/complete', tenantId, { method: 'POST' });
+}
+
+export async function convertAssessment(tenantId: string): Promise<AssessmentState> {
+  return apiCall<AssessmentState>('/assessment/convert', tenantId, { method: 'POST' });
+}
+
+export async function getAssessmentReport(tenantId: string, fee?: number): Promise<AssessmentReport> {
+  const query = fee ? `?fee=${fee}` : '';
+  return apiCall<AssessmentReport>(`/assessment/report${query}`, tenantId);
+}
+
+// ============================================================================
 // Namespace export for convenient usage: import { api } from '@/lib/api'
 // ============================================================================
 
@@ -770,6 +844,11 @@ export const api = {
   getPlaybooks,
   getCloudAccounts,
   getCloudOrgs,
+  getAssessment,
+  startAssessment,
+  completeAssessment,
+  convertAssessment,
+  getAssessmentReport,
   createCloudOrg,
   updateCloudOrgStatus,
   deleteCloudOrg,

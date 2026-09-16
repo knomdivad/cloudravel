@@ -17,8 +17,11 @@ import {
   getRemediations,
   getPlaybooks,
   getCloudAccounts,
+  getAssessment,
+  getAssessmentReport,
 } from './api';
 import type { TenantSummary, Organization, InventoryResource, TenantDashboard, OpsSummary } from './types';
+import type { AssessmentState, AssessmentReport } from './api';
 
 /**
  * SWR hooks for data fetching with caching, revalidation, and error handling.
@@ -215,5 +218,22 @@ export function useCloudAccounts(tenantId: string | null) {
   return useSWR(
     tenantId ? ['cloud-accounts', tenantId] : null,
     () => getCloudAccounts(tenantId!)
+  );
+}
+
+// ---- Assessment engagement hooks ----
+
+export function useAssessment(tenantId: string | null) {
+  return useSWR<AssessmentState>(
+    tenantId ? ['assessment', tenantId] : null,
+    () => getAssessment(tenantId!),
+    { revalidateOnFocus: true }
+  );
+}
+
+export function useAssessmentReport(tenantId: string | null, fee?: number) {
+  return useSWR<AssessmentReport>(
+    tenantId ? ['assessment-report', tenantId, fee ?? null] : null,
+    () => getAssessmentReport(tenantId!, fee)
   );
 }
