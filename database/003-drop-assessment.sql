@@ -8,8 +8,9 @@
 -- assessment concept, so the tenants engagement columns go.
 --
 -- Idempotent: every statement re-runs safely (drops are conditional).
--- Fresh installs simply never have these columns (001-schema has no
--- assessment columns anymore).
+-- Constraint names differ between fresh installs (named DF constraint in
+-- 001) and upgraded volumes (system-named from 002's ALTER TABLE), so the
+-- CHECK constraint is dropped dynamically by column, not by name.
 -- ============================================================================
 
 IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_tenants_engagement'
@@ -17,11 +18,15 @@ IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_tenants_engagement'
     DROP INDEX IX_tenants_engagement ON dbo.tenants;
 GO
 
-IF COL_LENGTH('dbo.tenants', 'assessment_completed_at') IS NOT NULL
-    ALTER TABLE dbo.tenants DROP CONSTRAINT DF_tenants_engagement_kind;
+-- Drop every CHECK constraint on engagement_kind, whatever it is named.
+DECLARE @drop_sql NVARCHAR(MAX) =
+    (SELECT STRING_AGG('ALTER TABLE dbo.tenants DROP CONSTRAINT ' + QUOTENAME(name), '; ')
+     FROM sys.check_constraints
+     WHERE parent_object_id = OBJECT_ID('dbo.tenants')
+       AND parent_column_id = COLUMNPROPERTY(OBJECT_ID('dbo.tenants'), 'engagement_kind', 'ColumnId'));
+IF @drop_sql IS NOT NULL EXEC(@drop_sql);
 GO
 
--- Drop in dependency order (constraint first via the guard above, then columns).
 IF COL_LENGTH('dbo.tenants', 'assessment_completed_at') IS NOT NULL
     ALTER TABLE dbo.tenants DROP COLUMN assessment_completed_at;
 GO
@@ -34,10 +39,6 @@ IF COL_LENGTH('dbo.tenants', 'assessment_started_at') IS NOT NULL
     ALTER TABLE dbo.tenants DROP COLUMN assessment_started_at;
 GO
 
-IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.tenants')
-           AND name = 'engagement_kind')
-BEGIN
-    -- Re-create a covering index replacement is unnecessary; drop the column.
+IF COL_LENGTH('dbo.tenants', 'engagement_kind') IS NOT NULL
     ALTER TABLE dbo.tenants DROP COLUMN engagement_kind;
-END;
 GO
