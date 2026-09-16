@@ -27,6 +27,8 @@ LEGACY_DB=aimdb
 MIGRATIONS=(
   001-schema
   002-assessment
+  003-drop-assessment
+  004-assessment-principal
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

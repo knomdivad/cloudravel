@@ -53,10 +53,6 @@ public sealed class TenantRepository : ITenantRepository
                    lighthouse_delegation_id AS LighthouseDelegationId,
                    auto_remediation_mode AS AutoRemediationMode,
                    aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
-                   engagement_kind AS EngagementKind,
-                   assessment_started_at AS AssessmentStartedAt,
-                   assessment_ends_at AS AssessmentEndsAt,
-                   assessment_completed_at AS AssessmentCompletedAt,
                    created_at AS CreatedAt, updated_at AS UpdatedAt, created_by AS CreatedBy
             FROM tenants WHERE tenant_id = @TenantId";
 
@@ -75,10 +71,6 @@ public sealed class TenantRepository : ITenantRepository
                    lighthouse_delegation_id AS LighthouseDelegationId,
                    auto_remediation_mode AS AutoRemediationMode,
                    aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
-                   engagement_kind AS EngagementKind,
-                   assessment_started_at AS AssessmentStartedAt,
-                   assessment_ends_at AS AssessmentEndsAt,
-                   assessment_completed_at AS AssessmentCompletedAt,
                    created_at AS CreatedAt, updated_at AS UpdatedAt, created_by AS CreatedBy
             FROM tenants WHERE status IN ('active', 'degraded')
             ORDER BY display_name";
@@ -99,10 +91,6 @@ public sealed class TenantRepository : ITenantRepository
                    t.lighthouse_delegation_id AS LighthouseDelegationId,
                    t.auto_remediation_mode AS AutoRemediationMode,
                    t.aiops_monitoring_enabled AS AiOpsMonitoringEnabled,
-                   t.engagement_kind AS EngagementKind,
-                   t.assessment_started_at AS AssessmentStartedAt,
-                   t.assessment_ends_at AS AssessmentEndsAt,
-                   t.assessment_completed_at AS AssessmentCompletedAt,
                    t.created_at AS CreatedAt, t.updated_at AS UpdatedAt, t.created_by AS CreatedBy
             FROM tenants t
             INNER JOIN user_tenant_access uta ON t.tenant_id = uta.tenant_id
@@ -123,15 +111,11 @@ public sealed class TenantRepository : ITenantRepository
             INSERT INTO tenants (tenant_id, display_name, azure_tenant_id, onboarding_method, status,
                                  snapshot_frequency_minutes, change_poll_frequency_minutes,
                                  secret_name, lighthouse_delegation_id,
-                                 auto_remediation_mode, aiops_monitoring_enabled,
-                                 engagement_kind, assessment_started_at, assessment_ends_at, assessment_completed_at,
-                                 created_by)
+                                 auto_remediation_mode, aiops_monitoring_enabled, created_by)
             VALUES (@TenantId, @DisplayName, @AzureTenantId, @OnboardingMethod, @Status,
                     @SnapshotFrequencyMinutes, @ChangePollFrequencyMinutes,
                     @SecretName, @LighthouseDelegationId,
-                    @AutoRemediationMode, @AiOpsMonitoringEnabled,
-                    @EngagementKind, @AssessmentStartedAt, @AssessmentEndsAt, @AssessmentCompletedAt,
-                    @CreatedBy)";
+                    @AutoRemediationMode, @AiOpsMonitoringEnabled, @CreatedBy)";
 
         await conn.ExecuteAsync(sql, new
         {
@@ -146,10 +130,6 @@ public sealed class TenantRepository : ITenantRepository
             tenant.LighthouseDelegationId,
             AutoRemediationMode = tenant.AutoRemediationMode.ToString().ToLowerInvariant(),
             tenant.AiOpsMonitoringEnabled,
-            EngagementKind = tenant.EngagementKind.ToString().ToLowerInvariant(),
-            tenant.AssessmentStartedAt,
-            tenant.AssessmentEndsAt,
-            tenant.AssessmentCompletedAt,
             CreatedBy = createdBy.ToString()
         });
 
@@ -211,7 +191,7 @@ public sealed class TenantRepository : ITenantRepository
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
         const string sql = @"
-            UPDATE tenants SET
+            UPDATE tenants SET 
                 display_name = @DisplayName,
                 azure_tenant_id = @AzureTenantId,
                 onboarding_method = @OnboardingMethod,
@@ -221,10 +201,6 @@ public sealed class TenantRepository : ITenantRepository
                 lighthouse_delegation_id = @LighthouseDelegationId,
                 auto_remediation_mode = @AutoRemediationMode,
                 aiops_monitoring_enabled = @AiOpsMonitoringEnabled,
-                engagement_kind = @EngagementKind,
-                assessment_started_at = @AssessmentStartedAt,
-                assessment_ends_at = @AssessmentEndsAt,
-                assessment_completed_at = @AssessmentCompletedAt,
                 updated_at = SYSUTCDATETIME()
             WHERE tenant_id = @TenantId";
 
@@ -239,11 +215,7 @@ public sealed class TenantRepository : ITenantRepository
             tenant.SecretName,
             tenant.LighthouseDelegationId,
             AutoRemediationMode = tenant.AutoRemediationMode.ToString().ToLowerInvariant(),
-            tenant.AiOpsMonitoringEnabled,
-            EngagementKind = tenant.EngagementKind.ToString().ToLowerInvariant(),
-            tenant.AssessmentStartedAt,
-            tenant.AssessmentEndsAt,
-            tenant.AssessmentCompletedAt
+            tenant.AiOpsMonitoringEnabled
         });
 
         if (affected == 0)

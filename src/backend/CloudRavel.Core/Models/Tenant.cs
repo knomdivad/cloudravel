@@ -21,22 +21,6 @@ public sealed class Tenant
     /// <summary>Master switch for proactive anomaly scanning on this tenant.</summary>
     public bool AiOpsMonitoringEnabled { get; set; } = true;
 
-    /// <summary>
-    /// Engagement lifecycle: Standard (ongoing monitoring) or Assessment (a
-    /// time-boxed, read-only fixed-fee assessment). Assessments force the
-    /// approval gate closed — see <see cref="AssessmentPolicy"/>.
-    /// </summary>
-    public EngagementKind EngagementKind { get; set; } = EngagementKind.Standard;
-
-    /// <summary>When the assessment watch window opened (null unless an assessment).</summary>
-    public DateTime? AssessmentStartedAt { get; set; }
-
-    /// <summary>When the assessment watch window closes: started + configured days.</summary>
-    public DateTime? AssessmentEndsAt { get; set; }
-
-    /// <summary>When the assessment was closed out (fix-list delivered).</summary>
-    public DateTime? AssessmentCompletedAt { get; set; }
-
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
@@ -54,18 +38,4 @@ public enum TenantStatus
     Degraded,
     Suspended,
     Offboarded
-}
-
-/// <summary>
-/// What kind of commercial engagement this workspace delivers.
-///   Standard   — ongoing AIOps monitoring (the default platform mode).
-///   Assessment — a time-boxed, read-only fixed-fee assessment: snapshot the
-///                estate once, watch changes for N days, produce the ranked
-///                fix-list. Remediation approval/execution is blocked while
-///                active; converting back to Standard restores action.
-/// </summary>
-public enum EngagementKind
-{
-    Standard,
-    Assessment
 }
