@@ -1,7 +1,6 @@
-using Xunit;
-
 using CloudRavel.Api.Functions;
 using CloudRavel.Infrastructure.Chat;
+using Xunit;
 
 namespace CloudRavel.Tests.Chat;
 
