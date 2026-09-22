@@ -26,7 +26,6 @@ LEGACY_DB=aimdb
 # you want Contoso sample rows.
 MIGRATIONS=(
   001-schema
-  002-assessment
   003-drop-assessment
   004-assessment-principal
 )
