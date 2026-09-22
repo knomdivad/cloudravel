@@ -91,6 +91,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Docker Engine — the supported "run the whole stack" path is docker compose
+# (docker-compose.yml / Makefile: mssql, openbao, azurite, migrator, api, web).
+# Cloud Agent VMs don't ship Docker, so install it here. The VM is itself a
+# nested container, so pin fuse-overlayfs: it's the only storage driver that
+# initialises (overlay2's mount is rejected by the sandbox kernel). Daemon
+# startup + the netfilter fixes a nested container needs live in start.sh,
+# which runs on every boot.
+# ---------------------------------------------------------------------------
+log "Docker Engine"
+if command -v docker >/dev/null 2>&1; then
+  echo "Already installed: $(docker --version)"
+else
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    ca-certificates curl fuse-overlayfs iptables uidmap
+  curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+  # DEBIAN_FRONTEND keeps the fuse3 conffile prompt from blocking the install.
+  sudo DEBIAN_FRONTEND=noninteractive sh /tmp/get-docker.sh
+  rm -f /tmp/get-docker.sh
+fi
+# Default the daemon to fuse-overlayfs so `dockerd` needs no extra flags.
+sudo mkdir -p /etc/docker
+if [[ ! -f /etc/docker/daemon.json ]]; then
+  printf '{\n  "storage-driver": "fuse-overlayfs"\n}\n' \
+    | sudo tee /etc/docker/daemon.json >/dev/null
+fi
+# Let the (non-root) agent user talk to the socket without sudo.
+sudo groupadd -f docker
+sudo usermod -aG docker "$(id -un)" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
 # Make the toolchain visible to interactive shells the agent opens later.
 # ---------------------------------------------------------------------------
 readonly PROFILE_MARKER="# >>> cloudravel toolchain >>>"
