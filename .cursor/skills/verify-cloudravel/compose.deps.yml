@@ -1,0 +1,11 @@
+# Optional Compose overlay for verification when the API/web run on the host
+# (Cloud Agent VMs may fail `docker compose build` on the workspace mount).
+# Usage:
+#   COMPOSE_PROJECT_NAME=cloudravel-verify-$ID \
+#   docker compose -f docker-compose.yml -f .cursor/skills/verify-cloudravel/compose.deps.yml up -d mssql azurite openbao
+services:
+  azurite:
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
