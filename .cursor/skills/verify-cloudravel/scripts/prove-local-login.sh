@@ -11,10 +11,25 @@ export PATH="${SCRIPT_DIR}:${PATH}"
 STATE_DIR="${VERIFY_ARTIFACTS_ROOT}/state"
 mkdir -p "${STATE_DIR}" "${VERIFY_ARTIFACTS_ROOT}/${VERIFY_RUN_ID}"
 
-DOCKER=( docker )
-if ! docker info >/dev/null 2>&1; then DOCKER=( sudo docker ); fi
-
-COMPOSE_FILES=( -f "${REPO_ROOT}/docker-compose.yml" -f "${SKILL_ROOT}/compose.deps.yml" )
+USE_SUDO_DOCKER=0
+if ! docker info >/dev/null 2>&1; then
+  if sudo docker info >/dev/null 2>&1; then USE_SUDO_DOCKER=1; else exit 1; fi
+fi
+COMPOSE_FILES=( -f "${REPO_ROOT}/docker-compose.yml" -f "${SKILL_ROOT}/compose.deps.yml" -f "${SKILL_ROOT}/compose.verify.yml" )
+compose_env() {
+  local -a vars=(
+    "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:?}"
+    "OPENBAO_MODE=${OPENBAO_MODE:-dev}"
+    "OPENBAO_TOKEN=${OPENBAO_TOKEN:-root}"
+    "GIT_SHA=${GIT_SHA:-}"
+    "VERIFY_DB_MOUNT=${VERIFY_DB_MOUNT:-}"
+  )
+  if [[ "${USE_SUDO_DOCKER}" -eq 1 ]]; then
+    sudo env "${vars[@]}" docker compose "${COMPOSE_FILES[@]}" "$@"
+  else
+    env "${vars[@]}" docker compose "${COMPOSE_FILES[@]}" "$@"
+  fi
+}
 PROJECT="cloudravel-verify-${VERIFY_RUN_ID}"
 
 if [[ ! -f "${REPO_ROOT}/.env" ]]; then
@@ -26,6 +41,14 @@ export COMPOSE_PROJECT_NAME="${PROJECT}"
 export OPENBAO_MODE=dev
 export OPENBAO_TOKEN=root
 export GIT_SHA="${GIT_SHA:-$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || true)}"
+
+db_scratch="/tmp/cloudravel-verify-${VERIFY_RUN_ID}/database"
+sudo rm -rf "/tmp/cloudravel-verify-${VERIFY_RUN_ID}" 2>/dev/null || true
+mkdir -p "${db_scratch}"
+cp "${REPO_ROOT}/database/"*.sql "${db_scratch}/" 2>/dev/null || true
+cp "${SCRIPT_DIR}/apply-migrations-verify.sh" "${db_scratch}/apply-migrations.sh"
+chmod +x "${db_scratch}/apply-migrations.sh"
+export VERIFY_DB_MOUNT="${db_scratch}"
 
 WEB_URL="http://127.0.0.1:3000"
 API_URL="http://127.0.0.1:7071/api"
@@ -53,26 +76,31 @@ cleanup() {
     kill "$(cat "${STATE_DIR}/web.pid")" 2>/dev/null || true
     rm -f "${STATE_DIR}/web.pid"
   fi
-  (cd "${REPO_ROOT}" && COMPOSE_PROJECT_NAME="${PROJECT}" OPENBAO_MODE=dev OPENBAO_TOKEN=root \
-    "${DOCKER[@]}" compose "${COMPOSE_FILES[@]}" down) || true
+  (cd "${REPO_ROOT}" && compose_env down -v) || true
+  sudo rm -rf "/tmp/cloudravel-verify-${VERIFY_RUN_ID}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 echo "=== launch deps (mssql, azurite, openbao dev) ==="
-(cd "${REPO_ROOT}" && COMPOSE_PROJECT_NAME="${PROJECT}" OPENBAO_MODE=dev OPENBAO_TOKEN=root \
-  "${DOCKER[@]}" compose "${COMPOSE_FILES[@]}" up -d mssql azurite openbao)
+(cd "${REPO_ROOT}" && compose_env up -d mssql azurite openbao)
 
 echo "=== migrator ==="
-(cd "${REPO_ROOT}" && COMPOSE_PROJECT_NAME="${PROJECT}" OPENBAO_MODE=dev OPENBAO_TOKEN=root \
-  "${DOCKER[@]}" compose "${COMPOSE_FILES[@]}" run --rm migrator)
+(cd "${REPO_ROOT}" && compose_env run --rm migrator)
 
-echo "=== host API + web (docker build may fail on workspace mount) ==="
+echo "=== host API + web (Functions Core Tools + Next dev; API container may stall on some agents) ==="
 export DOTNET_ROOT="${HOME}/.dotnet"
 export PATH="${DOTNET_ROOT}:${HOME}/.nvm/versions/node/v20.20.2/bin:${HOME}/.local/bin:${PATH}"
 [[ -s "${HOME}/.nvm/nvm.sh" ]] && . "${HOME}/.nvm/nvm.sh" && nvm use 20 >/dev/null 2>&1 || true
 
+if ! command -v func >/dev/null 2>&1; then
+  echo "prove-local-login: func (Azure Functions Core Tools v4) required — run .cursor/install.sh" >&2
+  exit 1
+fi
+
 STORAGE='DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1'
 SA_PASS="$(grep '^MSSQL_SA_PASSWORD=' "${REPO_ROOT}/.env" | cut -d= -f2-)"
+JWT_KEY="$(grep '^LOCAL_AUTH_JWT_SIGNING_KEY=' "${REPO_ROOT}/.env" | cut -d= -f2- || true)"
+JWT_KEY="${JWT_KEY:-dev-only-change-me-in-production}"
 
 (
   cd "${REPO_ROOT}/src/backend/CloudRavel.Api"
@@ -82,14 +110,15 @@ SA_PASS="$(grep '^MSSQL_SA_PASSWORD=' "${REPO_ROOT}/.env" | cut -d= -f2-)"
   export SqlConnectionString="Server=127.0.0.1,1433;Database=cloudraveldb;User ID=sa;Password=${SA_PASS};Encrypt=True;TrustServerCertificate=True;"
   export OpenBao__Address="http://127.0.0.1:8200"
   export OpenBao__Token=root
-  export LocalAuth__JwtSigningKey="${LOCAL_AUTH_JWT_SIGNING_KEY:-dev-only-change-me-in-production}"
+  export LocalAuth__JwtSigningKey="${JWT_KEY}"
   export Cors__AllowedOrigins="${WEB_URL}"
   export SecretStore__Provider=OpenBao
-  export AzureWebJobs.PollChangesTimer.Disabled=true
-  export AzureWebJobs.SyncAdvisorTimer.Disabled=true
-  export AzureWebJobs.SyncPolicyTimer.Disabled=true
-  export AzureWebJobs.SyncDefenderTimer.Disabled=true
-  dotnet run --no-launch-profile > "${VERIFY_ARTIFACTS_ROOT}/${VERIFY_RUN_ID}/api.log" 2>&1 &
+  export AzureWebJobs__PollChangesTimer__Disabled=true
+  export AzureWebJobs__SyncAdvisorTimer__Disabled=true
+  export AzureWebJobs__SyncPolicyTimer__Disabled=true
+  export AzureWebJobs__SyncDefenderTimer__Disabled=true
+  export DOTNET_ROLL_FORWARD="${DOTNET_ROLL_FORWARD:-LatestMajor}"
+  func start --port 7071 > "${VERIFY_ARTIFACTS_ROOT}/${VERIFY_RUN_ID}/api.log" 2>&1 &
   echo $! > "${STATE_DIR}/api.pid"
 )
 
@@ -100,8 +129,14 @@ SA_PASS="$(grep '^MSSQL_SA_PASSWORD=' "${REPO_ROOT}/.env" | cut -d= -f2-)"
   echo $! > "${STATE_DIR}/web.pid"
 )
 
-sleep 15
-control-cloudravel doctor
+echo "=== waiting for host API health ==="
+for _ in $(seq 1 60); do
+  if curl -sf "${API_URL}/health" | grep -q '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+    break
+  fi
+  sleep 5
+done
+control-cloudravel doctor || true
 
 echo "=== browser-login proof ==="
 control-cloudravel browser-login

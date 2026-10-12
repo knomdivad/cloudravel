@@ -4,7 +4,7 @@ This directory is the maintained source for verifying user-facing behavior of Cl
 
 ## Baseline preconditions
 
-- Launch the stack with `control-cloudravel launch` (or `make up` from the repo root) using an isolated `COMPOSE_PROJECT_NAME` such as `cloudravel-verify-<VERIFY_RUN_ID>`.
+- Launch with `control-cloudravel launch` (Compose + `compose.verify.yml` overlay) or `make up` from the repo root, using an isolated `COMPOSE_PROJECT_NAME` such as `cloudravel-verify-<VERIFY_RUN_ID>`. On Cloud Agents where the API container never becomes healthy, run `scripts/prove-local-login.sh` (Compose deps + host `func start` / `npm run dev`).
 - Ensure `.env` exists (`cp .env.example .env`); defaults include `MSSQL_SA_PASSWORD` and `LOCAL_AUTH_JWT_SIGNING_KEY`.
 - Web UI at `WEB_URL` (default `http://127.0.0.1:3000`); API at `API_URL` (default `http://127.0.0.1:7071/api`).
 - Seeded local system admin: **`admin@local` / `ChangeMe123!`** (documented in `README.md`; local dev only).

@@ -16,7 +16,9 @@ Read `.cursor/skills/verify-cloudravel/features/README.md` before driving a feat
 From the repository root, with Docker available:
 
 1. Ensure `.env` exists (`cp .env.example .env` — `MSSQL_SA_PASSWORD` and `LOCAL_AUTH_JWT_SIGNING_KEY` have working defaults in `.env.example`).
-2. Put helpers on `PATH` or invoke by path:
+2. On Cloud Agent VMs, Docker must be running (`.cursor/install.sh` installs `docker.io` + Compose v2; `.cursor/start.sh` starts `dockerd`). The helper uses `sudo docker` when the daemon is root-only and passes `COMPOSE_PROJECT_NAME` through `sudo env`.
+3. Verification sets **`OPENBAO_MODE=dev`** and **`OPENBAO_TOKEN=root`** by default so OpenBao starts in-memory (file-storage init often fails on fresh CI-like volumes).
+4. Put helpers on `PATH` or invoke by path:
 
 ```bash
 export PATH="/workspace/.cursor/skills/verify-cloudravel/scripts:${PATH}"
@@ -43,7 +45,7 @@ make up    # docker compose up -d --build
 make down  # docker compose down
 ```
 
-**Cloud Agent / workspace mount:** `docker compose build` may fail on `COPY` with `invalid argument`. Use `.cursor/skills/verify-cloudravel/scripts/build-images-via-tmp.sh` (extracts sources to `/tmp` first), then `docker compose up -d` without `--build`. If image **pull** fails with overlay whiteout errors on `azure-sql-edge`, the VM cannot run the stack; prove on a host where `docker pull mcr.microsoft.com/azure-sql-edge` succeeds. Fallback when images build but pull works: `.cursor/skills/verify-cloudravel/scripts/prove-local-login.sh` (Compose deps + host `dotnet run` / `npm run dev`); it records PIDs and tears down only what it started.
+**Cloud Agent / workspace mount:** `docker compose build` may fail on `COPY` with `invalid argument`. Use `.cursor/skills/verify-cloudravel/scripts/build-images-via-tmp.sh` (extracts sources to `/tmp` first), then `control-cloudravel launch` again. `launch` always adds `compose.verify.yml` so migrator/API reach SQL via `host.docker.internal` when in-network `mssql:1433` is unreachable (common with Azure SQL Edge on Linux agents). If `azure-sql-edge` **pull** fails with overlay whiteout errors, retry after `sudo docker system prune -f` or use `.cursor/skills/verify-cloudravel/scripts/prove-local-login.sh` (Compose deps + host `dotnet run` / `npm run dev` with `DOTNET_ROLL_FORWARD=LatestMajor`).
 
 ## Doctor
 
@@ -145,7 +147,7 @@ test -f "/opt/cursor/artifacts/verify-cloudravel/${VERIFY_RUN_ID}/local-login/po
 | Repo `verify/login-probe.sh` | Quick API login + `/auth/me` (optional; uses `API_URL`) |
 | Repo `Makefile` | `make up`, `make down`, `make ps`, `make logs` |
 
-Example end-to-end proof (one feature):
+Example end-to-end proof (one feature) — full Compose:
 
 ```bash
 export VERIFY_RUN_ID="proof1"
@@ -154,7 +156,15 @@ control-cloudravel launch
 control-cloudravel doctor
 control-cloudravel browser-login
 control-cloudravel cleanup
-ls -la "/opt/cursor/artifacts/verify-cloudravel/${VERIFY_RUN_ID}/local-login/"
+test -f "/opt/cursor/artifacts/verify-cloudravel/${VERIFY_RUN_ID}/local-login/post-login.png"
+```
+
+On Cloud Agent VMs, the **API container** may stay silent on port 80 while host `func start` works. Use the bundled host-stack script (same doctor + browser-login + evidence):
+
+```bash
+export VERIFY_RUN_ID="proof1"
+export PATH="/workspace/.cursor/skills/verify-cloudravel/scripts:$PATH"
+bash .cursor/skills/verify-cloudravel/scripts/prove-local-login.sh
 ```
 
 For keeping the feature map current as routes change, use `/maintain-verification-skill` when available.

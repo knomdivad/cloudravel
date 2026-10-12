@@ -5,8 +5,13 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-DOCKER=( docker )
-if ! docker info >/dev/null 2>&1; then DOCKER=( sudo docker ); fi
+USE_SUDO=0
+if ! docker info >/dev/null 2>&1; then
+  if sudo docker info >/dev/null 2>&1; then USE_SUDO=1; else exit 1; fi
+fi
+docker_build() {
+  if [[ "${USE_SUDO}" -eq 1 ]]; then sudo docker "$@"; else docker "$@"; fi
+}
 GIT_SHA="${GIT_SHA:-$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || true)}"
 
 tmpdir="$(mktemp -d)"
@@ -17,12 +22,12 @@ tar -C "${REPO_ROOT}/src/backend" -cf - . | tar -C "${tmpdir}/backend" -xf -
 tar -C "${REPO_ROOT}/src/frontend" -cf - . | tar -C "${tmpdir}/frontend" -xf -
 
 echo "Building cloudravel-api:local from ${tmpdir}/backend ..."
-"${DOCKER[@]}" build -t cloudravel-api:local \
+docker_build build -t cloudravel-api:local \
   --build-arg "GIT_SHA=${GIT_SHA}" \
   -f "${tmpdir}/backend/Dockerfile" "${tmpdir}/backend"
 
 echo "Building cloudravel-web:local from ${tmpdir}/frontend ..."
-"${DOCKER[@]}" build -t cloudravel-web:local \
+docker_build build -t cloudravel-web:local \
   --build-arg "NEXT_PUBLIC_API_BASE_URL=/api" \
   --build-arg "NEXT_PUBLIC_AZURE_AD_CLIENT_ID=" \
   --build-arg "NEXT_PUBLIC_AZURE_AD_TENANT_ID=" \
