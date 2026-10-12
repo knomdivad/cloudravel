@@ -1,0 +1,17 @@
+# Verification overlay for Cloud Agent VMs where Azure SQL Edge accepts host
+# port 1433 but not in-network connections to the mssql service IP.
+# Routes migrator + API through the published host port via host-gateway.
+services:
+  migrator:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DB_HOST: host.docker.internal
+    volumes:
+      - ${VERIFY_DB_MOUNT:-./database}:/database:ro
+
+  api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SqlConnectionString: "Server=host.docker.internal,${MSSQL_HOST_PORT:-1433};Database=cloudraveldb;User ID=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;"

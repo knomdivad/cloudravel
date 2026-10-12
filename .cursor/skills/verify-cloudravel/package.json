@@ -1,0 +1,8 @@
+{
+  "name": "verify-cloudravel-harness",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.49.1"
+  }
+}

@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# CloudRavel verification control plane — launch, doctor, API probes, browser drive, cleanup.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SKILL_ROOT}/../../.." && pwd)"
+COMPOSE_FILES=( -f "${REPO_ROOT}/docker-compose.yml" -f "${SKILL_ROOT}/compose.verify.yml" )
+
+# Docker on Cloud Agent VMs often requires sudo unless the user is in the docker group.
+USE_SUDO_DOCKER=0
+if docker info >/dev/null 2>&1; then
+  :
+elif sudo docker info >/dev/null 2>&1; then
+  USE_SUDO_DOCKER=1
+else
+  echo "control-cloudravel: docker daemon not reachable (tried docker and sudo docker)" >&2
+  exit 1
+fi
+
+# sudo strips caller env; verification needs an isolated project name and dev OpenBao.
+compose_env() {
+  # Compose reads ${MSSQL_SA_PASSWORD} etc. from ${REPO_ROOT}/.env; do not pass
+  # secrets on the sudo env line (special characters break project isolation).
+  local -a vars=(
+    "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME required}"
+    "WEB_HOST_PORT=${WEB_HOST_PORT:-3000}"
+    "API_HOST_PORT=${API_HOST_PORT:-7071}"
+    "OPENBAO_MODE=${OPENBAO_MODE:-dev}"
+    "OPENBAO_TOKEN=${OPENBAO_TOKEN:-root}"
+    "GIT_SHA=${GIT_SHA:-}"
+    "PLATFORM_ENVIRONMENT=${PLATFORM_ENVIRONMENT:-Development}"
+    "VERIFY_DB_MOUNT=${VERIFY_DB_MOUNT:-}"
+  )
+  if [[ "${USE_SUDO_DOCKER}" -eq 1 ]]; then
+    sudo env "${vars[@]}" docker compose "${COMPOSE_FILES[@]}" "$@"
+  else
+    env "${vars[@]}" docker compose "${COMPOSE_FILES[@]}" "$@"
+  fi
+}
+# Evidence survives cleanup; state tracks only what this run started.
+: "${VERIFY_ARTIFACTS_ROOT:=/opt/cursor/artifacts/verify-cloudravel}"
+: "${VERIFY_STATE_DIR:=${VERIFY_ARTIFACTS_ROOT}/state}"
+
+usage() {
+  cat <<'EOF'
+Usage: control-cloudravel <command> [args]
+
+Commands:
+  launch          Start the local Compose stack for this verification run
+  doctor          Read-only health check (API + optional UI probe)
+  api-login       POST /auth/login as admin@local; print token length + /auth/me snippet
+  browser-login   Playwright: local login + capture screenshot/ARIA (feature: local-login)
+  cleanup         Tear down the Compose project recorded for this run (keeps artifacts)
+
+Environment:
+  VERIFY_RUN_ID           Unique run id (default: random hex)
+  VERIFY_ARTIFACTS_ROOT   Proof output root (default: /opt/cursor/artifacts/verify-cloudravel)
+  WEB_HOST_PORT           Host port for web (default: 3000)
+  API_HOST_PORT           Host port for API (default: 7071)
+  CLOUDRAVEL_LOCAL_EMAIL  Default admin@local
+  CLOUDRAVEL_LOCAL_PASSWORD  Default ChangeMe123! (local dev seed only)
+EOF
+}
+
+require_state() {
+  if [[ ! -f "${VERIFY_STATE_DIR}/run.env" ]]; then
+    echo "control-cloudravel: no run state at ${VERIFY_STATE_DIR}/run.env — run launch first" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC1091
+  source "${VERIFY_STATE_DIR}/run.env"
+}
+
+cmd_launch() {
+  mkdir -p "${VERIFY_STATE_DIR}" "${VERIFY_ARTIFACTS_ROOT}"
+  local run_id="${VERIFY_RUN_ID:-$(openssl rand -hex 4)}"
+  local project="cloudravel-verify-${run_id}"
+  local web_port="${WEB_HOST_PORT:-3000}"
+  local api_port="${API_HOST_PORT:-7071}"
+
+  if [[ ! -f "${REPO_ROOT}/.env" ]]; then
+    cp "${REPO_ROOT}/.env.example" "${REPO_ROOT}/.env"
+    echo "control-cloudravel: created ${REPO_ROOT}/.env from .env.example"
+  fi
+
+  # shellcheck disable=SC1091
+  [[ -f "${REPO_ROOT}/.env" ]] && set -a && source "${REPO_ROOT}/.env" && set +a
+  export COMPOSE_PROJECT_NAME="${project}"
+  export WEB_HOST_PORT="${web_port}"
+  export API_HOST_PORT="${api_port}"
+  export OPENBAO_MODE=dev
+  export OPENBAO_TOKEN=root
+  export GIT_SHA="${GIT_SHA:-$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || true)}"
+
+  local db_scratch="/tmp/cloudravel-verify-${run_id}/database"
+  sudo rm -rf "/tmp/cloudravel-verify-${run_id}" 2>/dev/null || true
+  mkdir -p "${db_scratch}"
+  cp "${REPO_ROOT}/database/"*.sql "${db_scratch}/" 2>/dev/null || true
+  cp "${SCRIPT_DIR}/apply-migrations-verify.sh" "${db_scratch}/apply-migrations.sh"
+  chmod +x "${db_scratch}/apply-migrations.sh"
+  export VERIFY_DB_MOUNT="${db_scratch}"
+  export WEB_URL="http://127.0.0.1:${web_port}"
+  export API_URL="http://127.0.0.1:${api_port}/api"
+
+  cat > "${VERIFY_STATE_DIR}/run.env" <<ENV
+VERIFY_RUN_ID=${run_id}
+COMPOSE_PROJECT_NAME=${project}
+WEB_HOST_PORT=${web_port}
+API_HOST_PORT=${api_port}
+WEB_URL=http://127.0.0.1:${web_port}
+API_URL=http://127.0.0.1:${api_port}/api
+REPO_ROOT=${REPO_ROOT}
+VERIFY_ARTIFACTS_ROOT=${VERIFY_ARTIFACTS_ROOT}
+ENV
+
+  echo "control-cloudravel: launching project ${project} (web http://127.0.0.1:${web_port}, api http://127.0.0.1:${api_port}/api)"
+  set +e
+  (cd "${REPO_ROOT}" && compose_env up -d --build)
+  local up_rc=$?
+  set -e
+  if [[ "${up_rc}" -ne 0 ]]; then
+    echo "control-cloudravel: compose build/up failed (common on Cloud Agent workspace mounts)" >&2
+    echo "control-cloudravel: try: ${SCRIPT_DIR}/build-images-via-tmp.sh && compose up -d without --build" >&2
+    echo "control-cloudravel: or host-stack proof: ${SCRIPT_DIR}/prove-local-login.sh" >&2
+    return "${up_rc}"
+  fi
+  echo "control-cloudravel: stack started; waiting for API health..."
+  if wait_api_healthy "${API_URL}" 90; then
+    echo "control-cloudravel: API healthy"
+  else
+    echo "control-cloudravel: warning: API not healthy yet — run doctor before driving UI" >&2
+  fi
+}
+
+wait_api_healthy() {
+  local url="$1"
+  local attempts="${2:-90}"
+  local i=0
+  while (( i < attempts )); do
+    if curl -sf "${url}/health" | grep -q '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+      return 0
+    fi
+    sleep 5
+    (( i++ )) || true
+  done
+  return 1
+}
+
+cmd_doctor() {
+  require_state
+  local fail=0
+  echo "=== control-cloudravel doctor ==="
+  echo "run_id=${VERIFY_RUN_ID}"
+  echo "compose_project=${COMPOSE_PROJECT_NAME}"
+  echo "web_url=${WEB_URL}"
+  echo "api_url=${API_URL}"
+
+  if ! (cd "${REPO_ROOT}" && compose_env ps --format json 2>/dev/null | head -1 >/dev/null); then
+    echo "FAIL: compose ps for project ${COMPOSE_PROJECT_NAME}" >&2
+    fail=1
+  else
+    echo "OK: compose project ${COMPOSE_PROJECT_NAME} is registered"
+    (cd "${REPO_ROOT}" && compose_env ps)
+  fi
+
+  if wait_api_healthy "${API_URL}" 3; then
+    :
+  elif ! wait_api_healthy "${API_URL}" 60; then
+    echo "FAIL: API ${API_URL}/health not healthy within timeout" >&2
+    curl -sS "${API_URL}/health" | head -c 400 || true
+    echo >&2
+    fail=1
+  fi
+
+  if [[ "${fail}" -eq 0 ]]; then
+    local health ready
+    health="$(curl -sf "${API_URL}/health")"
+    ready="$(curl -sf "${API_URL}/health/ready")"
+    echo "OK: health=$(echo "${health}" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("status"), d.get("version"), d.get("commit"))')"
+    echo "OK: ready=$(echo "${ready}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status"))')"
+    local code
+    code="$(curl -s -o /dev/null -w '%{http_code}' "${WEB_URL}/")"
+    if [[ "${code}" == "200" ]]; then
+      echo "OK: web ${WEB_URL}/ HTTP ${code}"
+    else
+      echo "FAIL: web ${WEB_URL}/ HTTP ${code}" >&2
+      fail=1
+    fi
+  fi
+
+  return "${fail}"
+}
+
+cmd_api_login() {
+  require_state
+  local email="${CLOUDRAVEL_LOCAL_EMAIL:-admin@local}"
+  local password="${CLOUDRAVEL_LOCAL_PASSWORD:-ChangeMe123!}"
+  local token
+  token="$(curl -sS -m 15 -X POST "${API_URL}/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"${email}\",\"password\":\"${password}\"}" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+  echo "token_len=${#token}"
+  curl -sS -m 15 "${API_URL}/auth/me" -H "Authorization: Bearer ${token}" | head -c 600
+  echo
+}
+
+cmd_browser_login() {
+  require_state
+  local out_dir="${VERIFY_ARTIFACTS_ROOT}/${VERIFY_RUN_ID}/local-login"
+  mkdir -p "${out_dir}"
+  export WEB_URL API_URL CLOUDRAVEL_LOCAL_EMAIL CLOUDRAVEL_LOCAL_PASSWORD
+  CLOUDRAVEL_LOCAL_EMAIL="${CLOUDRAVEL_LOCAL_EMAIL:-admin@local}"
+  CLOUDRAVEL_LOCAL_PASSWORD="${CLOUDRAVEL_LOCAL_PASSWORD:-ChangeMe123!}"
+  (cd "${SKILL_ROOT}" && node "${SCRIPT_DIR}/browser-login.mjs" "${out_dir}")
+  echo "artifacts: ${out_dir}"
+}
+
+cmd_cleanup() {
+  if [[ ! -f "${VERIFY_STATE_DIR}/run.env" ]]; then
+    echo "control-cloudravel: no run state — nothing to clean up"
+    return 0
+  fi
+  # shellcheck disable=SC1091
+  source "${VERIFY_STATE_DIR}/run.env"
+  echo "control-cloudravel: stopping compose project ${COMPOSE_PROJECT_NAME}"
+  export OPENBAO_MODE=dev
+  export OPENBAO_TOKEN=root
+  (cd "${REPO_ROOT}" && compose_env down -v)
+  sudo rm -rf "/tmp/cloudravel-verify-${VERIFY_RUN_ID:-}" 2>/dev/null || rm -rf "/tmp/cloudravel-verify-${VERIFY_RUN_ID:-}" 2>/dev/null || true
+  echo "control-cloudravel: cleanup complete (artifacts under ${VERIFY_ARTIFACTS_ROOT} retained)"
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+  case "${cmd}" in
+    launch) cmd_launch "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    api-login) cmd_api_login "$@" ;;
+    browser-login) cmd_browser_login "$@" ;;
+    cleanup) cmd_cleanup "$@" ;;
+    -h|--help|help|"") usage ;;
+    *) echo "unknown command: ${cmd}" >&2; usage; exit 1 ;;
+  esac
+}
+
+main "$@"

@@ -121,6 +121,35 @@ log "Restoring .NET packages"
 log "Installing frontend dependencies"
 (cd "${REPO_ROOT}/src/frontend" && npm ci --no-audit --no-fund)
 
+# ---------------------------------------------------------------------------
+# Docker + Compose — required for verify-cloudravel (local stack).
+# ---------------------------------------------------------------------------
+log "Docker (Compose stack verification)"
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  echo "Already installed: $(docker --version) / $(docker compose version --short 2>/dev/null || true)"
+else
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose-v2
+  fi
+fi
+if getent group docker >/dev/null 2>&1 && ! id -nG "${USER}" | grep -qw docker; then
+  sudo usermod -aG docker "${USER}" || true
+fi
+
+log "Azure Functions Core Tools v4 (host-stack verification fallback)"
+if command -v func >/dev/null 2>&1; then
+  echo "Already installed: $(func --version 2>/dev/null | head -1 || true)"
+else
+  npm install -g azure-functions-core-tools@4 --unsafe-perm true
+fi
+
+log "verify-cloudravel Playwright (chromium)"
+VERIFY_SKILL="${REPO_ROOT}/.cursor/skills/verify-cloudravel"
+if [[ -f "${VERIFY_SKILL}/package.json" ]]; then
+  (cd "${VERIFY_SKILL}" && npm ci --no-audit --no-fund && npx playwright install chromium)
+fi
+
 log "Environment ready"
 dotnet --version
 node --version
