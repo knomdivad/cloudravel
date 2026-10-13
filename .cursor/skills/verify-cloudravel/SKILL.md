@@ -45,7 +45,9 @@ make up    # docker compose up -d --build
 make down  # docker compose down
 ```
 
-**Cloud Agent / workspace mount:** `docker compose build` may fail on `COPY` with `invalid argument`. Use `.cursor/skills/verify-cloudravel/scripts/build-images-via-tmp.sh` (extracts sources to `/tmp` first), then `control-cloudravel launch` again. `launch` always adds `compose.verify.yml` so migrator/API reach SQL via `host.docker.internal` when in-network `mssql:1433` is unreachable (common with Azure SQL Edge on Linux agents). If `azure-sql-edge` **pull** fails with overlay whiteout errors, retry after `sudo docker system prune -f` or use `.cursor/skills/verify-cloudravel/scripts/prove-local-login.sh` (Compose deps + host `dotnet run` / `npm run dev` with `DOTNET_ROLL_FORWARD=LatestMajor`).
+**Cloud Agent / workspace mount:** `docker compose build` may fail on `COPY` with `invalid argument`. Use `.cursor/skills/verify-cloudravel/scripts/build-images-via-tmp.sh` (extracts sources to `/tmp` first), then `control-cloudravel launch` again. `launch` always adds `compose.verify.yml` so migrator/API reach SQL via `host.docker.internal` when in-network `mssql:1433` is unreachable (common with Azure SQL Edge on Linux agents). The same overlay routes **web → API** through the docker bridge gateway (`172.17.0.1:${API_HOST_PORT}`) because the Functions host often binds HTTP on IPv6-only `:80`, which breaks in-network `api:80` and nginx `/api/*` login (504/502). First cold start can take **10+ minutes** before `/health` is healthy; `launch` waits up to ~15 minutes. If `azure-sql-edge` **pull** fails with overlay whiteout errors, retry after `sudo docker system prune -f` or use `.cursor/skills/verify-cloudravel/scripts/prove-local-login.sh` (Compose deps + host `dotnet run` / `npm run dev` with `DOTNET_ROLL_FORWARD=LatestMajor`).
+
+**Cloud Agent Docker boot:** `.cursor/start.sh` starts `dockerd --data-root /tmp/docker` when neither `docker` nor `sudo docker` works (idempotent when already up). After a slow `dockerd` shutdown with running containers, the 30s wait loop may exit 1 — retry once or wait for shutdown to finish.
 
 ## Doctor
 
@@ -144,6 +146,7 @@ test -f "/opt/cursor/artifacts/verify-cloudravel/${VERIFY_RUN_ID}/local-login/po
 |--------|---------|
 | `.cursor/skills/verify-cloudravel/scripts/control-cloudravel` | `launch`, `doctor`, `api-login`, `browser-login`, `cleanup` |
 | `.cursor/skills/verify-cloudravel/scripts/browser-login.mjs` | Playwright local login + artifacts |
+| `.cursor/skills/verify-cloudravel/scripts/browser-drive-features.mjs` | Playwright dashboard, inventory, org-create |
 | Repo `verify/login-probe.sh` | Quick API login + `/auth/me` (optional; uses `API_URL`) |
 | Repo `Makefile` | `make up`, `make down`, `make ps`, `make logs` |
 

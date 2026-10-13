@@ -21,7 +21,7 @@ Preconditions:
 - Authenticated as `system_admin` (default seed admin).
 - No name collision if re-running; use a unique name like `Verify Org ${VERIFY_RUN_ID}`.
 
-- **Open modal.** Playwright: click button with title **Create a new organization** (`+ New` text). Heading **New Organization** visible.
+- **Open modal.** Playwright: `page.getByRole('button', { name: '+ New' })` (accessible name; `title` is **Create a new organization**). Heading **New Organization** visible.
 - **Fill and submit.** Fill the required **Name** textbox (placeholder `Acme Corp`), keep **Development** selected, click **Create Organization**. Modal closes; dropdown lists the new org.
 - **Proof.** Screenshot showing organization name in sidebar select; optional `GET ${API_URL}/organizations` with bearer token lists the org.
 - **Cleanup note.** Removing test orgs is not automated; prefer disposable Compose volumes via `control-cloudravel cleanup` after proof.
