@@ -51,6 +51,7 @@ Commands:
   doctor          Read-only health check (API + optional UI probe)
   api-login       POST /auth/login as admin@local; print token length + /auth/me snippet
   browser-login   Playwright: local login + capture screenshot/ARIA (feature: local-login)
+  browser-drive-features  Playwright: dashboard, inventory, org-create (after doctor)
   cleanup         Tear down the Compose project recorded for this run (keeps artifacts)
 
 Environment:
@@ -126,7 +127,7 @@ ENV
     return "${up_rc}"
   fi
   echo "control-cloudravel: stack started; waiting for API health..."
-  if wait_api_healthy "${API_URL}" 90; then
+  if wait_api_healthy "${API_URL}" 180; then
     echo "control-cloudravel: API healthy"
   else
     echo "control-cloudravel: warning: API not healthy yet — run doctor before driving UI" >&2
@@ -217,6 +218,15 @@ cmd_browser_login() {
   echo "artifacts: ${out_dir}"
 }
 
+cmd_browser_drive_features() {
+  require_state
+  export WEB_URL API_URL VERIFY_RUN_ID VERIFY_ARTIFACTS_ROOT CLOUDRAVEL_LOCAL_EMAIL CLOUDRAVEL_LOCAL_PASSWORD
+  CLOUDRAVEL_LOCAL_EMAIL="${CLOUDRAVEL_LOCAL_EMAIL:-admin@local}"
+  CLOUDRAVEL_LOCAL_PASSWORD="${CLOUDRAVEL_LOCAL_PASSWORD:-ChangeMe123!}"
+  (cd "${SKILL_ROOT}" && node "${SCRIPT_DIR}/browser-drive-features.mjs")
+  echo "artifacts: ${VERIFY_ARTIFACTS_ROOT}/${VERIFY_RUN_ID}/"
+}
+
 cmd_cleanup() {
   if [[ ! -f "${VERIFY_STATE_DIR}/run.env" ]]; then
     echo "control-cloudravel: no run state — nothing to clean up"
@@ -240,6 +250,7 @@ main() {
     doctor) cmd_doctor "$@" ;;
     api-login) cmd_api_login "$@" ;;
     browser-login) cmd_browser_login "$@" ;;
+    browser-drive-features) cmd_browser_drive_features "$@" ;;
     cleanup) cmd_cleanup "$@" ;;
     -h|--help|help|"") usage ;;
     *) echo "unknown command: ${cmd}" >&2; usage; exit 1 ;;
