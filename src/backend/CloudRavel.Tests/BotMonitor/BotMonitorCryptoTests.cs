@@ -50,7 +50,11 @@ public sealed class BotMonitorCryptoTests
     [Fact]
     public void Protect_roundtrip()
     {
-        var key = BotMonitorCrypto.ResolveProtectionKey(null, allowDevelopmentFallback: true, "unit-test-seed");
+        var key = BotMonitorCrypto.ResolveProtectionKey(
+            null,
+            "Development",
+            allowDevKey: true,
+            BotMonitorTestConfig.DevKeyBase64);
         var enc = BotMonitorCrypto.ProtectSecret("secret-value", key);
         Assert.DoesNotContain("secret-value", enc);
         Assert.Equal("secret-value", BotMonitorCrypto.UnprotectSecret(enc, key));

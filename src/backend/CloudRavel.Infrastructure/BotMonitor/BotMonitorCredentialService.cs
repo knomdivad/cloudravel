@@ -11,11 +11,12 @@ public sealed class BotMonitorCredentialService
 
     public BotMonitorCredentialService(IConfiguration configuration, IPlatformInfo platform)
     {
-        var isDevelopment = platform.Environment.Equals("Development", StringComparison.OrdinalIgnoreCase);
+        var allowDevKey = bool.TryParse(configuration["BotMonitor:AllowDevKey"], out var devFlag) && devFlag;
         _protectionKey = BotMonitorCrypto.ResolveProtectionKey(
             configuration["BotMonitor:DataProtectionKeyBase64"],
-            isDevelopment,
-            configuration["LOCAL_AUTH_JWT_SIGNING_KEY"]);
+            platform.Environment,
+            allowDevKey,
+            configuration["BotMonitor:DevDataProtectionKeyBase64"]);
         _tokenPepper = configuration["BotMonitor:TokenPepper"];
     }
 

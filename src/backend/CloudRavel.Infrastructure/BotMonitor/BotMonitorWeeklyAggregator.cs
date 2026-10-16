@@ -56,7 +56,7 @@ public static class BotMonitorWeeklyAggregator
     private static (int Year, int Week) AddIsoWeeks(int year, int week, int delta)
     {
         var jan4 = ISOWeek.ToDateTime(year, 1, DayOfWeek.Monday);
-        var target = ISOWeek.ToDateTime(year, week, DayOfWeek.Monday).AddDays(delta * 7);
+        var target = ISOWeek.ToDateTime(year, week, DayOfWeek.Monday).AddDays((double)delta * 7.0);
         return (ISOWeek.GetYear(target), ISOWeek.GetWeekOfYear(target));
     }
 }

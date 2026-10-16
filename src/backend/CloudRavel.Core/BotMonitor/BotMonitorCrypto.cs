@@ -79,29 +79,37 @@ public static class BotMonitorCrypto
 
     /// <summary>
     /// Resolves the AES key for encrypting bot HMAC secrets at rest.
-    /// Non-Development hosts must set BotMonitor:DataProtectionKeyBase64 (32 bytes, base64).
-    /// Development may derive from LOCAL_AUTH_JWT_SIGNING_KEY when the dedicated key is unset.
+    /// Outside Development, BotMonitor:DataProtectionKeyBase64 is mandatory.
+    /// In Development only, BotMonitor:AllowDevKey=true may use BotMonitor:DevDataProtectionKeyBase64.
     /// </summary>
     public static byte[] ResolveProtectionKey(
-        string? configuredBase64,
-        bool allowDevelopmentFallback,
-        string? localAuthSigningKey)
+        string? dataProtectionKeyBase64,
+        string platformEnvironment,
+        bool allowDevKey,
+        string? devDataProtectionKeyBase64)
     {
-        if (!string.IsNullOrWhiteSpace(configuredBase64))
+        if (!string.IsNullOrWhiteSpace(dataProtectionKeyBase64))
+            return ParseKey32(dataProtectionKeyBase64, nameof(dataProtectionKeyBase64));
+
+        var isDevelopment = platformEnvironment.Equals("Development", StringComparison.OrdinalIgnoreCase);
+        if (!isDevelopment)
         {
-            var key = Convert.FromBase64String(configuredBase64.Trim());
-            if (key.Length == 32) return key;
-            throw new InvalidOperationException("BotMonitor:DataProtectionKeyBase64 must decode to exactly 32 bytes.");
+            throw new InvalidOperationException(
+                "BotMonitor:DataProtectionKeyBase64 is required when Platform:Environment is not Development.");
         }
 
-        if (allowDevelopmentFallback && !string.IsNullOrWhiteSpace(localAuthSigningKey))
-            return SHA256.HashData(Encoding.UTF8.GetBytes(localAuthSigningKey));
+        if (allowDevKey && !string.IsNullOrWhiteSpace(devDataProtectionKeyBase64))
+            return ParseKey32(devDataProtectionKeyBase64, "BotMonitor:DevDataProtectionKeyBase64");
 
         throw new InvalidOperationException(
-            "BotMonitor:DataProtectionKeyBase64 is required when Platform:Environment is not Development.");
+            "Set BotMonitor:DataProtectionKeyBase64, or in Development set BotMonitor:AllowDevKey=true "
+            + "with BotMonitor:DevDataProtectionKeyBase64.");
     }
 
-    [Obsolete("Use ResolveProtectionKey")]
-    public static byte[] DeriveProtectionKey(string? configuredBase64, string? fallbackSigningKey) =>
-        ResolveProtectionKey(configuredBase64, allowDevelopmentFallback: true, fallbackSigningKey);
+    private static byte[] ParseKey32(string base64, string settingName)
+    {
+        var key = Convert.FromBase64String(base64.Trim());
+        if (key.Length == 32) return key;
+        throw new InvalidOperationException($"{settingName} must decode to exactly 32 bytes.");
+    }
 }

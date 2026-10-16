@@ -4,6 +4,10 @@ SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO
 
+DELETE FROM bot_monitor_tenants
+WHERE tenant_id NOT IN (SELECT org_id FROM organizations);
+GO
+
 IF NOT EXISTS (
     SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_bot_monitor_tenants_organization')
 BEGIN

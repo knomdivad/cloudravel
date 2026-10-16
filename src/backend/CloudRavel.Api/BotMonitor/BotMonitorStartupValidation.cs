@@ -8,10 +8,11 @@ public static class BotMonitorStartupValidation
 {
     public static void ValidateBotMonitorConfiguration(IConfiguration configuration, IPlatformInfo platform)
     {
-        var isDevelopment = platform.Environment.Equals("Development", StringComparison.OrdinalIgnoreCase);
+        var allowDevKey = bool.TryParse(configuration["BotMonitor:AllowDevKey"], out var devFlag) && devFlag;
         _ = BotMonitorCrypto.ResolveProtectionKey(
             configuration["BotMonitor:DataProtectionKeyBase64"],
-            isDevelopment,
-            configuration["LOCAL_AUTH_JWT_SIGNING_KEY"]);
+            platform.Environment,
+            allowDevKey,
+            configuration["BotMonitor:DevDataProtectionKeyBase64"]);
     }
 }

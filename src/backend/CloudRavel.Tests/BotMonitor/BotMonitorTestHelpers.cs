@@ -21,13 +21,17 @@ internal sealed class FakePlatformInfo : IPlatformInfo
 
 internal static class BotMonitorTestConfig
 {
+    internal static readonly string DevKeyBase64 = Convert.ToBase64String(new byte[32]);
+
+    public static IConfiguration DevelopmentConfig() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["BotMonitor:AllowDevKey"] = "true",
+                ["BotMonitor:DevDataProtectionKeyBase64"] = DevKeyBase64,
+            })
+            .Build();
+
     public static BotMonitorCredentialService Credentials(string environment = "Development") =>
-        new(
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["LOCAL_AUTH_JWT_SIGNING_KEY"] = "test-signing-key-for-unit-tests",
-                })
-                .Build(),
-            new FakePlatformInfo(environment));
+        new(DevelopmentConfig(), new FakePlatformInfo(environment));
 }

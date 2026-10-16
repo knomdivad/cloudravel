@@ -1,5 +1,5 @@
 -- ============================================================================
--- LOCAL DEVELOPMENT ONLY — BotMonitor demo rows for /ops/bots and /portal/bots.
+-- LOCAL DEVELOPMENT ONLY: BotMonitor demo rows for /ops/bots and /portal/bots.
 -- Do not run against staging or production. Contains synthetic token hashes only.
 --
 -- Guard: abort unless the instance is explicitly Development.
@@ -9,9 +9,9 @@ SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO
 
-IF EXISTS (SELECT 1 FROM organizations WHERE environment = N'Production')
+IF EXISTS (SELECT 1 FROM organizations WHERE environment <> N'Development')
 BEGIN
-    RAISERROR(N'seed-bot-monitor-demo.sql is local-only and must not run when Production organizations exist.', 16, 1);
+    RAISERROR(N'seed-bot-monitor-demo.sql is local-only and requires all organizations to be Development.', 16, 1);
     RETURN;
 END
 

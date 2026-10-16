@@ -2,13 +2,16 @@
 
 We use this routine so each bot reports status to CloudRavel without exposing secrets in logs.
 
-## Environment
+## Credentials
 
-Set these variables before running the helper scripts (never commit real values):
+Preferred: mode `0600` files (never commit these paths or contents):
 
-- `CR_BOT_TOKEN` per-bot bearer token (shown once at registration)
-- `CR_BOT_HMAC_SECRET` base64 HMAC secret (shown once at registration)
-- `CR_API_BASE` optional API root, default `http://localhost:7071/api`
+- `CR_BOT_TOKEN_FILE` path to the bearer token (shown once at registration)
+- `CR_BOT_HMAC_SECRET_FILE` path to the base64 HMAC secret (shown once at registration)
+
+Alternative: `CR_BOT_TOKEN` and `CR_BOT_HMAC_SECRET` environment variables for local runs only.
+
+Optional: `CR_API_BASE` API root, default `http://localhost:7071/api`
 
 ## Keep check prompt
 
@@ -19,12 +22,19 @@ Before posting, run your local Keep checklist (disk, queue depth, last job error
 
 If checks fail, still post a heartbeat with `status` `error` so operators see the drift.
 
-## Scripts
+## Script
 
-- `scripts/bot-monitor/send-heartbeat.sh` (bash, curl, openssl)
-- `scripts/bot-monitor/send-heartbeat.py` (Python 3)
+`scripts/bot-monitor/send-heartbeat.py` (Python 3, stdlib `hmac` and `hashlib` only)
 
-Both read token and secret from the environment, sign the payload, and POST once. The bash helper decodes the base64 HMAC key into a private temp file, derives a hex key, and passes it to OpenSSL with `-mac HMAC -macopt hexkey:...` so the raw secret never appears on the command line. They exit 0 on HTTP 200 and fail soft (exit 1 with a short message) on auth or network errors.
+The script reads credentials from files or the environment, signs the JSON body, and POSTs once. It exits 0 on HTTP 200 and fails soft (exit 1 with a short message) on auth or network errors.
+
+```bash
+python3 scripts/bot-monitor/send-heartbeat.py
+```
+
+## Registry
+
+Link an organization before creating bots: `POST /api/bot-monitor/registry/tenants` with JSON `{"organizationId":"<org guid>"}` (system admin). Bot create uses the same id as `tenantId`.
 
 ## API contract
 
@@ -32,7 +42,7 @@ Both read token and secret from the environment, sign the payload, and POST once
 
 Headers:
 
-- `Authorization: Bearer <CR_BOT_TOKEN>`
+- `Authorization: Bearer <token>`
 - `X-CR-Timestamp` unix seconds UTC
 - `X-CR-Signature` lowercase hex HMAC-SHA256 over `timestamp + "." + raw body`
 

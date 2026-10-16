@@ -27,38 +27,42 @@ export function BotMonitorShell({
   );
 }
 
-const presenceStyles: Record<string, { border: string; dot: string; label: string }> = {
-  online: { border: '#6db87a', dot: '#6db87a', label: text },
-  stale: { border: '#c9a227', dot: '#c9a227', label: text },
-  offline: { border: '#8a8580', dot: '#8a8580', label: text },
+const presenceMeta: Record<string, { label: string; icon: string }> = {
+  online: { label: 'online', icon: '\u25CF' },
+  stale: { label: 'stale', icon: '\u25C9' },
+  offline: { label: 'offline', icon: '\u25CB' },
 };
 
 export function PresenceBadge({ presence }: { presence: string }) {
   const key = presence.toLowerCase();
-  const style = presenceStyles[key] ?? { border: accent, dot: accent, label: text };
+  const meta = presenceMeta[key] ?? { label: presence, icon: '\u2022' };
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize"
       style={{
         backgroundColor: surface,
-        color: style.label,
-        border: `1px solid ${style.border}`,
+        color: text,
+        border: `1px solid ${accent}`,
       }}
     >
-      <span
-        aria-hidden
-        className="inline-block h-2 w-2 rounded-full"
-        style={{ backgroundColor: style.dot }}
-      />
-      {presence}
+      <span aria-hidden style={{ color: accent }}>
+        {meta.icon}
+      </span>
+      {meta.label}
     </span>
   );
 }
 
 export function KeepBadge({ value }: { value?: string | null }) {
-  if (!value || value === 'none') return <span className="opacity-50 text-xs">Keep: n/a</span>;
+  if (!value || value === 'none') {
+    return (
+      <span className="text-xs" style={{ color: text, opacity: 0.6 }}>
+        Keep: n/a
+      </span>
+    );
+  }
   return (
-    <span className="text-xs capitalize" style={{ color: accent }}>
+    <span className="text-xs capitalize" style={{ color: text }}>
       Keep: {value}
     </span>
   );
