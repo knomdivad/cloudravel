@@ -263,7 +263,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         var buckets = BotMonitorWeeklyAggregator.BuildEmptyWeeks(weeks, nowUtc).ToDictionary(
             b => (b.IsoYear, b.IsoWeek));
 
-        var since = nowUtc.AddDays(-(double)(7 * weeks));
+        var since = nowUtc.AddDays(-(double)weeks * 7.0);
         var rows = await conn.QueryAsync<(DateTime ReceivedAt, string Status, string KeepCheck)>(
             "SELECT received_at AS ReceivedAt, status AS Status, keep_check AS KeepCheck "
             + "FROM bot_monitor_heartbeats WHERE bot_id = @botId AND tenant_id = @tenantId AND received_at >= @since",

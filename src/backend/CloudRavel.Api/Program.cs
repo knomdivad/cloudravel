@@ -89,7 +89,7 @@ var host = new HostBuilder()
         services.AddScoped<IBotMonitorRepository, BotMonitorRepository>();
         services.AddSingleton<BotMonitorCredentialService>();
         services.AddScoped<BotMonitorHeartbeatService>();
-        // Azure services — Scoped to avoid singleton-depends-on-scoped issue
+        // Azure services: scoped to avoid singleton-depends-on-scoped issue
         services.AddScoped<IAzureCredentialFactory, AzureCredentialFactory>();
         services.AddScoped<IInventoryCollectionService, InventoryCollectionService>();
         services.AddScoped<IAriIngestionService, AriIngestionService>();

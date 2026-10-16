@@ -129,7 +129,7 @@ export async function getPortalBots(tenantId: string): Promise<BotMonitorPortalB
 }
 
 // ============================================================================
-// Organization API — the in-app workspace above clouds
+// Organization API: the in-app workspace above clouds
 // ============================================================================
 
 export async function getOrganizations(): Promise<Organization[]> {
