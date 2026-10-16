@@ -1,6 +1,7 @@
 using CloudRavel.Core.BotMonitor;
 using CloudRavel.Core.Interfaces;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace CloudRavel.Infrastructure.BotMonitor;
 
@@ -13,16 +14,19 @@ public sealed class BotMonitorHeartbeatService
     private readonly IBotMonitorRepository _repo;
     private readonly BotMonitorCredentialService _credentials;
     private readonly Func<DateTime> _clock;
+    private readonly ILogger<BotMonitorHeartbeatService>? _logger;
 
     public BotMonitorHeartbeatService(
         IBotMonitorRepository repo,
         BotMonitorCredentialService credentials,
         IConfiguration configuration,
-        Func<DateTime>? clock = null)
+        Func<DateTime>? clock = null,
+        ILogger<BotMonitorHeartbeatService>? logger = null)
     {
         _repo = repo;
         _credentials = credentials;
         _clock = clock ?? (() => DateTime.UtcNow);
+        _logger = logger;
     }
 
     public enum HeartbeatRejectReason
@@ -96,11 +100,15 @@ public sealed class BotMonitorHeartbeatService
 
         await _repo.IngestHeartbeatAsync(bot.TenantId, bot.BotId, payload, now, ct);
         await _repo.PurgeExpiredNoncesAsync(now.AddMinutes(-10), ct);
+        _logger?.LogDebug("Heartbeat accepted for bot {BotId}", bot.BotId);
         return new HeartbeatResult { Success = true, Reason = HeartbeatRejectReason.None };
     }
 
-    private static HeartbeatResult Fail(HeartbeatRejectReason reason) =>
-        new() { Success = false, Reason = reason };
+    private HeartbeatResult Fail(HeartbeatRejectReason reason)
+    {
+        _logger?.LogDebug("Heartbeat rejected with reason {ReasonCode}", reason);
+        return new HeartbeatResult { Success = false, Reason = reason };
+    }
 }
 
 internal static class DateTimeUnixExtensions

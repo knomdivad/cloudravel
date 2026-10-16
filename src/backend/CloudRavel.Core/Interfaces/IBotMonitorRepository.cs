@@ -6,7 +6,8 @@ public interface IBotMonitorRepository
 {
     Task<BotMonitorTenant?> GetTenantAsync(Guid tenantId, CancellationToken ct = default);
     Task<IReadOnlyList<BotMonitorTenant>> ListTenantsAsync(CancellationToken ct = default);
-    Task<BotMonitorTenant> CreateTenantAsync(string name, CancellationToken ct = default);
+    /// <summary>Registers bot monitor for an existing organization id (same as portal tenant id).</summary>
+    Task<BotMonitorTenant?> LinkOrganizationAsync(Guid organizationId, string organizationName, CancellationToken ct = default);
 
     Task<BotMonitorBot?> GetBotByIdAsync(Guid tenantId, Guid botId, CancellationToken ct = default);
     Task<BotMonitorBot?> GetBotByTokenHashAsync(string tokenHash, CancellationToken ct = default);

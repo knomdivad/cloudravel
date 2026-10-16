@@ -1,6 +1,19 @@
--- Optional BotMonitor demo rows for /ops/bots and /portal/bots verification.
--- Run after migrations, with RLS bypass:
---   sqlcmd ... -I -i database/seed-bot-monitor-demo.sql
+-- ============================================================================
+-- LOCAL DEVELOPMENT ONLY — BotMonitor demo rows for /ops/bots and /portal/bots.
+-- Do not run against staging or production. Contains synthetic token hashes only.
+--
+-- Guard: abort unless the instance is explicitly Development.
+-- ============================================================================
+
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+GO
+
+IF EXISTS (SELECT 1 FROM organizations WHERE environment = N'Production')
+BEGIN
+    RAISERROR(N'seed-bot-monitor-demo.sql is local-only and must not run when Production organizations exist.', 16, 1);
+    RETURN;
+END
 
 EXEC sp_set_session_context @key = N'bypass_rls', @value = 1;
 
@@ -18,11 +31,17 @@ BEGIN
     RETURN;
 END
 
-INSERT INTO bot_monitor_tenants (tenant_id, name) VALUES (@TenantId, N'cloudravel-internal');
-
 IF NOT EXISTS (SELECT 1 FROM organizations WHERE org_id = @TenantId)
     INSERT INTO organizations (org_id, name, environment, created_by)
     VALUES (@TenantId, N'cloudravel-internal', N'Development', N'system');
+
+INSERT INTO bot_monitor_tenants (tenant_id, name) VALUES (@TenantId, N'cloudravel-internal');
+
+DECLARE @AdminUserId UNIQUEIDENTIFIER = (SELECT TOP 1 user_id FROM users WHERE email = N'admin@local');
+IF @AdminUserId IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM user_tenant_access WHERE user_id = @AdminUserId AND tenant_id = @TenantId)
+    INSERT INTO user_tenant_access (user_id, tenant_id, role, granted_by)
+    VALUES (@AdminUserId, @TenantId, N'org_admin', @AdminUserId);
 
 INSERT INTO bot_monitor_bots
     (bot_id, tenant_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes)
@@ -41,4 +60,4 @@ VALUES
     (@BotA, @TenantId, DATEADD(MINUTE, -5, @Now), N'ok', NULL, NULL),
     (@BotB, @TenantId, DATEADD(HOUR, -3, @Now), N'error', N'timeout', DATEADD(HOUR, -3, @Now));
 
-PRINT 'BotMonitor demo seed complete.';
+PRINT 'BotMonitor demo seed complete (local development only).';

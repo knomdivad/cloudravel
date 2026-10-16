@@ -4,7 +4,8 @@ namespace CloudRavel.Core.DTOs;
 
 public sealed class CreateBotMonitorTenantRequest
 {
-    public string Name { get; set; } = string.Empty;
+    /// <summary>Must match an existing organization (portal workspace) id.</summary>
+    public Guid OrganizationId { get; set; }
 }
 
 public sealed class CreateBotMonitorBotRequest

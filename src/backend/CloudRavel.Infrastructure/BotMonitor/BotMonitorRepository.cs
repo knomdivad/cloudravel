@@ -27,10 +27,23 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         return rows.ToList();
     }
 
-    public async Task<BotMonitorTenant> CreateTenantAsync(string name, CancellationToken ct = default)
+    public async Task<BotMonitorTenant?> LinkOrganizationAsync(Guid organizationId, string organizationName, CancellationToken ct = default)
     {
-        var tenant = new BotMonitorTenant { TenantId = Guid.NewGuid(), Name = name.Trim(), CreatedAt = DateTime.UtcNow };
         await using var conn = await _db.CreateAdminConnectionAsync();
+        var orgExists = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(1) FROM organizations WHERE org_id = @organizationId",
+            new { organizationId });
+        if (orgExists == 0) return null;
+
+        var existing = await GetTenantAsync(organizationId, ct);
+        if (existing != null) return existing;
+
+        var tenant = new BotMonitorTenant
+        {
+            TenantId = organizationId,
+            Name = organizationName.Trim(),
+            CreatedAt = DateTime.UtcNow,
+        };
         await conn.ExecuteAsync(
             "INSERT INTO bot_monitor_tenants (tenant_id, name) VALUES (@TenantId, @Name)",
             tenant);
@@ -40,7 +53,9 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     public async Task<BotMonitorBot?> GetBotByIdAsync(Guid tenantId, Guid botId, CancellationToken ct = default)
     {
         await using var conn = await _db.CreateConnectionAsync(tenantId);
-        var row = await conn.QuerySingleOrDefaultAsync<dynamic>(BotSelectSql + " AND bot_id = @botId", new { botId });
+        var row = await conn.QuerySingleOrDefaultAsync<dynamic>(
+            BotSelectSql + " AND bot_id = @botId AND tenant_id = @tenantId",
+            new { botId, tenantId });
         return row is null ? null : MapBotOnly(row);
     }
 
@@ -62,9 +77,10 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
                    b.platform AS Platform, b.token_hash AS TokenHash, b.hmac_secret_enc AS HmacSecretEnc,
                    b.checkin_interval_minutes AS CheckinIntervalMinutes, b.created_at AS CreatedAt, b.revoked_at AS RevokedAt,
                    s.last_seen_at AS LastSeenAt, s.last_status AS LastStatus, s.last_error AS LastError, s.last_error_at AS LastErrorAt,
-                   (SELECT TOP 1 keep_check FROM bot_monitor_heartbeats h WHERE h.bot_id = b.bot_id ORDER BY received_at DESC) AS LastKeepCheck
+                   (SELECT TOP 1 keep_check FROM bot_monitor_heartbeats h
+                    WHERE h.bot_id = b.bot_id AND h.tenant_id = b.tenant_id ORDER BY received_at DESC) AS LastKeepCheck
             FROM bot_monitor_bots b
-            LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id
+            LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id AND s.tenant_id = b.tenant_id
             WHERE b.tenant_id = @tenantId
             ORDER BY b.display_name
             """;
@@ -82,10 +98,11 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
                    b.checkin_interval_minutes AS CheckinIntervalMinutes, b.created_at AS CreatedAt, b.revoked_at AS RevokedAt,
                    s.last_seen_at AS LastSeenAt, s.last_status AS LastStatus, s.last_error AS LastError, s.last_error_at AS LastErrorAt,
                    t.name AS TenantName,
-                   (SELECT TOP 1 keep_check FROM bot_monitor_heartbeats h WHERE h.bot_id = b.bot_id ORDER BY received_at DESC) AS LastKeepCheck
+                   (SELECT TOP 1 keep_check FROM bot_monitor_heartbeats h
+                    WHERE h.bot_id = b.bot_id AND h.tenant_id = b.tenant_id ORDER BY received_at DESC) AS LastKeepCheck
             FROM bot_monitor_bots b
             INNER JOIN bot_monitor_tenants t ON t.tenant_id = b.tenant_id
-            LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id
+            LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id AND s.tenant_id = b.tenant_id
             WHERE (@filterTenantId IS NULL OR b.tenant_id = @filterTenantId)
             ORDER BY t.name, b.display_name
             """;
@@ -216,7 +233,8 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
 
         await conn.ExecuteAsync("""
             MERGE bot_monitor_bot_state AS t
-            USING (SELECT @botId AS bot_id) AS s ON t.bot_id = s.bot_id
+            USING (SELECT @botId AS bot_id, @tenantId AS tenant_id) AS s
+            ON t.bot_id = s.bot_id AND t.tenant_id = s.tenant_id
             WHEN MATCHED THEN UPDATE SET
                 last_seen_at = @receivedAtUtc,
                 last_status = @statusDb,
@@ -239,8 +257,8 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     {
         await using var conn = await _db.CreateConnectionAsync(tenantId);
         var interval = await conn.QuerySingleOrDefaultAsync<int?>(
-            "SELECT checkin_interval_minutes FROM bot_monitor_bots WHERE bot_id = @botId",
-            new { botId }) ?? 60;
+            "SELECT checkin_interval_minutes FROM bot_monitor_bots WHERE bot_id = @botId AND tenant_id = @tenantId",
+            new { botId, tenantId }) ?? 60;
 
         var buckets = BotMonitorWeeklyAggregator.BuildEmptyWeeks(weeks, nowUtc).ToDictionary(
             b => (b.IsoYear, b.IsoWeek));
@@ -248,8 +266,8 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         var since = nowUtc.AddDays(-7 * weeks);
         var rows = await conn.QueryAsync<(DateTime ReceivedAt, string Status, string KeepCheck)>(
             "SELECT received_at AS ReceivedAt, status AS Status, keep_check AS KeepCheck "
-            + "FROM bot_monitor_heartbeats WHERE bot_id = @botId AND received_at >= @since",
-            new { botId, since });
+            + "FROM bot_monitor_heartbeats WHERE bot_id = @botId AND tenant_id = @tenantId AND received_at >= @since",
+            new { botId, tenantId, since });
 
         foreach (var row in rows)
         {

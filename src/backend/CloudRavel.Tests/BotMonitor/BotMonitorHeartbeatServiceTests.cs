@@ -13,13 +13,7 @@ public sealed class BotMonitorHeartbeatServiceTests
     private readonly BotMonitorCredentialService _credentials;
     private readonly DateTime _now = new(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
 
-    public BotMonitorHeartbeatServiceTests()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["LOCAL_AUTH_JWT_SIGNING_KEY"] = "test-signing-key" })
-            .Build();
-        _credentials = new BotMonitorCredentialService(config);
-    }
+    public BotMonitorHeartbeatServiceTests() => _credentials = BotMonitorTestConfig.Credentials();
 
     [Fact]
     public async Task Timestamp_skew_future_rejected()
@@ -74,6 +68,50 @@ public sealed class BotMonitorHeartbeatServiceTests
         var replay = await svc.ProcessAsync(token, ts.ToString(), sig, body);
         Assert.False(replay.Success);
         Assert.Equal(BotMonitorHeartbeatService.HeartbeatRejectReason.Replay, replay.Reason);
+    }
+
+    [Fact]
+    public async Task Missing_signature_header_rejected()
+    {
+        var (token, _, hash, enc) = _credentials.MintCredentials();
+        var bot = new BotMonitorBot { BotId = Guid.NewGuid(), TenantId = Guid.NewGuid(), TokenHash = hash, HmacSecretEnc = enc, CheckinIntervalMinutes = 60 };
+        _repo.GetBotByTokenHashAsync(Arg.Any<string>()).Returns(bot);
+
+        var svc = new BotMonitorHeartbeatService(_repo, _credentials, new ConfigurationBuilder().Build(), () => _now);
+        var body = """{"status":"ok"}"""u8.ToArray();
+        var ts = _now.ToUnixTimeSeconds();
+
+        var result = await svc.ProcessAsync(token, ts.ToString(), signatureHeader: null, body);
+        Assert.Equal(BotMonitorHeartbeatService.HeartbeatRejectReason.BadSignature, result.Reason);
+    }
+
+    [Fact]
+    public async Task Malformed_signature_header_rejected()
+    {
+        var (token, _, hash, enc) = _credentials.MintCredentials();
+        var bot = new BotMonitorBot { BotId = Guid.NewGuid(), TenantId = Guid.NewGuid(), TokenHash = hash, HmacSecretEnc = enc, CheckinIntervalMinutes = 60 };
+        _repo.GetBotByTokenHashAsync(Arg.Any<string>()).Returns(bot);
+
+        var svc = new BotMonitorHeartbeatService(_repo, _credentials, new ConfigurationBuilder().Build(), () => _now);
+        var body = """{"status":"ok"}"""u8.ToArray();
+        var ts = _now.ToUnixTimeSeconds();
+
+        var result = await svc.ProcessAsync(token, ts.ToString(), "not-a-valid-hmac-hex", body);
+        Assert.Equal(BotMonitorHeartbeatService.HeartbeatRejectReason.BadSignature, result.Reason);
+    }
+
+    [Fact]
+    public async Task Missing_timestamp_header_rejected()
+    {
+        var (token, _, hash, enc) = _credentials.MintCredentials();
+        var bot = new BotMonitorBot { BotId = Guid.NewGuid(), TenantId = Guid.NewGuid(), TokenHash = hash, HmacSecretEnc = enc, CheckinIntervalMinutes = 60 };
+        _repo.GetBotByTokenHashAsync(Arg.Any<string>()).Returns(bot);
+
+        var svc = new BotMonitorHeartbeatService(_repo, _credentials, new ConfigurationBuilder().Build(), () => _now);
+        var body = """{"status":"ok"}"""u8.ToArray();
+
+        var result = await svc.ProcessAsync(token, timestampHeader: null, signatureHeader: "abc", body);
+        Assert.Equal(BotMonitorHeartbeatService.HeartbeatRejectReason.TimestampSkew, result.Reason);
     }
 
     [Fact]

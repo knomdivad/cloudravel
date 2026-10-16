@@ -15,7 +15,27 @@ BODY=$(printf '{"status":"%s","lastTask":"%s","errors":[],"keepCheck":"%s","keep
 
 TS=$(date -u +%s)
 CANON="${TS}.${BODY}"
-SIG=$(printf '%s' "$CANON" | openssl dgst -sha256 -hmac "$(printf '%s' "$SECRET_B64" | base64 -d)" -hex | awk '{print $2}')
+
+WORKDIR=
+cleanup() {
+  if [ -n "${WORKDIR:-}" ] && [ -d "$WORKDIR" ]; then
+    rm -rf "$WORKDIR"
+  fi
+}
+trap cleanup EXIT
+
+umask 077
+WORKDIR=$(mktemp -d)
+KEY_BIN="$WORKDIR/key.bin"
+KEY_HEX="$WORKDIR/key.hex"
+
+printf '%s' "$SECRET_B64" | base64 -d >"$KEY_BIN"
+xxd -p -c 256 "$KEY_BIN" | tr -d '\n' >"$KEY_HEX"
+
+SIG=$(
+  printf '%s' "$CANON" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$(cat "$KEY_HEX")" -hex \
+    | awk '{print $2}'
+)
 
 HTTP=$(curl -sS -o /tmp/cr-hb.out -w '%{http_code}' \
   -X POST "${API_BASE}/bot-monitor/heartbeat" \

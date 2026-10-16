@@ -1,4 +1,5 @@
 using CloudRavel.Core.BotMonitor;
+using CloudRavel.Core.Interfaces;
 using Microsoft.Extensions.Configuration;
 
 namespace CloudRavel.Infrastructure.BotMonitor;
@@ -8,10 +9,12 @@ public sealed class BotMonitorCredentialService
     private readonly byte[] _protectionKey;
     private readonly string? _tokenPepper;
 
-    public BotMonitorCredentialService(IConfiguration configuration)
+    public BotMonitorCredentialService(IConfiguration configuration, IPlatformInfo platform)
     {
-        _protectionKey = BotMonitorCrypto.DeriveProtectionKey(
+        var isDevelopment = platform.Environment.Equals("Development", StringComparison.OrdinalIgnoreCase);
+        _protectionKey = BotMonitorCrypto.ResolveProtectionKey(
             configuration["BotMonitor:DataProtectionKeyBase64"],
+            isDevelopment,
             configuration["LOCAL_AUTH_JWT_SIGNING_KEY"]);
         _tokenPepper = configuration["BotMonitor:TokenPepper"];
     }

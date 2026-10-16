@@ -27,19 +27,29 @@ export function BotMonitorShell({
   );
 }
 
+const presenceStyles: Record<string, { border: string; dot: string; label: string }> = {
+  online: { border: '#6db87a', dot: '#6db87a', label: text },
+  stale: { border: '#c9a227', dot: '#c9a227', label: text },
+  offline: { border: '#8a8580', dot: '#8a8580', label: text },
+};
+
 export function PresenceBadge({ presence }: { presence: string }) {
   const key = presence.toLowerCase();
-  const tone =
-    key === 'online'
-      ? accent
-      : key === 'stale'
-        ? '#8a6a3a'
-        : '#5c5c5c';
+  const style = presenceStyles[key] ?? { border: accent, dot: accent, label: text };
   return (
     <span
-      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize"
-      style={{ backgroundColor: surface, color: text, border: `1px solid ${tone}` }}
+      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize"
+      style={{
+        backgroundColor: surface,
+        color: style.label,
+        border: `1px solid ${style.border}`,
+      }}
     >
+      <span
+        aria-hidden
+        className="inline-block h-2 w-2 rounded-full"
+        style={{ backgroundColor: style.dot }}
+      />
       {presence}
     </span>
   );

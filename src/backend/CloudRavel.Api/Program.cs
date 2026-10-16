@@ -9,6 +9,7 @@ using CloudRavel.Infrastructure;
 using CloudRavel.Infrastructure.AiOps;
 using CloudRavel.Infrastructure.Auth;
 using CloudRavel.Infrastructure.Azure;
+using CloudRavel.Api.BotMonitor;
 using CloudRavel.Infrastructure.BotMonitor;
 using CloudRavel.Infrastructure.Chat;
 using CloudRavel.Infrastructure.Data;
@@ -88,7 +89,6 @@ var host = new HostBuilder()
         services.AddScoped<IBotMonitorRepository, BotMonitorRepository>();
         services.AddSingleton<BotMonitorCredentialService>();
         services.AddScoped<BotMonitorHeartbeatService>();
-
         // Azure services — Scoped to avoid singleton-depends-on-scoped issue
         services.AddScoped<IAzureCredentialFactory, AzureCredentialFactory>();
         services.AddScoped<IInventoryCollectionService, InventoryCollectionService>();
@@ -254,6 +254,12 @@ var host = new HostBuilder()
         services.ConfigureFunctionsApplicationInsights();
     })
     .Build();
+
+{
+    var config = host.Services.GetRequiredService<IConfiguration>();
+    var platform = host.Services.GetRequiredService<IPlatformInfo>();
+    BotMonitorStartupValidation.ValidateBotMonitorConfiguration(config, platform);
+}
 
 host.Run();
 

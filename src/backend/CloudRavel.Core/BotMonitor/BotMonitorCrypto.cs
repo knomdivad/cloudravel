@@ -77,15 +77,31 @@ public static class BotMonitorCrypto
         return Encoding.UTF8.GetString(plain);
     }
 
-    public static byte[] DeriveProtectionKey(string? configuredBase64, string? fallbackSigningKey)
+    /// <summary>
+    /// Resolves the AES key for encrypting bot HMAC secrets at rest.
+    /// Non-Development hosts must set BotMonitor:DataProtectionKeyBase64 (32 bytes, base64).
+    /// Development may derive from LOCAL_AUTH_JWT_SIGNING_KEY when the dedicated key is unset.
+    /// </summary>
+    public static byte[] ResolveProtectionKey(
+        string? configuredBase64,
+        bool allowDevelopmentFallback,
+        string? localAuthSigningKey)
     {
         if (!string.IsNullOrWhiteSpace(configuredBase64))
         {
             var key = Convert.FromBase64String(configuredBase64.Trim());
             if (key.Length == 32) return key;
+            throw new InvalidOperationException("BotMonitor:DataProtectionKeyBase64 must decode to exactly 32 bytes.");
         }
 
-        var seed = fallbackSigningKey ?? "bot-monitor-dev-key-seed";
-        return SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        if (allowDevelopmentFallback && !string.IsNullOrWhiteSpace(localAuthSigningKey))
+            return SHA256.HashData(Encoding.UTF8.GetBytes(localAuthSigningKey));
+
+        throw new InvalidOperationException(
+            "BotMonitor:DataProtectionKeyBase64 is required when Platform:Environment is not Development.");
     }
+
+    [Obsolete("Use ResolveProtectionKey")]
+    public static byte[] DeriveProtectionKey(string? configuredBase64, string? fallbackSigningKey) =>
+        ResolveProtectionKey(configuredBase64, allowDevelopmentFallback: true, fallbackSigningKey);
 }

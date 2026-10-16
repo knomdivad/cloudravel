@@ -64,8 +64,9 @@ public sealed class BotMonitorTenantIsolationTests
     private static BotMonitorFunctions BuildFunctions(IBotMonitorRepository repo)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
-        var cred = new BotMonitorCredentialService(config);
+        var cred = BotMonitorTestConfig.Credentials();
+        var orgs = Substitute.For<IOrganizationRepository>();
         var hb = new BotMonitorHeartbeatService(repo, cred, config, () => DateTime.UtcNow);
-        return new BotMonitorFunctions(repo, cred, hb, config, NullLogger<BotMonitorFunctions>.Instance);
+        return new BotMonitorFunctions(repo, orgs, cred, hb, config, NullLogger<BotMonitorFunctions>.Instance);
     }
 }

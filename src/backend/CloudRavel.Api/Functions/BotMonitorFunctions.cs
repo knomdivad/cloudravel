@@ -15,6 +15,7 @@ namespace CloudRavel.Api.Functions;
 public sealed class BotMonitorFunctions
 {
     private readonly IBotMonitorRepository _repo;
+    private readonly IOrganizationRepository _organizations;
     private readonly BotMonitorCredentialService _credentials;
     private readonly BotMonitorHeartbeatService _heartbeat;
     private readonly IConfiguration _config;
@@ -23,12 +24,14 @@ public sealed class BotMonitorFunctions
 
     public BotMonitorFunctions(
         IBotMonitorRepository repo,
+        IOrganizationRepository organizations,
         BotMonitorCredentialService credentials,
         BotMonitorHeartbeatService heartbeat,
         IConfiguration config,
         ILogger<BotMonitorFunctions> logger)
     {
         _repo = repo;
+        _organizations = organizations;
         _credentials = credentials;
         _heartbeat = heartbeat;
         _config = config;
@@ -187,10 +190,17 @@ public sealed class BotMonitorFunctions
             body = null;
         }
 
-        if (body is null || string.IsNullOrWhiteSpace(body.Name))
-            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_BODY", "Name is required."));
+        if (body is null || body.OrganizationId == Guid.Empty)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_BODY", "organizationId is required."));
 
-        var tenant = await _repo.CreateTenantAsync(body.Name);
+        var org = await _organizations.GetByIdAsync(body.OrganizationId);
+        if (org is null)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("UNKNOWN_ORGANIZATION", "Organization not found."));
+
+        var tenant = await _repo.LinkOrganizationAsync(org.OrgId, org.Name);
+        if (tenant is null)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("LINK_FAILED", "Could not link organization to bot monitor."));
+
         return await WriteJsonAsync(req, HttpStatusCode.Created, tenant);
     }
 
@@ -224,8 +234,11 @@ public sealed class BotMonitorFunctions
         if (body is null || body.TenantId == Guid.Empty || string.IsNullOrWhiteSpace(body.DisplayName))
             return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_BODY", "TenantId and displayName are required."));
 
+        if (await _organizations.GetByIdAsync(body.TenantId) is null)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("UNKNOWN_ORGANIZATION", "Organization not found."));
+
         if (await _repo.GetTenantAsync(body.TenantId) is null)
-            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("UNKNOWN_TENANT", "Bot monitor tenant not found."));
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("UNKNOWN_TENANT", "Link the organization via bot-monitor registry before creating bots."));
 
         var mint = _credentials.MintCredentials();
         var bot = await _repo.InsertBotAsync(new BotMonitorBot
