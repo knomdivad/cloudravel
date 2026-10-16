@@ -410,11 +410,24 @@ export interface ApiError {
 
 // --- Bot monitor ---
 
+export interface BotMonitorBotType {
+  typeKey: string;
+  displayName: string;
+  isActive: boolean;
+}
+
+export interface BotMonitorBotTypeCount {
+  typeKey: string;
+  displayName: string;
+  count: number;
+}
+
 export interface BotMonitorFleetTenant {
   tenantId: string;
   tenantName: string;
   botCount: number;
   onlineCount: number;
+  typeCounts?: BotMonitorBotTypeCount[];
 }
 
 export interface BotMonitorFleetUser {
@@ -422,6 +435,7 @@ export interface BotMonitorFleetUser {
   displayName: string;
   email: string;
   botCount: number;
+  typeCounts?: BotMonitorBotTypeCount[];
 }
 
 export interface BotMonitorCheckinPoint {
@@ -436,6 +450,8 @@ export interface BotMonitorListItem {
   tenantName: string;
   displayName: string;
   platform: string;
+  botTypeKey?: string;
+  botTypeDisplayName?: string;
   presence: string;
   lastSeenAt?: string | null;
   lastError?: string | null;
@@ -501,6 +517,8 @@ export interface BotMonitorPortalBot {
   ownerDisplayName?: string | null;
   displayName: string;
   platform: string;
+  botTypeKey?: string;
+  botTypeDisplayName?: string;
   presence: string;
   lastSeenAt?: string | null;
   weeklyHistory: BotMonitorWeeklyBucket[];
@@ -513,6 +531,7 @@ export interface BotMonitorPortalUserBotCount {
   displayName: string;
   email: string;
   botCount: number;
+  typeCounts?: BotMonitorBotTypeCount[];
 }
 
 export interface BotMonitorPortalDashboard {
@@ -523,5 +542,6 @@ export interface BotMonitorPortalDashboard {
   offlineCount: number;
   averageUptimePercent: number;
   userBotCounts?: BotMonitorPortalUserBotCount[];
+  typeCounts?: BotMonitorBotTypeCount[];
   bots: BotMonitorPortalBot[];
 }

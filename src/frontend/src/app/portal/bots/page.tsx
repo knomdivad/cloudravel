@@ -1,13 +1,14 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import useSWR from 'swr';
-import { getPortalBotDashboard } from '../../../lib/api';
+import { getPortalBotDashboard, getPortalBotTypes } from '../../../lib/api';
 import { useTenantContext } from '../../../contexts/TenantContext';
 import {
   BotMonitorShell,
   PresenceBadge,
 } from '../../../components/bot-monitor/BotMonitorShell';
+import { BotTypeBadge, BotTypeCountChips } from '../../../components/bot-monitor/BotTypeBadge';
 import {
   CheckinSparkline,
   HealthTrendChart,
@@ -19,9 +20,11 @@ import { BotMonitorMetricsCharts } from '../../../components/bot-monitor/BotMoni
 
 export default function PortalBotsPage() {
   const { tenantId, currentOrg, canViewAllTenantBots, isTenantAdmin } = useTenantContext();
+  const [typeFilter, setTypeFilter] = useState('');
+  const botTypes = useSWR(tenantId ? ['portal-bot-types', tenantId] : null, () => getPortalBotTypes(tenantId!));
   const { data, error, isLoading } = useSWR(
-    tenantId ? ['portal-bot-dashboard', tenantId] : null,
-    () => getPortalBotDashboard(tenantId!),
+    tenantId ? ['portal-bot-dashboard', tenantId, typeFilter] : null,
+    () => getPortalBotDashboard(tenantId!, typeFilter || undefined),
   );
 
   if (!tenantId) {
@@ -59,6 +62,27 @@ export default function PortalBotsPage() {
             avgUptime={dashboard.averageUptimePercent}
           />
 
+          <div className="mb-6 flex flex-wrap items-center gap-2">
+            <label className="text-xs opacity-80" htmlFor="portal-bot-type-filter">
+              Bot type
+            </label>
+            <select
+              id="portal-bot-type-filter"
+              className="rounded border px-2 py-1 text-sm"
+              style={{ backgroundColor: '#232427', borderColor: '#46224d', color: '#e3dbd3' }}
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+            >
+              <option value="">All types</option>
+              {(botTypes.data ?? []).map((t) => (
+                <option key={t.typeKey} value={t.typeKey}>
+                  {t.displayName}
+                </option>
+              ))}
+            </select>
+            {(dashboard.typeCounts?.length ?? 0) > 0 && <BotTypeCountChips counts={dashboard.typeCounts!} />}
+          </div>
+
           {(dashboard.viewScope === 'organization' || canViewAllTenantBots) && (dashboard.userBotCounts?.length ?? 0) > 0 && (
             <div className="mb-6 grid gap-2 md:grid-cols-3">
               {dashboard.userBotCounts!.map((u) => (
@@ -70,6 +94,7 @@ export default function PortalBotsPage() {
                   <p className="text-sm font-medium">{u.displayName}</p>
                   <p className="text-xs opacity-70">{u.email}</p>
                   <p className="text-xs mt-1">{u.botCount} bots</p>
+                  {u.typeCounts && u.typeCounts.length > 0 && <BotTypeCountChips counts={u.typeCounts} />}
                 </div>
               ))}
             </div>
@@ -91,7 +116,15 @@ export default function PortalBotsPage() {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                     <div>
-                      <h2 className="text-lg font-medium">{bot.displayName}</h2>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-lg font-medium">{bot.displayName}</h2>
+                        {bot.botTypeKey && (
+                          <BotTypeBadge
+                            typeKey={bot.botTypeKey}
+                            displayName={bot.botTypeDisplayName ?? bot.botTypeKey}
+                          />
+                        )}
+                      </div>
                       <p className="text-xs opacity-70 capitalize">{bot.platform.replace('_', ' ')}</p>
                       {bot.ownerDisplayName && (
                         <p className="text-xs opacity-70">Owner: {bot.ownerDisplayName}</p>

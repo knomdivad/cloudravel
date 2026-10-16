@@ -37,6 +37,9 @@ DECLARE @MetricsBeta NVARCHAR(4000) = N'{"routine":{"id":"inbox-poll","expectedA
 
 IF EXISTS (SELECT 1 FROM bot_monitor_tenants WHERE tenant_id = @TenantId)
 BEGIN
+    UPDATE b SET bot_type_key = CASE b.display_name WHEN N'Keep probe alpha' THEN N'grokbot' ELSE N'chatgpt' END
+    FROM bot_monitor_bots b
+    WHERE b.tenant_id = @TenantId AND (b.bot_type_key IS NULL OR b.bot_type_key = N'other_plugin');
     UPDATE h SET reported_metrics = CASE b.display_name WHEN N'Keep probe alpha' THEN @MetricsAlpha ELSE @MetricsBeta END
     FROM bot_monitor_heartbeats h
     INNER JOIN bot_monitor_bots b ON b.bot_id = h.bot_id AND b.tenant_id = h.tenant_id
@@ -44,10 +47,10 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM bot_monitor_bots WHERE tenant_id = @TenantId)
     BEGIN
         DECLARE @AdminUserId2 UNIQUEIDENTIFIER = (SELECT TOP 1 user_id FROM users WHERE email = N'admin@local');
-        INSERT INTO bot_monitor_bots (bot_id, tenant_id, owner_user_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes)
+        INSERT INTO bot_monitor_bots (bot_id, tenant_id, owner_user_id, display_name, platform, bot_type_key, token_hash, hmac_secret_enc, checkin_interval_minutes)
         VALUES
-            (@BotA, @TenantId, @AdminUserId2, N'Keep probe alpha', N'grok_bot', @TokenHashA, @EncSecret, 60),
-            (@BotB, @TenantId, @AdminUserId2, N'Mail collab beta', N'email', @TokenHashB, @EncSecret, 60);
+            (@BotA, @TenantId, @AdminUserId2, N'Keep probe alpha', N'grok_bot', N'grokbot', @TokenHashA, @EncSecret, 60),
+            (@BotB, @TenantId, @AdminUserId2, N'Mail collab beta', N'email', N'chatgpt', @TokenHashB, @EncSecret, 60);
         INSERT INTO bot_monitor_heartbeats (bot_id, tenant_id, received_at, status, last_task, errors, keep_check, keep_check_detail, reported_metrics)
         VALUES
             (@BotA, @TenantId, DATEADD(MINUTE, -5, @Now), N'ok', N'Weekly Keep checks', NULL, N'pass', N'All probes succeeded', @MetricsAlpha),
@@ -74,10 +77,10 @@ IF @AdminUserId IS NOT NULL AND NOT EXISTS (
     VALUES (@AdminUserId, @TenantId, N'tenant_admin', @AdminUserId, 1, 1);
 
 INSERT INTO bot_monitor_bots
-    (bot_id, tenant_id, owner_user_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes)
+    (bot_id, tenant_id, owner_user_id, display_name, platform, bot_type_key, token_hash, hmac_secret_enc, checkin_interval_minutes)
 VALUES
-    (@BotA, @TenantId, @AdminUserId, N'Keep probe alpha', N'grok_bot', @TokenHashA, @EncSecret, 60),
-    (@BotB, @TenantId, @AdminUserId, N'Mail collab beta', N'email', @TokenHashB, @EncSecret, 60);
+    (@BotA, @TenantId, @AdminUserId, N'Keep probe alpha', N'grok_bot', N'grokbot', @TokenHashA, @EncSecret, 60),
+    (@BotB, @TenantId, @AdminUserId, N'Mail collab beta', N'email', N'chatgpt', @TokenHashB, @EncSecret, 60);
 
 INSERT INTO bot_monitor_heartbeats
     (bot_id, tenant_id, received_at, status, last_task, errors, keep_check, keep_check_detail, reported_metrics)

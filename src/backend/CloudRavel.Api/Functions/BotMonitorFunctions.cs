@@ -87,14 +87,26 @@ public sealed class BotMonitorFunctions
 
         var now = _clock();
         var rows = await _repo.ListFleetTenantSummariesAsync(now);
-        var tenants = rows.Select(r => new BotMonitorFleetTenantDto
+        var tenants = new List<BotMonitorFleetTenantDto>();
+        foreach (var r in rows)
         {
-            TenantId = r.TenantId,
-            TenantName = r.TenantName,
-            BotCount = r.BotCount,
-            OnlineCount = r.OnlineCount,
-        }).ToList();
-        return await WriteJsonAsync(req, HttpStatusCode.OK, new { tenants });
+            var typeRows = await _repo.CountBotsByTypeAsync(r.TenantId, null, null);
+            tenants.Add(new BotMonitorFleetTenantDto
+            {
+                TenantId = r.TenantId,
+                TenantName = r.TenantName,
+                BotCount = r.BotCount,
+                OnlineCount = r.OnlineCount,
+                TypeCounts = MapTypeCounts(typeRows),
+            });
+        }
+
+        var fleetTypeRows = await _repo.CountBotsByTypeAsync(null, null, null);
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new
+        {
+            tenants,
+            fleetTypeCounts = MapTypeCounts(fleetTypeRows),
+        });
     }
 
     [Function("BotMonitorOpsFleetUsers")]
@@ -113,14 +125,27 @@ public sealed class BotMonitorFunctions
             return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("NOT_FOUND", "Tenant not found."));
 
         var rows = await _repo.ListFleetUsersForTenantAsync(tenantGuid);
-        var users = rows.Select(r => new BotMonitorFleetUserDto
+        var tenantTypeRows = await _repo.CountBotsByTypeAsync(tenantGuid, null, null);
+        var users = new List<BotMonitorFleetUserDto>();
+        foreach (var r in rows)
         {
-            UserId = r.UserId,
-            DisplayName = r.DisplayName,
-            Email = r.Email,
-            BotCount = r.BotCount,
-        }).ToList();
-        return await WriteJsonAsync(req, HttpStatusCode.OK, new { tenantId = tenantGuid, users });
+            var userTypeRows = await _repo.CountBotsByTypeAsync(tenantGuid, r.UserId, null);
+            users.Add(new BotMonitorFleetUserDto
+            {
+                UserId = r.UserId,
+                DisplayName = r.DisplayName,
+                Email = r.Email,
+                BotCount = r.BotCount,
+                TypeCounts = MapTypeCounts(userTypeRows),
+            });
+        }
+
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new
+        {
+            tenantId = tenantGuid,
+            typeCounts = MapTypeCounts(tenantTypeRows),
+            users,
+        });
     }
 
     [Function("BotMonitorOpsFleetUserBots")]
@@ -139,10 +164,18 @@ public sealed class BotMonitorFunctions
         if (await _repo.GetTenantAsync(tenantGuid) is null)
             return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("NOT_FOUND", "Tenant not found."));
 
+        var botTypeKey = ParseBotTypeKeyQuery(req);
         var now = _clock();
-        var rows = await _repo.ListBotsForTenantUserAsync(tenantGuid, userGuid);
+        var rows = await _repo.ListBotsForTenantUserAsync(tenantGuid, userGuid, botTypeKey);
+        var typeRows = await _repo.CountBotsByTypeAsync(tenantGuid, userGuid, null);
         var bots = rows.Select(r => ToListItem(r.Bot, r.State, r.LastKeepCheck, string.Empty, now)).ToList();
-        return await WriteJsonAsync(req, HttpStatusCode.OK, new { tenantId = tenantGuid, userId = userGuid, bots });
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new
+        {
+            tenantId = tenantGuid,
+            userId = userGuid,
+            typeCounts = MapTypeCounts(typeRows),
+            bots,
+        });
     }
 
     [Function("BotMonitorOpsBots")]
@@ -155,11 +188,13 @@ public sealed class BotMonitorFunctions
 
         Guid? filter = null;
         if (Guid.TryParse(QueryParam(req.Url, "tenantId"), out var tid) && tid != Guid.Empty) filter = tid;
+        var botTypeKey = ParseBotTypeKeyQuery(req);
 
         var now = _clock();
-        var rows = await _repo.ListAllBotsAsync(filter);
+        var rows = await _repo.ListAllBotsAsync(filter, botTypeKey);
+        var typeRows = await _repo.CountBotsByTypeAsync(filter, null, botTypeKey);
         var dto = rows.Select(r => ToListItem(r.Bot, r.State, r.LastKeepCheck, r.TenantName, now)).ToList();
-        return await WriteJsonAsync(req, HttpStatusCode.OK, new { bots = dto });
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new { typeCounts = MapTypeCounts(typeRows), bots = dto });
     }
 
     [Function("BotMonitorPortalMetrics")]
@@ -245,13 +280,15 @@ public sealed class BotMonitorFunctions
         if (!userId.HasValue)
             return await WriteJsonAsync(req, HttpStatusCode.Unauthorized, Error("UNAUTHENTICATED", "User identity is required."));
 
+        var botTypeKey = ParseBotTypeKeyQuery(req);
         var now = _clock();
         var organizationView = context.CanViewAllTenantBots();
         Guid? ownerFilter = organizationView ? null : userId.Value;
-        var rows = await _repo.ListBotsForTenantAsync(tenantId, ownerFilter);
+        var rows = await _repo.ListBotsForTenantAsync(tenantId, ownerFilter, botTypeKey);
+        var typeCountRows = await _repo.CountBotsByTypeAsync(tenantId, ownerFilter, botTypeKey);
         var userBotCounts = organizationView
-            ? await _repo.ListUserBotCountsForTenantAsync(tenantId)
-            : Array.Empty<(Guid UserId, string DisplayName, string Email, int BotCount)>();
+            ? await BuildPortalUserBotCountsAsync(tenantId, botTypeKey)
+            : Array.Empty<BotMonitorPortalUserBotCountDto>();
         var bots = new List<BotMonitorPortalBotDto>();
         var online = 0;
         var stale = 0;
@@ -275,6 +312,8 @@ public sealed class BotMonitorFunctions
                 OwnerDisplayName = row.Bot.OwnerDisplayName,
                 DisplayName = row.Bot.DisplayName,
                 Platform = row.Bot.Platform.ToString(),
+                BotTypeKey = row.Bot.BotTypeKey,
+                BotTypeDisplayName = row.Bot.BotTypeDisplayName ?? row.Bot.BotTypeKey,
                 Presence = presence.ToString(),
                 LastSeenAt = row.State?.LastSeenAt,
                 WeeklyHistory = history.Select(h => new BotMonitorWeeklyBucketDto
@@ -304,17 +343,34 @@ public sealed class BotMonitorFunctions
             StaleCount = stale,
             OfflineCount = offline,
             AverageUptimePercent = bots.Count == 0 ? 0 : Math.Round(uptimeSum / bots.Count, 1),
-            UserBotCounts = userBotCounts.Select(u => new BotMonitorPortalUserBotCountDto
-            {
-                UserId = u.UserId,
-                DisplayName = u.DisplayName,
-                Email = u.Email,
-                BotCount = u.BotCount,
-            }).ToList(),
+            UserBotCounts = userBotCounts,
+            TypeCounts = MapTypeCounts(typeCountRows),
             Bots = bots,
         };
 
         return await WriteJsonAsync(req, HttpStatusCode.OK, new { dashboard });
+    }
+
+    [Function("BotMonitorPortalBotTypes")]
+    public async Task<HttpResponseData> PortalBotTypes(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "bot-monitor/portal/bot-types")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var auth = await context.RequireAuthenticatedUserAsync(req);
+        if (auth != null) return auth;
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.ReadOnly);
+        if (forbid != null) return forbid;
+        var botGate = await context.RequireBotMonitoringEntitlementAsync(req);
+        if (botGate != null) return botGate;
+
+        if (context.GetTenantId() == Guid.Empty)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("MISSING_WORKSPACE", "Select an organization first."));
+
+        var types = await _repo.ListBotTypesAsync(activeOnly: true);
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new
+        {
+            types = types.Select(MapBotType).ToList(),
+        });
     }
 
     [Function("BotMonitorPortalBotById")]
@@ -424,6 +480,11 @@ public sealed class BotMonitorFunctions
         if (await _repo.GetTenantAsync(body.TenantId) is null)
             return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("UNKNOWN_TENANT", "Link the organization via bot-monitor registry before creating bots."));
 
+        var typeKey = string.IsNullOrWhiteSpace(body.BotTypeKey) ? "other_plugin" : body.BotTypeKey.Trim();
+        var botType = await _repo.GetBotTypeByKeyAsync(typeKey);
+        if (botType is null || !botType.IsActive)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("UNKNOWN_BOT_TYPE", "botTypeKey must reference an active row in bot_monitor_bot_types."));
+
         var mint = _credentials.MintCredentials();
         var bot = await _repo.InsertBotAsync(new BotMonitorBot
         {
@@ -431,6 +492,7 @@ public sealed class BotMonitorFunctions
             OwnerUserId = body.OwnerUserId,
             DisplayName = body.DisplayName,
             Platform = body.Platform,
+            BotTypeKey = typeKey,
             CheckinIntervalMinutes = body.CheckinIntervalMinutes,
             TokenHash = mint.TokenHash,
             HmacSecretEnc = mint.HmacSecretEnc,
@@ -446,6 +508,49 @@ public sealed class BotMonitorFunctions
             Token = mint.Token,
             HmacSecret = mint.HmacSecret,
         });
+    }
+
+    [Function("BotMonitorRegistryBotTypes")]
+    public async Task<HttpResponseData> RegistryBotTypes(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = "bot-monitor/registry/bot-types")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
+
+        if (req.Method.Equals("GET", StringComparison.OrdinalIgnoreCase))
+        {
+            var types = await _repo.ListBotTypesAsync(activeOnly: false);
+            return await WriteJsonAsync(req, HttpStatusCode.OK, new { types = types.Select(MapBotType).ToList() });
+        }
+
+        CreateBotMonitorBotTypeRequest? body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync<CreateBotMonitorBotTypeRequest>(req.Body,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch
+        {
+            body = null;
+        }
+
+        if (body is null || string.IsNullOrWhiteSpace(body.TypeKey) || string.IsNullOrWhiteSpace(body.DisplayName))
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_BODY", "typeKey and displayName are required."));
+
+        var existing = await _repo.GetBotTypeByKeyAsync(body.TypeKey);
+        if (existing is not null)
+            return await WriteJsonAsync(req, HttpStatusCode.Conflict, Error("DUPLICATE_TYPE", "A bot type with this typeKey already exists."));
+
+        try
+        {
+            var created = await _repo.InsertBotTypeAsync(body.TypeKey, body.DisplayName);
+            return await WriteJsonAsync(req, HttpStatusCode.Created, MapBotType(created));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_TYPE_KEY", ex.Message));
+        }
     }
 
     [Function("BotMonitorRevokeBot")]
@@ -595,12 +700,59 @@ public sealed class BotMonitorFunctions
             TenantName = tenantName,
             DisplayName = bot.DisplayName,
             Platform = bot.Platform.ToString(),
+            BotTypeKey = bot.BotTypeKey,
+            BotTypeDisplayName = bot.BotTypeDisplayName ?? bot.BotTypeKey,
             Presence = BotMonitorStaleEvaluator.Evaluate(state?.LastSeenAt, bot.CheckinIntervalMinutes, now).ToString(),
             LastSeenAt = state?.LastSeenAt,
             LastError = state?.LastError,
             LastKeepCheck = lastKeep,
             RevokedAt = bot.RevokedAt,
         };
+
+    private async Task<IReadOnlyList<BotMonitorPortalUserBotCountDto>> BuildPortalUserBotCountsAsync(
+        Guid tenantId, string? botTypeKey)
+    {
+        var users = await _repo.ListUserBotCountsForTenantAsync(tenantId);
+        var result = new List<BotMonitorPortalUserBotCountDto>();
+        foreach (var u in users)
+        {
+            var typeRows = await _repo.CountBotsByTypeAsync(tenantId, u.UserId, botTypeKey);
+            var botCount = typeRows.Sum(x => x.Count);
+            if (botTypeKey is not null && botCount == 0) continue;
+            result.Add(new BotMonitorPortalUserBotCountDto
+            {
+                UserId = u.UserId,
+                DisplayName = u.DisplayName,
+                Email = u.Email,
+                BotCount = botTypeKey is null ? u.BotCount : botCount,
+                TypeCounts = MapTypeCounts(typeRows),
+            });
+        }
+
+        return result;
+    }
+
+    private static BotMonitorBotTypeDto MapBotType(BotMonitorBotType t) => new()
+    {
+        TypeKey = t.TypeKey,
+        DisplayName = t.DisplayName,
+        IsActive = t.IsActive,
+    };
+
+    private static IReadOnlyList<BotMonitorBotTypeCountDto> MapTypeCounts(
+        IEnumerable<(string TypeKey, string DisplayName, int Count)> rows) =>
+        rows.Select(r => new BotMonitorBotTypeCountDto
+        {
+            TypeKey = r.TypeKey,
+            DisplayName = r.DisplayName,
+            Count = r.Count,
+        }).ToList();
+
+    private static string? ParseBotTypeKeyQuery(HttpRequestData req)
+    {
+        var raw = QueryParam(req.Url, "botTypeKey");
+        return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+    }
 
     private static Guid? qTenantOverride(HttpRequestData req) =>
         Guid.TryParse(QueryParam(req.Url, "tenantId"), out var t) ? t : null;

@@ -43,6 +43,8 @@ public sealed class BotMonitorBot
     public Guid TenantId { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public BotMonitorPlatform Platform { get; set; }
+    public string BotTypeKey { get; set; } = "other_plugin";
+    public string? BotTypeDisplayName { get; set; }
     public string TokenHash { get; set; } = string.Empty;
     public string HmacSecretEnc { get; set; } = string.Empty;
     public int CheckinIntervalMinutes { get; set; } = 60;

@@ -34,6 +34,7 @@ MIGRATIONS=(
   007-feature-entitlements
   008-bot-monitor-health-metrics
   009-tenant-admin-role
+  010-bot-monitor-bot-types
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

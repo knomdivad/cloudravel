@@ -53,10 +53,20 @@ internal sealed class InMemoryBotMonitorCredentialStore : IBotMonitorRepository
     public Task<BotMonitorTenant?> LinkOrganizationAsync(Guid organizationId, string organizationName, CancellationToken ct = default) => Task.FromResult<BotMonitorTenant?>(null);
     public Task<BotMonitorBot?> GetBotByIdAsync(Guid tenantId, Guid botId, CancellationToken ct = default) => Task.FromResult<BotMonitorBot?>(null);
     public Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantAsync(
-        Guid tenantId, Guid? ownerUserId = null, CancellationToken ct = default) =>
+        Guid tenantId, Guid? ownerUserId = null, string? botTypeKey = null, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<(BotMonitorBot, BotMonitorBotState?, string?)>>(Array.Empty<(BotMonitorBot, BotMonitorBotState?, string?)>());
-    public Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>> ListAllBotsAsync(Guid? filterTenantId, CancellationToken ct = default) =>
+    public Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>> ListAllBotsAsync(
+        Guid? filterTenantId, string? botTypeKey = null, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<(BotMonitorBot, BotMonitorBotState?, string?, string)>>(Array.Empty<(BotMonitorBot, BotMonitorBotState?, string?, string)>());
+    public Task<IReadOnlyList<BotMonitorBotType>> ListBotTypesAsync(bool activeOnly, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<BotMonitorBotType>>(Array.Empty<BotMonitorBotType>());
+    public Task<BotMonitorBotType?> GetBotTypeByKeyAsync(string typeKey, CancellationToken ct = default) =>
+        Task.FromResult<BotMonitorBotType?>(null);
+    public Task<BotMonitorBotType> InsertBotTypeAsync(string typeKey, string displayName, CancellationToken ct = default) =>
+        Task.FromResult(new BotMonitorBotType { TypeKey = typeKey, DisplayName = displayName, IsActive = true });
+    public Task<IReadOnlyList<(string TypeKey, string DisplayName, int Count)>> CountBotsByTypeAsync(
+        Guid? tenantId, Guid? ownerUserId, string? botTypeKeyFilter, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<(string, string, int)>>(Array.Empty<(string, string, int)>());
     public Task<BotMonitorBot> InsertBotAsync(BotMonitorBot bot, CancellationToken ct = default) => Task.FromResult(bot);
     public Task<IReadOnlyList<BotMonitorWeeklyBucket>> GetWeeklyHistoryAsync(Guid tenantId, Guid botId, int weeks, DateTime nowUtc, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<BotMonitorWeeklyBucket>>(Array.Empty<BotMonitorWeeklyBucket>());
@@ -76,8 +86,8 @@ internal sealed class InMemoryBotMonitorCredentialStore : IBotMonitorRepository
         Task.FromResult<IReadOnlyList<(Guid, string, string, int)>>(Array.Empty<(Guid, string, string, int)>());
 
     public Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantUserAsync(
-        Guid tenantId, Guid userId, CancellationToken ct = default) =>
-        ListBotsForTenantAsync(tenantId, userId, ct);
+        Guid tenantId, Guid userId, string? botTypeKey = null, CancellationToken ct = default) =>
+        ListBotsForTenantAsync(tenantId, userId, botTypeKey, ct);
 
     public Task<BotMonitorHealthMetricsSnapshot?> GetBotMetricsSnapshotAsync(
         Guid tenantId, Guid botId, DateTime nowUtc, CancellationToken ct = default) =>

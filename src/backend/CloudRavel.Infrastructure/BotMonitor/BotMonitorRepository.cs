@@ -69,12 +69,13 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     }
 
     public async Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantAsync(
-        Guid tenantId, Guid? ownerUserId = null, CancellationToken ct = default)
+        Guid tenantId, Guid? ownerUserId = null, string? botTypeKey = null, CancellationToken ct = default)
     {
         await using var conn = await _db.CreateConnectionAsync(tenantId);
         const string sql = """
             SELECT b.bot_id AS BotId, b.tenant_id AS TenantId, b.display_name AS DisplayName,
-                   b.platform AS Platform, b.token_hash AS TokenHash, b.hmac_secret_enc AS HmacSecretEnc,
+                   b.platform AS Platform, b.bot_type_key AS BotTypeKey, bt.display_name AS BotTypeDisplayName,
+                   b.token_hash AS TokenHash, b.hmac_secret_enc AS HmacSecretEnc,
                    b.checkin_interval_minutes AS CheckinIntervalMinutes, b.created_at AS CreatedAt, b.revoked_at AS RevokedAt,
                    b.owner_user_id AS OwnerUserId,
                    u.display_name AS OwnerDisplayName,
@@ -82,36 +83,43 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
                    (SELECT TOP 1 keep_check FROM bot_monitor_heartbeats h
                     WHERE h.bot_id = b.bot_id AND h.tenant_id = b.tenant_id ORDER BY received_at DESC) AS LastKeepCheck
             FROM bot_monitor_bots b
+            INNER JOIN bot_monitor_bot_types bt ON bt.type_key = b.bot_type_key
             LEFT JOIN users u ON u.user_id = b.owner_user_id
             LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id AND s.tenant_id = b.tenant_id
             WHERE b.tenant_id = @tenantId
               AND b.revoked_at IS NULL
               AND (@ownerUserId IS NULL OR b.owner_user_id = @ownerUserId)
+              AND (@botTypeKey IS NULL OR b.bot_type_key = @botTypeKey)
             ORDER BY b.display_name
             """;
-        var rows = await conn.QueryAsync<dynamic>(sql, new { tenantId, ownerUserId });
+        var rows = await conn.QueryAsync<dynamic>(sql, new { tenantId, ownerUserId, botTypeKey });
         return rows.Select(MapBotRow).ToList();
     }
 
     public async Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>> ListAllBotsAsync(
-        Guid? filterTenantId, CancellationToken ct = default)
+        Guid? filterTenantId, string? botTypeKey = null, CancellationToken ct = default)
     {
         await using var conn = await _db.CreateAdminConnectionAsync();
         var sql = """
             SELECT b.bot_id AS BotId, b.tenant_id AS TenantId, b.display_name AS DisplayName,
-                   b.platform AS Platform, b.token_hash AS TokenHash, b.hmac_secret_enc AS HmacSecretEnc,
+                   b.platform AS Platform, b.bot_type_key AS BotTypeKey, bt.display_name AS BotTypeDisplayName,
+                   b.token_hash AS TokenHash, b.hmac_secret_enc AS HmacSecretEnc,
                    b.checkin_interval_minutes AS CheckinIntervalMinutes, b.created_at AS CreatedAt, b.revoked_at AS RevokedAt,
+                   b.owner_user_id AS OwnerUserId,
                    s.last_seen_at AS LastSeenAt, s.last_status AS LastStatus, s.last_error AS LastError, s.last_error_at AS LastErrorAt,
                    t.name AS TenantName,
                    (SELECT TOP 1 keep_check FROM bot_monitor_heartbeats h
                     WHERE h.bot_id = b.bot_id AND h.tenant_id = b.tenant_id ORDER BY received_at DESC) AS LastKeepCheck
             FROM bot_monitor_bots b
             INNER JOIN bot_monitor_tenants t ON t.tenant_id = b.tenant_id
+            INNER JOIN bot_monitor_bot_types bt ON bt.type_key = b.bot_type_key
             LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id AND s.tenant_id = b.tenant_id
-            WHERE (@filterTenantId IS NULL OR b.tenant_id = @filterTenantId)
+            WHERE b.revoked_at IS NULL
+              AND (@filterTenantId IS NULL OR b.tenant_id = @filterTenantId)
+              AND (@botTypeKey IS NULL OR b.bot_type_key = @botTypeKey)
             ORDER BY t.name, b.display_name
             """;
-        var rows = await conn.QueryAsync<dynamic>(sql, new { filterTenantId });
+        var rows = await conn.QueryAsync<dynamic>(sql, new { filterTenantId, botTypeKey });
         var list = new List<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>();
         foreach (var r in rows)
         {
@@ -129,14 +137,15 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         await using var conn = await _db.CreateConnectionAsync(bot.TenantId);
         await conn.ExecuteAsync("""
             INSERT INTO bot_monitor_bots
-                (bot_id, tenant_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes, owner_user_id)
-            VALUES (@BotId, @TenantId, @DisplayName, @PlatformDb, @TokenHash, @HmacSecretEnc, @CheckinIntervalMinutes, @OwnerUserId)
+                (bot_id, tenant_id, display_name, platform, bot_type_key, token_hash, hmac_secret_enc, checkin_interval_minutes, owner_user_id)
+            VALUES (@BotId, @TenantId, @DisplayName, @PlatformDb, @BotTypeKey, @TokenHash, @HmacSecretEnc, @CheckinIntervalMinutes, @OwnerUserId)
             """, new
         {
             bot.BotId,
             bot.TenantId,
             bot.DisplayName,
             PlatformDb = PlatformToDb(bot.Platform),
+            BotTypeKey = string.IsNullOrWhiteSpace(bot.BotTypeKey) ? "other_plugin" : bot.BotTypeKey.Trim(),
             bot.TokenHash,
             bot.HmacSecretEnc,
             bot.CheckinIntervalMinutes,
@@ -387,8 +396,69 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     }
 
     public async Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantUserAsync(
-        Guid tenantId, Guid userId, CancellationToken ct = default)
-        => await ListBotsForTenantAsync(tenantId, userId, ct);
+        Guid tenantId, Guid userId, string? botTypeKey = null, CancellationToken ct = default)
+        => await ListBotsForTenantAsync(tenantId, userId, botTypeKey, ct);
+
+    public async Task<IReadOnlyList<BotMonitorBotType>> ListBotTypesAsync(bool activeOnly, CancellationToken ct = default)
+    {
+        await using var conn = await _db.CreateAdminConnectionAsync();
+        var sql = activeOnly
+            ? "SELECT type_key AS TypeKey, display_name AS DisplayName, is_active AS IsActive, created_at AS CreatedAt FROM bot_monitor_bot_types WHERE is_active = 1 ORDER BY display_name"
+            : "SELECT type_key AS TypeKey, display_name AS DisplayName, is_active AS IsActive, created_at AS CreatedAt FROM bot_monitor_bot_types ORDER BY display_name";
+        var rows = await conn.QueryAsync<BotMonitorBotType>(sql);
+        return rows.ToList();
+    }
+
+    public async Task<BotMonitorBotType?> GetBotTypeByKeyAsync(string typeKey, CancellationToken ct = default)
+    {
+        await using var conn = await _db.CreateAdminConnectionAsync();
+        return await conn.QuerySingleOrDefaultAsync<BotMonitorBotType>(
+            "SELECT type_key AS TypeKey, display_name AS DisplayName, is_active AS IsActive, created_at AS CreatedAt FROM bot_monitor_bot_types WHERE type_key = @typeKey",
+            new { typeKey = typeKey.Trim() });
+    }
+
+    public async Task<BotMonitorBotType> InsertBotTypeAsync(string typeKey, string displayName, CancellationToken ct = default)
+    {
+        var key = NormalizeTypeKey(typeKey);
+        var name = displayName.Trim();
+        if (name.Length > 128) name = name[..128];
+        await using var conn = await _db.CreateAdminConnectionAsync();
+        await conn.ExecuteAsync(
+            "INSERT INTO bot_monitor_bot_types (type_key, display_name, is_active) VALUES (@key, @name, 1)",
+            new { key, name });
+        return new BotMonitorBotType { TypeKey = key, DisplayName = name, IsActive = true, CreatedAt = DateTime.UtcNow };
+    }
+
+    public async Task<IReadOnlyList<(string TypeKey, string DisplayName, int Count)>> CountBotsByTypeAsync(
+        Guid? tenantId, Guid? ownerUserId, string? botTypeKeyFilter, CancellationToken ct = default)
+    {
+        var conn = tenantId.HasValue
+            ? await _db.CreateConnectionAsync(tenantId.Value)
+            : await _db.CreateAdminConnectionAsync();
+        await using var _ = conn;
+        const string sql = """
+            SELECT b.bot_type_key AS TypeKey, bt.display_name AS DisplayName, COUNT(*) AS Count
+            FROM bot_monitor_bots b
+            INNER JOIN bot_monitor_bot_types bt ON bt.type_key = b.bot_type_key
+            WHERE b.revoked_at IS NULL
+              AND (@tenantId IS NULL OR b.tenant_id = @tenantId)
+              AND (@ownerUserId IS NULL OR b.owner_user_id = @ownerUserId)
+              AND (@botTypeKeyFilter IS NULL OR b.bot_type_key = @botTypeKeyFilter)
+            GROUP BY b.bot_type_key, bt.display_name
+            ORDER BY Count DESC, bt.display_name
+            """;
+        var rows = await conn.QueryAsync<(string TypeKey, string DisplayName, int Count)>(sql,
+            new { tenantId, ownerUserId, botTypeKeyFilter });
+        return rows.ToList();
+    }
+
+    private static string NormalizeTypeKey(string raw)
+    {
+        var key = raw.Trim().ToLowerInvariant();
+        if (key.Length > 64) key = key[..64];
+        if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("typeKey is required.");
+        return key;
+    }
 
     public async Task<BotMonitorHealthMetricsSnapshot?> GetBotMetricsSnapshotAsync(
         Guid tenantId, Guid botId, DateTime nowUtc, CancellationToken ct = default)
@@ -439,7 +509,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     public async Task<IReadOnlyList<(Guid BotId, string DisplayName, BotMonitorHealthMetricsSnapshot Snapshot)>> ListMetricsForTenantAsync(
         Guid tenantId, Guid? ownerUserId, DateTime nowUtc, CancellationToken ct = default)
     {
-        var bots = await ListBotsForTenantAsync(tenantId, ownerUserId, ct);
+        var bots = await ListBotsForTenantAsync(tenantId, ownerUserId, botTypeKey: null, ct);
         var result = new List<(Guid, string, BotMonitorHealthMetricsSnapshot)>();
         foreach (var row in bots)
         {
@@ -472,7 +542,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
 
     private const string BotSelectSql = """
         SELECT bot_id AS BotId, tenant_id AS TenantId, display_name AS DisplayName,
-               platform AS Platform, token_hash AS TokenHash, hmac_secret_enc AS HmacSecretEnc,
+               platform AS Platform, bot_type_key AS BotTypeKey, token_hash AS TokenHash, hmac_secret_enc AS HmacSecretEnc,
                checkin_interval_minutes AS CheckinIntervalMinutes, created_at AS CreatedAt, revoked_at AS RevokedAt,
                owner_user_id AS OwnerUserId
         FROM bot_monitor_bots
@@ -491,6 +561,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         CreatedAt = r.CreatedAt,
         RevokedAt = r.RevokedAt,
         OwnerUserId = r.OwnerUserId,
+        BotTypeKey = r.BotTypeKey is null ? "other_plugin" : (string)r.BotTypeKey,
     };
 
     private static (BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck) MapBotRow(dynamic r)
@@ -508,6 +579,8 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
             RevokedAt = r.RevokedAt,
             OwnerUserId = r.OwnerUserId,
             OwnerDisplayName = r.OwnerDisplayName as string,
+            BotTypeKey = r.BotTypeKey is null ? "other_plugin" : (string)r.BotTypeKey,
+            BotTypeDisplayName = r.BotTypeDisplayName as string,
         };
         BotMonitorBotState? state = r.LastSeenAt is null && r.LastStatus is null
             ? null

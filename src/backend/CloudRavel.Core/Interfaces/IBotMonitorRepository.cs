@@ -12,9 +12,16 @@ public interface IBotMonitorRepository
     Task<BotMonitorBot?> GetBotByIdAsync(Guid tenantId, Guid botId, CancellationToken ct = default);
     Task<BotMonitorBot?> GetBotByTokenHashAsync(string tokenHash, CancellationToken ct = default);
     Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantAsync(
-        Guid tenantId, Guid? ownerUserId = null, CancellationToken ct = default);
+        Guid tenantId, Guid? ownerUserId = null, string? botTypeKey = null, CancellationToken ct = default);
     Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>> ListAllBotsAsync(
-        Guid? filterTenantId, CancellationToken ct = default);
+        Guid? filterTenantId, string? botTypeKey = null, CancellationToken ct = default);
+
+    Task<IReadOnlyList<BotMonitorBotType>> ListBotTypesAsync(bool activeOnly, CancellationToken ct = default);
+    Task<BotMonitorBotType?> GetBotTypeByKeyAsync(string typeKey, CancellationToken ct = default);
+    Task<BotMonitorBotType> InsertBotTypeAsync(string typeKey, string displayName, CancellationToken ct = default);
+
+    Task<IReadOnlyList<(string TypeKey, string DisplayName, int Count)>> CountBotsByTypeAsync(
+        Guid? tenantId, Guid? ownerUserId, string? botTypeKeyFilter, CancellationToken ct = default);
 
     Task<BotMonitorBot> InsertBotAsync(BotMonitorBot bot, CancellationToken ct = default);
 
@@ -43,7 +50,7 @@ public interface IBotMonitorRepository
         Guid tenantId, CancellationToken ct = default);
 
     Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantUserAsync(
-        Guid tenantId, Guid userId, CancellationToken ct = default);
+        Guid tenantId, Guid userId, string? botTypeKey = null, CancellationToken ct = default);
 
     Task<BotMonitorHealthMetricsSnapshot?> GetBotMetricsSnapshotAsync(
         Guid tenantId, Guid botId, DateTime nowUtc, CancellationToken ct = default);

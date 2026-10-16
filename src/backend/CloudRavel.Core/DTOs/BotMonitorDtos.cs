@@ -14,7 +14,29 @@ public sealed class CreateBotMonitorBotRequest
     public Guid? OwnerUserId { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public BotMonitorPlatform Platform { get; set; } = BotMonitorPlatform.Other;
+    /// <summary>Lookup key from bot_monitor_bot_types (separate from platform).</summary>
+    public string BotTypeKey { get; set; } = "other_plugin";
     public int CheckinIntervalMinutes { get; set; } = 60;
+}
+
+public sealed class CreateBotMonitorBotTypeRequest
+{
+    public string TypeKey { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+}
+
+public sealed class BotMonitorBotTypeDto
+{
+    public string TypeKey { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+}
+
+public sealed class BotMonitorBotTypeCountDto
+{
+    public string TypeKey { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public int Count { get; set; }
 }
 
 public sealed class CreateBotMonitorBotResponse
@@ -32,6 +54,7 @@ public sealed class BotMonitorFleetTenantDto
     public string TenantName { get; set; } = string.Empty;
     public int BotCount { get; set; }
     public int OnlineCount { get; set; }
+    public IReadOnlyList<BotMonitorBotTypeCountDto> TypeCounts { get; set; } = Array.Empty<BotMonitorBotTypeCountDto>();
 }
 
 public sealed class BotMonitorFleetUserDto
@@ -40,6 +63,7 @@ public sealed class BotMonitorFleetUserDto
     public string DisplayName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public int BotCount { get; set; }
+    public IReadOnlyList<BotMonitorBotTypeCountDto> TypeCounts { get; set; } = Array.Empty<BotMonitorBotTypeCountDto>();
 }
 
 public sealed class BotMonitorBotListItemDto
@@ -50,6 +74,8 @@ public sealed class BotMonitorBotListItemDto
     public string TenantName { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Platform { get; set; } = string.Empty;
+    public string BotTypeKey { get; set; } = string.Empty;
+    public string BotTypeDisplayName { get; set; } = string.Empty;
     public string Presence { get; set; } = string.Empty;
     public DateTime? LastSeenAt { get; set; }
     public string? LastError { get; set; }
@@ -63,6 +89,7 @@ public sealed class BotMonitorPortalUserBotCountDto
     public string DisplayName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public int BotCount { get; set; }
+    public IReadOnlyList<BotMonitorBotTypeCountDto> TypeCounts { get; set; } = Array.Empty<BotMonitorBotTypeCountDto>();
 }
 
 public sealed class BotMonitorPortalBotDto
@@ -72,6 +99,8 @@ public sealed class BotMonitorPortalBotDto
     public string? OwnerDisplayName { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string Platform { get; set; } = string.Empty;
+    public string BotTypeKey { get; set; } = string.Empty;
+    public string BotTypeDisplayName { get; set; } = string.Empty;
     public string Presence { get; set; } = string.Empty;
     public DateTime? LastSeenAt { get; set; }
     public IReadOnlyList<BotMonitorWeeklyBucketDto> WeeklyHistory { get; set; } = Array.Empty<BotMonitorWeeklyBucketDto>();
@@ -89,6 +118,7 @@ public sealed class BotMonitorPortalDashboardDto
     public int OfflineCount { get; set; }
     public double AverageUptimePercent { get; set; }
     public IReadOnlyList<BotMonitorPortalUserBotCountDto> UserBotCounts { get; set; } = Array.Empty<BotMonitorPortalUserBotCountDto>();
+    public IReadOnlyList<BotMonitorBotTypeCountDto> TypeCounts { get; set; } = Array.Empty<BotMonitorBotTypeCountDto>();
     public IReadOnlyList<BotMonitorPortalBotDto> Bots { get; set; } = Array.Empty<BotMonitorPortalBotDto>();
 }
 

@@ -57,6 +57,22 @@ python3 scripts/bot-monitor/send-heartbeat.py
 
 Link an organization before creating bots: `POST /api/bot-monitor/registry/tenants` with JSON `{"organizationId":"<org guid>"}` (system admin). Bot create uses the same id as `tenantId`.
 
+Bot types live in the `bot_monitor_bot_types` lookup table (separate from the `platform` transport field on each bot). Seeded keys include `grokbot`, `chatgpt`, `muse_meta`, `openclaw`, `hermes`, `dot`, and `other_plugin`. System administrators can list types with `GET /api/bot-monitor/registry/bot-types` and add new active types with `POST /api/bot-monitor/registry/bot-types` and JSON `{"typeKey":"my_agent","displayName":"My agent"}`.
+
+When registering a bot, set `botTypeKey` on `POST /api/bot-monitor/registry/bots` alongside `platform`:
+
+```json
+{
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "displayName": "Weekly Keep probe",
+  "platform": "other",
+  "botTypeKey": "grokbot",
+  "checkinIntervalMinutes": 60
+}
+```
+
+Portal users with bot monitoring enabled can read active types from `GET /api/bot-monitor/portal/bot-types` (same organization session as the dashboard).
+
 ## API contract
 
 `POST /api/bot-monitor/heartbeat`
