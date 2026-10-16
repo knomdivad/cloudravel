@@ -11,7 +11,10 @@ GO
 
 DECLARE @PlatformEnvironment NVARCHAR(64) = LTRIM(RTRIM(N'$(PlatformEnvironment)'));
 IF @PlatformEnvironment = N'$(PlatformEnvironment)' OR @PlatformEnvironment = N''
-    SET @PlatformEnvironment = N'Development';
+BEGIN
+    RAISERROR(N'seed-bot-monitor-demo.sql refused: set sqlcmd -v PlatformEnvironment=Development.', 16, 1);
+    RETURN;
+END
 IF @PlatformEnvironment <> N'Development'
 BEGIN
     RAISERROR(N'seed-bot-monitor-demo.sql refused: PlatformEnvironment must be Development.', 16, 1);
