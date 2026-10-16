@@ -44,11 +44,15 @@ export function useOrganizations() {
 
 // ---- Tenant hooks ----
 
-export function useTenants() {
-  return useSWR<TenantSummary[]>('tenants', () => getTenants(), {
-    revalidateOnFocus: true,
-    refreshInterval: 60_000,
-  });
+export function useTenants(workspaceId: string | null) {
+  return useSWR<TenantSummary[]>(
+    workspaceId ? ['tenants', workspaceId] : null,
+    () => getTenants(workspaceId!),
+    {
+      revalidateOnFocus: true,
+      refreshInterval: 60_000,
+    }
+  );
 }
 
 // ---- Inventory hooks ----

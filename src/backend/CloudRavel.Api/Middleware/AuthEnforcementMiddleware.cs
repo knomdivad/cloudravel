@@ -46,8 +46,7 @@ public sealed class AuthEnforcementMiddleware : IFunctionsWorkerMiddleware
             return;
         }
 
-        var path = httpRequestData.Url.AbsolutePath.ToLowerInvariant();
-        if (path.Contains("/health") || path.Contains("/auth/login"))
+        if (AnonymousApiPaths.IsAnonymousBypass(httpRequestData.Url.AbsolutePath))
         {
             await next(context);
             return;
@@ -56,7 +55,8 @@ public sealed class AuthEnforcementMiddleware : IFunctionsWorkerMiddleware
         var httpContext = context.GetHttpContext();
         if (httpContext == null)
         {
-            _logger.LogError("No HttpContext available for {Path} — AspNetCore integration misconfigured?", path);
+            _logger.LogError("No HttpContext available for {Path}; AspNetCore integration misconfigured?",
+                httpRequestData.Url.AbsolutePath);
             var errorResponse = httpRequestData.CreateCorsResponse(HttpStatusCode.InternalServerError);
             context.GetInvocationResult().Value = errorResponse;
             return;

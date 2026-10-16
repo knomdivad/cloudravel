@@ -32,6 +32,10 @@ interface TenantContextState {
   tenantId: string | null;
   /** The caller is org_admin in the selected org. */
   isOrgAdmin: boolean;
+  /** Tenant administrator: organization wide bot monitoring in the selected org. */
+  isTenantAdmin: boolean;
+  /** Organization or tenant admin: all bots in the workspace. */
+  canViewAllTenantBots: boolean;
   /** The caller can manage clouds in the selected org (cloud_admin or org_admin). */
   canManageClouds: boolean;
   /** Select a workspace/organization by ID */
@@ -85,6 +89,8 @@ export function TenantProvider({ children }: { children: ReactNode }) {
 
   const callerRole = currentOrg?.callerRole;
   const isOrgAdmin = callerRole === 'org_admin';
+  const isTenantAdmin = callerRole === 'tenant_admin';
+  const canViewAllTenantBots = isOrgAdmin || isTenantAdmin;
   const canManageClouds = callerRole === 'org_admin' || callerRole === 'cloud_admin';
 
   return (
@@ -96,6 +102,8 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         currentTenant: currentOrg ? toRef(currentOrg) : null,
         tenantId: currentOrg?.orgId ?? null,
         isOrgAdmin,
+        isTenantAdmin,
+        canViewAllTenantBots,
         canManageClouds,
         selectTenant,
         refreshOrganizations,

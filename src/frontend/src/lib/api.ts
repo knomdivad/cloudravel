@@ -28,6 +28,13 @@ import type {
   SystemSettings,
   AdminUser,
   OrgSso,
+  BotMonitorListItem,
+  BotMonitorPortalDashboard,
+  BotMonitorBotMetricsItem,
+  BotMonitorFleetTenant,
+  BotMonitorFleetUser,
+  BotMonitorBotType,
+  BotMonitorBotTypeCount,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/api';
@@ -112,7 +119,85 @@ async function apiCall<T>(
 const NO_WORKSPACE = '00000000-0000-0000-0000-000000000000';
 
 // ============================================================================
-// Organization API — the in-app workspace above clouds
+// Bot monitor
+// ============================================================================
+
+export async function getOpsBots(tenantFilter?: string): Promise<BotMonitorListItem[]> {
+  const q = tenantFilter ? `?tenantId=${encodeURIComponent(tenantFilter)}` : '';
+  const data = await apiCall<{ bots: BotMonitorListItem[] }>(`/bot-monitor/ops/bots${q}`, NO_WORKSPACE);
+  return data.bots ?? [];
+}
+
+export async function getOpsFleet(): Promise<{ tenants: BotMonitorFleetTenant[]; fleetTypeCounts: BotMonitorBotTypeCount[] }> {
+  const data = await apiCall<{ tenants: BotMonitorFleetTenant[]; fleetTypeCounts?: BotMonitorBotTypeCount[] }>(
+    '/bot-monitor/ops/fleet',
+    NO_WORKSPACE,
+  );
+  return { tenants: data.tenants ?? [], fleetTypeCounts: data.fleetTypeCounts ?? [] };
+}
+
+export async function getOpsFleetUsers(tenantId: string): Promise<{
+  users: BotMonitorFleetUser[];
+  typeCounts: BotMonitorBotTypeCount[];
+}> {
+  const data = await apiCall<{ users: BotMonitorFleetUser[]; typeCounts?: BotMonitorBotTypeCount[] }>(
+    `/bot-monitor/ops/fleet/tenants/${tenantId}/users`,
+    NO_WORKSPACE,
+  );
+  return { users: data.users ?? [], typeCounts: data.typeCounts ?? [] };
+}
+
+export async function getOpsFleetUserBots(
+  tenantId: string,
+  userId: string,
+  botTypeKey?: string,
+): Promise<{ bots: BotMonitorListItem[]; typeCounts: BotMonitorBotTypeCount[] }> {
+  const q = botTypeKey ? `?botTypeKey=${encodeURIComponent(botTypeKey)}` : '';
+  const data = await apiCall<{ bots: BotMonitorListItem[]; typeCounts?: BotMonitorBotTypeCount[] }>(
+    `/bot-monitor/ops/fleet/tenants/${tenantId}/users/${userId}/bots${q}`,
+    NO_WORKSPACE,
+  );
+  return { bots: data.bots ?? [], typeCounts: data.typeCounts ?? [] };
+}
+
+export async function getPortalBotTypes(tenantId: string): Promise<BotMonitorBotType[]> {
+  const data = await apiCall<{ types: BotMonitorBotType[] }>('/bot-monitor/portal/bot-types', tenantId);
+  return data.types ?? [];
+}
+
+export async function getPortalBotDashboard(
+  tenantId: string,
+  botTypeKey?: string,
+): Promise<BotMonitorPortalDashboard> {
+  const q = botTypeKey ? `?botTypeKey=${encodeURIComponent(botTypeKey)}` : '';
+  const data = await apiCall<{ dashboard: BotMonitorPortalDashboard }>(`/bot-monitor/portal/bots${q}`, tenantId);
+  return (
+    data.dashboard ?? {
+      totalBots: 0,
+      onlineCount: 0,
+      staleCount: 0,
+      offlineCount: 0,
+      averageUptimePercent: 0,
+      bots: [],
+    }
+  );
+}
+
+export async function getPortalBotMetrics(tenantId: string): Promise<BotMonitorBotMetricsItem[]> {
+  const data = await apiCall<{ bots: BotMonitorBotMetricsItem[] }>('/bot-monitor/portal/metrics', tenantId);
+  return data.bots ?? [];
+}
+
+export async function getOpsBotMetrics(tenantId: string, userId: string): Promise<BotMonitorBotMetricsItem[]> {
+  const data = await apiCall<{ bots: BotMonitorBotMetricsItem[] }>(
+    `/bot-monitor/ops/metrics?tenantId=${encodeURIComponent(tenantId)}&userId=${encodeURIComponent(userId)}`,
+    NO_WORKSPACE,
+  );
+  return data.bots ?? [];
+}
+
+// ============================================================================
+// Organization API: the in-app workspace above clouds
 // ============================================================================
 
 export async function getOrganizations(): Promise<Organization[]> {
@@ -205,6 +290,12 @@ function normalizeAdminUser(raw: Record<string, unknown>): AdminUser {
     username: (raw.username ?? raw.Username ?? null) as string | null,
     lastLoginAt: (raw.lastLoginAt ?? raw.LastLoginAt ?? null) as string | null,
     orgRole: (raw.orgRole ?? raw.OrgRole ?? null) as string | null,
+    entitlementBotMonitor: Boolean(
+      raw.entitlementBotMonitor ?? raw.EntitlementBotMonitor ?? false
+    ),
+    entitlementCloudMonitor: Boolean(
+      raw.entitlementCloudMonitor ?? raw.EntitlementCloudMonitor ?? false
+    ),
   };
 }
 
@@ -264,7 +355,15 @@ export async function getOrgUsers(orgId: string): Promise<AdminUser[]> {
 
 export async function addOrgUser(
   orgId: string,
-  request: { username?: string; email?: string; displayName?: string; password?: string; role: string }
+  request: {
+    username?: string;
+    email?: string;
+    displayName?: string;
+    password?: string;
+    role: string;
+    entitlementBotMonitor: boolean;
+    entitlementCloudMonitor: boolean;
+  }
 ): Promise<AdminUser> {
   return apiCall<AdminUser>(`/organizations/${orgId}/users`, orgId, {
     method: 'POST',
@@ -272,10 +371,18 @@ export async function addOrgUser(
   });
 }
 
-export async function updateOrgUserRole(orgId: string, userId: string, role: string): Promise<void> {
+export async function updateOrgUserRole(
+  orgId: string,
+  userId: string,
+  request: {
+    role: string;
+    entitlementBotMonitor: boolean;
+    entitlementCloudMonitor: boolean;
+  }
+): Promise<void> {
   await apiCall(`/organizations/${orgId}/users/${userId}`, orgId, {
     method: 'PATCH',
-    body: JSON.stringify({ role }),
+    body: JSON.stringify(request),
   });
 }
 
@@ -308,16 +415,19 @@ export async function updateOrgSso(
 // Tenant API
 // ============================================================================
 
-export async function getTenants(): Promise<TenantSummary[]> {
-  const token = await getAccessToken();
-  const response = await fetch(`${API_BASE}/tenants`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'X-Tenant-Id': '00000000-0000-0000-0000-000000000000',
-    },
-  });
-  const data = await response.json();
-  return data.tenants ?? data.Tenants;
+const EMPTY_WORKSPACE = '00000000-0000-0000-0000-000000000000';
+
+function assertWorkspaceId(workspaceId: string, apiName: string): void {
+  if (!workspaceId || workspaceId === EMPTY_WORKSPACE) {
+    throw new Error(`${apiName} requires a selected workspace id (X-Tenant-Id).`);
+  }
+}
+
+export async function getTenants(workspaceId: string): Promise<TenantSummary[]> {
+  assertWorkspaceId(workspaceId, 'getTenants');
+  return apiCall<{ tenants?: TenantSummary[]; Tenants?: TenantSummary[] }>('/tenants', workspaceId).then(
+    (data) => data.tenants ?? data.Tenants ?? []
+  );
 }
 
 // ============================================================================
@@ -474,30 +584,23 @@ export async function askCustomerChat(
 // Tenant Management API
 // ============================================================================
 
-export async function onboardTenant(request: {
-  displayName: string;
-  azureTenantId: string;
-  onboardingMethod: string;
-  clientId?: string;
-  clientSecret?: string;
-  lighthouseDelegationId?: string;
-  subscriptionIds?: string[];
-}): Promise<{ tenantId: string }> {
-  const token = await getAccessToken();
-  const response = await fetch(`${API_BASE}/tenants`, {
+export async function onboardTenant(
+  workspaceId: string,
+  request: {
+    displayName: string;
+    azureTenantId: string;
+    onboardingMethod: string;
+    clientId?: string;
+    clientSecret?: string;
+    lighthouseDelegationId?: string;
+    subscriptionIds?: string[];
+  }
+): Promise<{ tenantId: string }> {
+  assertWorkspaceId(workspaceId, 'onboardTenant');
+  return apiCall<{ tenantId: string }>('/tenants', workspaceId, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'X-Tenant-Id': '00000000-0000-0000-0000-000000000000',
-    },
     body: JSON.stringify(request),
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
-    throw new Error(error.message || `HTTP ${response.status}: ${response.statusText}`);
-  }
-  return response.json();
 }
 
 export async function updateTenantStatus(
@@ -814,4 +917,9 @@ export const api = {
   removeOrgUser,
   getOrgSso,
   updateOrgSso,
+  getOpsBots,
+  getOpsFleet,
+  getOpsFleetUsers,
+  getOpsFleetUserBots,
+  getPortalBotDashboard,
 };

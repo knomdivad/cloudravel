@@ -212,6 +212,8 @@ const navItems: NavItem[] = [
   { label: 'Cloud help', href: '/help/clouds', icon: HelpIcon },
   { label: 'Organization', href: '/organization', icon: OrgAdminIcon, require: 'org_admin' },
   { label: 'Admin', href: '/admin', icon: AdminIcon, require: 'system_admin' },
+  { label: 'Bot fleet', href: '/ops/bots', icon: BotFleetIcon, require: 'system_admin' },
+  { label: 'Your bots', href: '/portal/bots', icon: BotFleetIcon },
 ];
 
 function AppShell({ children }: { children: React.ReactNode }) {
@@ -410,6 +412,14 @@ function AppShell({ children }: { children: React.ReactNode }) {
 // ============================================================================
 // Icons (inline SVG components)
 // ============================================================================
+
+function BotFleetIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-3.75h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Z" />
+    </svg>
+  );
+}
 
 function DashboardIcon({ className }: { className?: string }) {
   return (

@@ -1,3 +1,4 @@
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.Models;
 
 namespace CloudRavel.Core.Interfaces;
@@ -14,7 +15,12 @@ public interface IUserRepository
     Task UpdateLastLoginAsync(Guid userId);
     Task<IReadOnlyList<UserTenantAccess>> GetUserTenantAccessAsync(Guid userId);
     Task<bool> HasTenantAccessAsync(Guid userId, Guid tenantId);
-    Task GrantTenantAccessAsync(Guid userId, Guid tenantId, string role, Guid grantedBy);
+    Task GrantTenantAccessAsync(
+        Guid userId,
+        Guid tenantId,
+        string role,
+        Guid grantedBy,
+        FeatureEntitlements entitlements);
     Task RevokeTenantAccessAsync(Guid userId, Guid tenantId);
 
     // --- RBAC / admin ---
@@ -22,11 +28,13 @@ public interface IUserRepository
     /// <summary>The caller's org role for a workspace (user_tenant_access.role), or null if none.</summary>
     Task<string?> GetTenantRoleAsync(Guid userId, Guid tenantId);
 
+    Task<FeatureEntitlements?> GetFeatureEntitlementsAsync(Guid userId, Guid tenantId);
+
     /// <summary>All users (system-admin global listing).</summary>
     Task<IReadOnlyList<User>> ListAllAsync();
 
     /// <summary>Users with access to a workspace, paired with their org role.</summary>
-    Task<IReadOnlyList<(User User, string Role)>> ListByTenantAsync(Guid tenantId);
+    Task<IReadOnlyList<(User User, string Role, FeatureEntitlements Entitlements)>> ListByTenantAsync(Guid tenantId);
 
     /// <summary>Create a local username/password user. Returns the created row.</summary>
     Task<User> CreateLocalUserAsync(User user, string passwordHash);

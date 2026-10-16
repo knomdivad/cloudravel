@@ -35,6 +35,10 @@ public sealed class Organization
     public string Status { get; set; } = "active";
     public DateTime CreatedAt { get; set; }
     public string CreatedBy { get; set; } = "system";
+    public bool EntitlementBotMonitor { get; set; }
+    public bool EntitlementCloudMonitor { get; set; }
+    /// <summary>When true, row is excluded from legacy entitlement backfill migrations.</summary>
+    public bool EntitlementBackfillV014 { get; set; }
 }
 
 /// <summary>

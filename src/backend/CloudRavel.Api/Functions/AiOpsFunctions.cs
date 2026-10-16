@@ -103,7 +103,7 @@ public sealed class AiOpsFunctions
         long id,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<UpdateAnomalyStatusRequest>();
@@ -181,7 +181,7 @@ public sealed class AiOpsFunctions
         long id,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<UpdateIncidentRequest>();
@@ -280,7 +280,7 @@ public sealed class AiOpsFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "remediations")] HttpRequestData req,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<ProposeRemediationRequest>();
@@ -317,7 +317,7 @@ public sealed class AiOpsFunctions
         long id,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
         try
@@ -348,7 +348,7 @@ public sealed class AiOpsFunctions
         long id,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<RejectRemediationRequest>();
@@ -525,7 +525,7 @@ public sealed class AiOpsFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "cloud-orgs")] HttpRequestData req,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<CreateCloudOrgRequest>();
@@ -568,7 +568,7 @@ public sealed class AiOpsFunctions
         Guid orgId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<UpdateCloudOrgStatusRequest>();
@@ -613,7 +613,7 @@ public sealed class AiOpsFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "cloud-accounts")] HttpRequestData req,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
         var body = await req.ReadFromJsonAsync<LinkCloudAccountRequest>();
@@ -685,7 +685,7 @@ public sealed class AiOpsFunctions
         Guid id,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
 
@@ -722,7 +722,7 @@ public sealed class AiOpsFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "cloud-orgs/governance/sync")] HttpRequestData req,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
 
@@ -762,7 +762,7 @@ public sealed class AiOpsFunctions
         Guid id,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
 
@@ -788,7 +788,7 @@ public sealed class AiOpsFunctions
         Guid id,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
 
@@ -844,7 +844,7 @@ public sealed class AiOpsFunctions
         Guid orgId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
 
@@ -878,7 +878,7 @@ public sealed class AiOpsFunctions
         Guid orgId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
         var tenantId = context.GetTenantId();
 

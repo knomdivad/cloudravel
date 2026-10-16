@@ -20,17 +20,20 @@ public sealed class AdminFunctions
 {
     private readonly ISystemSettingsRepository _settings;
     private readonly IUserRepository _userRepo;
+    private readonly IOrganizationRepository _orgRepo;
     private readonly ISecretStore? _secretStore;
     private readonly ILogger<AdminFunctions> _logger;
 
     public AdminFunctions(
         ISystemSettingsRepository settings,
         IUserRepository userRepo,
+        IOrganizationRepository orgRepo,
         ILogger<AdminFunctions> logger,
         ISecretStore? secretStore = null)
     {
         _settings = settings;
         _userRepo = userRepo;
+        _orgRepo = orgRepo;
         _secretStore = secretStore;
         _logger = logger;
     }
@@ -236,6 +239,34 @@ public sealed class AdminFunctions
         response.Headers.Add("Content-Type", "application/json; charset=utf-8");
         await response.WriteStringAsync(JsonSerializer.Serialize(body, AdminJson));
         return response;
+    }
+
+    /// <summary>PATCH /api/system/organizations/{orgId}/entitlements: org paid feature flags (system_admin only).</summary>
+    [Function("UpdateOrgEntitlements")]
+    public async Task<HttpResponseData> UpdateOrgEntitlements(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "system/organizations/{orgId:guid}/entitlements")] HttpRequestData req,
+        Guid orgId,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
+
+        var body = await req.ReadFromJsonAsync<UpdateOrgEntitlementsRequest>();
+        if (body == null)
+            return await BadRequest(req, "INVALID_REQUEST", "An entitlements body is required.");
+
+        if (await _orgRepo.GetByIdAsync(orgId) == null)
+            return await NotFound(req, $"Organization {orgId} not found.");
+
+        var entitlements = new FeatureEntitlements(body.EntitlementBotMonitor, body.EntitlementCloudMonitor);
+        await _orgRepo.UpdateFeatureEntitlementsAsync(orgId, entitlements);
+
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new
+        {
+            orgId,
+            entitlementBotMonitor = entitlements.BotMonitoring,
+            entitlementCloudMonitor = entitlements.CloudMonitoring,
+        });
     }
 
     /// <summary>PATCH /api/system/users/{id} — set global role / active / reset password.</summary>

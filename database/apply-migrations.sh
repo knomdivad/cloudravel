@@ -29,6 +29,16 @@ MIGRATIONS=(
   002-assessment
   003-drop-assessment
   004-assessment-principal
+  005-bot-monitor
+  006-bot-monitor-org-fk
+  007-feature-entitlements
+  008-bot-monitor-health-metrics
+  009-tenant-admin-role
+  010-bot-monitor-bot-types
+  011-entitlement-backfill-cloud-only
+  012-organization-feature-entitlements
+  013-new-org-entitlements-fail-closed
+  014-org-entitlement-backfill-cloud-only
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

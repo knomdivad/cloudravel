@@ -48,18 +48,18 @@ public sealed class OrganizationDto
 {
     public Guid OrgId { get; set; }
     public string Name { get; set; } = string.Empty;
-    public string Environment { get; set; } = "Development";
+    public string? Environment { get; set; }
     public string Status { get; set; } = "active";
-    public DateTime CreatedAt { get; set; }
+    public DateTime? CreatedAt { get; set; }
 
-    // Cloud rollup for the selector / org card
-    public bool AzureConnected { get; set; }
+    // Cloud rollup for the selector / org card (omitted when caller lacks cloud_monitoring).
+    public bool? AzureConnected { get; set; }
     public string? AzureTenantName { get; set; }
     /// <summary>Number of Azure tenant connections (an org can hold more than one).</summary>
-    public int AzureOrgCount { get; set; }
-    public int AwsOrgCount { get; set; }
-    public int GcpOrgCount { get; set; }
-    public int CloudCount { get; set; }
+    public int? AzureOrgCount { get; set; }
+    public int? AwsOrgCount { get; set; }
+    public int? GcpOrgCount { get; set; }
+    public int? CloudCount { get; set; }
     /// <summary>The requesting user's role in this organization (org_admin | cloud_admin | read_only).</summary>
     public string CallerRole { get; set; } = "read_only";
 }

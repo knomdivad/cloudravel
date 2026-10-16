@@ -139,6 +139,13 @@ public sealed class TestFunctionContext : FunctionContext
         return bindings?.GetType().GetProperty("InvocationResult")?.GetValue(bindings) as HttpResponseData;
     }
 
+    public void SetInvocationResult(HttpResponseData response)
+    {
+        var bindings = GetFeatureMethod.MakeGenericMethod(BindingsFeatureInterface)
+            .Invoke(_features, null);
+        bindings?.GetType().GetProperty("InvocationResult")?.SetValue(bindings, response);
+    }
+
     // IFunctionBindingsFeature is internal; BindingsFeatureStub implements the
     // member shape the middleware's GetInvocationResult() path needs
     // (InvocationResult get/set). Reflection-based registration erases the

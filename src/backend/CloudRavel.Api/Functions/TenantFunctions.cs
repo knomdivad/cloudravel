@@ -72,7 +72,6 @@ public sealed class TenantFunctions
         {
             var resourceCount = await _inventoryRepo.GetResourceCountAsync(tenant.TenantId);
             var latestSnapshot = await _inventoryRepo.GetLatestSnapshotAsync(tenant.TenantId);
-            var recentChanges = await _changeRepo.GetRecentChangesAsync(tenant.TenantId, hours: 24, limit: 1);
             var changeCount = await _changeRepo.GetChangeCountAsync(tenant.TenantId,
                 DateTime.UtcNow.AddDays(-1), DateTime.UtcNow);
 
@@ -135,7 +134,7 @@ public sealed class TenantFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "tenants")] HttpRequestData req,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         var body = await req.ReadFromJsonAsync<OnboardTenantRequest>();
@@ -253,7 +252,7 @@ public sealed class TenantFunctions
         string tenantId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         if (!Guid.TryParse(tenantId, out var id))

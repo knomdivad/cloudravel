@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Identity;
 using CloudRavel.Api.Auth;
+using CloudRavel.Api.BotMonitor;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.Auth;
 using CloudRavel.Core.Interfaces;
@@ -9,6 +10,7 @@ using CloudRavel.Infrastructure;
 using CloudRavel.Infrastructure.AiOps;
 using CloudRavel.Infrastructure.Auth;
 using CloudRavel.Infrastructure.Azure;
+using CloudRavel.Infrastructure.BotMonitor;
 using CloudRavel.Infrastructure.Chat;
 using CloudRavel.Infrastructure.Data;
 using CloudRavel.Infrastructure.MultiCloud;
@@ -39,6 +41,7 @@ var host = new HostBuilder()
         // then TenantContextMiddleware checks the authenticated user's tenant access.
         builder.UseMiddleware<AuthEnforcementMiddleware>();
         builder.UseMiddleware<TenantContextMiddleware>();
+        builder.UseMiddleware<FeatureRouteEntitlementMiddleware>();
         // Read-only service credentials (the standalone assessment tool) get
         // single-tenant scope + mutation refusal + audit + rate limiting.
         builder.UseMiddleware<AssessmentPrincipalMiddleware>();
@@ -84,8 +87,10 @@ var host = new HostBuilder()
         services.AddScoped<ISystemSettingsRepository, SystemSettingsRepository>();
         services.AddScoped<ICloudOrgRepository, CloudOrgRepository>();
         services.AddScoped<ICloudAccountRepository, CloudAccountRepository>();
-
-        // Azure services — Scoped to avoid singleton-depends-on-scoped issue
+        services.AddScoped<IBotMonitorRepository, BotMonitorRepository>();
+        services.AddSingleton<BotMonitorCredentialService>();
+        services.AddScoped<BotMonitorHeartbeatService>();
+        // Azure services: scoped to avoid singleton-depends-on-scoped issue
         services.AddScoped<IAzureCredentialFactory, AzureCredentialFactory>();
         services.AddScoped<IInventoryCollectionService, InventoryCollectionService>();
         services.AddScoped<IAriIngestionService, AriIngestionService>();
@@ -250,6 +255,12 @@ var host = new HostBuilder()
         services.ConfigureFunctionsApplicationInsights();
     })
     .Build();
+
+{
+    var config = host.Services.GetRequiredService<IConfiguration>();
+    var platform = host.Services.GetRequiredService<IPlatformInfo>();
+    BotMonitorStartupValidation.ValidateBotMonitorConfiguration(config, platform);
+}
 
 host.Run();
 

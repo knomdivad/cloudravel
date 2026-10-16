@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "test:help": "node scripts/check-cloud-help.mjs"
+    "test:help": "node scripts/check-cloud-help.mjs",
+    "test:tenant-header": "node scripts/check-tenant-workspace-header.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.27.0",

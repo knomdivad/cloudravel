@@ -6,7 +6,43 @@ import { useTenantContext } from '@/contexts/TenantContext';
 import { useAuth } from '@/contexts/AuthContext';
 import type { AdminUser, OrgSso } from '@/lib/types';
 import { Field, ModalShell, ModalActions, Spinner, ErrorBox, Toast, AccessDenied, type ToastType } from '@/components/admin-ui';
-const ORG_ROLES = ['org_admin', 'cloud_admin', 'read_only'];
+const ORG_ROLES = ['org_admin', 'tenant_admin', 'cloud_admin', 'read_only'];
+
+function defaultEntitlementsForRole(role: string) {
+  if (role === 'tenant_admin') {
+    return { entitlementBotMonitor: true, entitlementCloudMonitor: false };
+  }
+  return { entitlementBotMonitor: false, entitlementCloudMonitor: true };
+}
+
+function EntitlementFields({
+  bot,
+  cloud,
+  onBot,
+  onCloud,
+}: {
+  bot: boolean;
+  cloud: boolean;
+  onBot: (v: boolean) => void;
+  onCloud: (v: boolean) => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-lg border border-gray-200 p-3 bg-gray-50">
+      <p className="text-xs font-medium text-gray-700">Feature access</p>
+      <label className="flex items-center gap-2 text-sm text-gray-700">
+        <input type="checkbox" checked={cloud} onChange={(e) => onCloud(e.target.checked)} />
+        Cloud monitoring
+      </label>
+      <label className="flex items-center gap-2 text-sm text-gray-700">
+        <input type="checkbox" checked={bot} onChange={(e) => onBot(e.target.checked)} />
+        Bot monitoring
+      </label>
+      {!bot && !cloud && (
+        <p className="text-xs text-red-600">Select at least one feature entitlement.</p>
+      )}
+    </div>
+  );
+}
 
 export default function OrganizationPage() {
   const { currentOrg, tenantId, isOrgAdmin, canManageClouds, refreshOrganizations } = useTenantContext();
@@ -114,8 +150,15 @@ function MembersCard({ orgId, showToast }: { orgId: string; showToast: (m: strin
   useEffect(() => { load(); }, [load]);
 
   const setRole = async (u: AdminUser, role: string) => {
-    try { await api.updateOrgUserRole(orgId, u.userId, role); showToast(`${u.displayName} → ${role}.`, 'success'); load(); }
-    catch (err: any) { showToast(err?.message ?? 'Failed.', 'error'); }
+    try {
+      await api.updateOrgUserRole(orgId, u.userId, {
+        role,
+        entitlementBotMonitor: u.entitlementBotMonitor ?? false,
+        entitlementCloudMonitor: u.entitlementCloudMonitor ?? true,
+      });
+      showToast(`${u.displayName} → ${role}.`, 'success');
+      load();
+    } catch (err: any) { showToast(err?.message ?? 'Failed.', 'error'); }
   };
   const remove = async (u: AdminUser) => {
     try { await api.removeOrgUser(orgId, u.userId); showToast(`Removed ${u.displayName}.`, 'success'); load(); }
@@ -171,18 +214,32 @@ function AddMemberModal({ orgId, onClose, onAdded }: { orgId: string; onClose: (
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('read_only');
+  const [role, setRoleState] = useState('read_only');
+  const [entitlementBotMonitor, setEntitlementBotMonitor] = useState(false);
+  const [entitlementCloudMonitor, setEntitlementCloudMonitor] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const onRoleChange = (next: string) => {
+    setRoleState(next);
+    const d = defaultEntitlementsForRole(next);
+    setEntitlementBotMonitor(d.entitlementBotMonitor);
+    setEntitlementCloudMonitor(d.entitlementCloudMonitor);
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!entitlementBotMonitor && !entitlementCloudMonitor) {
+      setError('Select at least one feature entitlement.');
+      return;
+    }
     setBusy(true); setError(null);
     try {
       const eaddr = email.trim().toLowerCase();
+      const entitlements = { entitlementBotMonitor, entitlementCloudMonitor };
       await api.addOrgUser(orgId, mode === 'new'
-        ? { email: eaddr, username: eaddr, displayName: displayName.trim(), password, role }
-        : { email: eaddr, role });
+        ? { email: eaddr, username: eaddr, displayName: displayName.trim(), password, role, ...entitlements }
+        : { email: eaddr, role, ...entitlements });
       onAdded();
     } catch (err: any) { setError(err?.message ?? 'Failed to add member.'); }
     finally { setBusy(false); }
@@ -215,10 +272,16 @@ function AddMemberModal({ orgId, onClose, onAdded }: { orgId: string; onClose: (
         )}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Org role</label>
-          <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          <select value={role} onChange={(e) => onRoleChange(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
             {ORG_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
+        <EntitlementFields
+          bot={entitlementBotMonitor}
+          cloud={entitlementCloudMonitor}
+          onBot={setEntitlementBotMonitor}
+          onCloud={setEntitlementCloudMonitor}
+        />
         <ModalActions busy={busy} submitLabel="Add Member" onClose={onClose} />
       </form>
     </ModalShell>

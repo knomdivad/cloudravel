@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CloudRavel.Api.Middleware;
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.DTOs;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
@@ -85,15 +87,61 @@ public sealed class OrganizationFunctions
             else if (access.TryGetValue(o.OrgId, out var r)) callerRole = r;
             else continue; // no access → omit from this user's list
 
-            var dto = await BuildDto(o);
-            dto.CallerRole = callerRole;
+            OrganizationDto dto;
+            if (isSystemAdmin)
+            {
+                dto = await BuildDto(o);
+                dto.CallerRole = callerRole;
+            }
+            else if (userId.HasValue)
+            {
+                var memberEnt = await _userRepo.GetFeatureEntitlementsAsync(userId.Value, o.OrgId)
+                                ?? FeatureEntitlements.None;
+                var orgEnt = await _orgRepo.GetFeatureEntitlementsAsync(o.OrgId);
+                var effective = FeatureEntitlements.IntersectWithOrg(memberEnt, orgEnt);
+                if (effective.CloudMonitoring)
+                {
+                    dto = await BuildDto(o);
+                    dto.CallerRole = callerRole;
+                }
+                else
+                {
+                    dto = new OrganizationDto
+                    {
+                        OrgId = o.OrgId,
+                        Name = o.Name,
+                        Status = o.Status,
+                        CallerRole = callerRole,
+                    };
+                }
+            }
+            else
+            {
+                dto = new OrganizationDto
+                {
+                    OrgId = o.OrgId,
+                    Name = o.Name,
+                    Status = o.Status,
+                    CallerRole = callerRole,
+                };
+            }
+
             dtos.Add(dto);
         }
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new OrganizationListResponse { Organizations = dtos });
+        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        await response.WriteStringAsync(JsonSerializer.Serialize(
+            new OrganizationListResponse { Organizations = dtos },
+            OrganizationJsonOptions));
         return response;
     }
+
+    private static readonly JsonSerializerOptions OrganizationJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
 
     /// <summary>POST /api/organizations — create a new workspace (no clouds yet).</summary>
     [Function("CreateOrganization")]
@@ -123,7 +171,10 @@ public sealed class OrganizationFunctions
             Name = name,
             Environment = environment,
             Status = "active",
-            CreatedBy = context.GetActor()
+            CreatedBy = context.GetActor(),
+            EntitlementBotMonitor = false,
+            EntitlementCloudMonitor = false,
+            EntitlementBackfillV014 = true,
         });
 
         // user_tenant_access.tenant_id FK → tenants.tenant_id. Materialize a
@@ -145,7 +196,8 @@ public sealed class OrganizationFunctions
         // Creator is org_admin of the new workspace (system_admin already has
         // implicit access; this also keeps membership lists accurate).
         if (createdBy != Guid.Empty)
-            await _userRepo.GrantTenantAccessAsync(createdBy, orgId, OrgRole.OrgAdmin, createdBy);
+            await _userRepo.GrantTenantAccessAsync(
+                createdBy, orgId, OrgRole.OrgAdmin, createdBy, FeatureEntitlements.None);
 
         _logger.LogInformation("Created organization {OrgId} ({Name})", org.OrgId, org.Name);
 
@@ -165,7 +217,7 @@ public sealed class OrganizationFunctions
         Guid orgId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         var mismatch = await context.RequirePathTenantMatchAsync(req, orgId);
@@ -218,7 +270,7 @@ public sealed class OrganizationFunctions
         Guid orgId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         var mismatch = await context.RequirePathTenantMatchAsync(req, orgId);

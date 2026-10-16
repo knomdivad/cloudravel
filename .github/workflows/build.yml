@@ -66,6 +66,9 @@ jobs:
           dotnet test CloudRavel.sln --configuration Release --no-build --verbosity normal
           --collect:"XPlat Code Coverage" --results-directory ./.coverage
 
+      - name: BotMonitor Python signer tests
+        run: python3 scripts/bot-monitor/test_send_heartbeat.py
+
       # No threshold yet: establish a baseline before it can be ratcheted.
       # Reports appear once coverlet.collector is referenced by the test project;
       # without it the collector emits nothing, hence warn rather than error.

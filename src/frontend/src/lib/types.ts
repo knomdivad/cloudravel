@@ -32,6 +32,8 @@ export interface AdminUser {
   lastLoginAt?: string | null;
   /** Only populated in the per-organization member listing. */
   orgRole?: string | null;
+  entitlementBotMonitor?: boolean;
+  entitlementCloudMonitor?: boolean;
 }
 
 export interface OrgSso {
@@ -58,7 +60,7 @@ export interface Organization {
   /** Number of Azure tenant connections (an org can hold more than one). */
   azureOrgCount: number;
   /** The signed-in user's role in this organization. */
-  callerRole: 'org_admin' | 'cloud_admin' | 'read_only';
+  callerRole: 'org_admin' | 'tenant_admin' | 'cloud_admin' | 'read_only';
   awsOrgCount: number;
   gcpOrgCount: number;
   cloudCount: number;
@@ -406,4 +408,142 @@ export interface ApiError {
   code: string;
   message: string;
   traceId?: string;
+}
+
+// --- Bot monitor ---
+
+export interface BotMonitorBotType {
+  typeKey: string;
+  displayName: string;
+  isActive: boolean;
+}
+
+export interface BotMonitorBotTypeCount {
+  typeKey: string;
+  displayName: string;
+  count: number;
+}
+
+export interface BotMonitorFleetTenant {
+  tenantId: string;
+  tenantName: string;
+  botCount: number;
+  onlineCount: number;
+  typeCounts?: BotMonitorBotTypeCount[];
+}
+
+export interface BotMonitorFleetUser {
+  userId: string;
+  displayName: string;
+  email: string;
+  botCount: number;
+  typeCounts?: BotMonitorBotTypeCount[];
+}
+
+export interface BotMonitorCheckinPoint {
+  receivedAt: string;
+  status: string;
+}
+
+export interface BotMonitorListItem {
+  botId: string;
+  tenantId: string;
+  ownerUserId?: string | null;
+  tenantName: string;
+  displayName: string;
+  platform: string;
+  botTypeKey?: string;
+  botTypeDisplayName?: string;
+  presence: string;
+  lastSeenAt?: string | null;
+  lastError?: string | null;
+  lastKeepCheck?: string | null;
+  revokedAt?: string | null;
+}
+
+export interface BotMonitorWeeklyBucket {
+  isoYear: number;
+  isoWeek: number;
+  uptimePercent: number;
+  keepPassCount: number;
+  keepWarnCount: number;
+  keepFailCount: number;
+  errorCount: number;
+}
+
+export interface BotMonitorRoutineReport {
+  id?: string | null;
+  expectedAt?: string | null;
+  ranAt?: string | null;
+  result?: string | null;
+}
+
+export interface BotMonitorConnectorReport {
+  name: string;
+  state: string;
+}
+
+export interface BotMonitorReportedMetricsDto {
+  routine?: BotMonitorRoutineReport | null;
+  connectors?: BotMonitorConnectorReport[];
+  actions?: { attempted: number; failed: number } | null;
+  inbox?: { unanswered: number; oldestMinutes: number } | null;
+  approvals?: { pending: number; oldestMinutes: number } | null;
+  queue?: { open: number; oldestMinutes: number } | null;
+  escalations?: number | null;
+}
+
+export interface BotMonitorDerivedMetricsDto {
+  consecutiveFailureStreak: number;
+  routineMissed: boolean;
+  checkInLatenessMinutes: number;
+  runsPerDay: number;
+  actionErrorsReported: number;
+}
+
+export interface BotMonitorHealthMetricsDto {
+  reported?: BotMonitorReportedMetricsDto | null;
+  derived: BotMonitorDerivedMetricsDto;
+  asOfUtc?: string | null;
+}
+
+export interface BotMonitorBotMetricsItem {
+  botId: string;
+  displayName: string;
+  metrics: BotMonitorHealthMetricsDto;
+}
+
+export interface BotMonitorPortalBot {
+  botId: string;
+  ownerUserId?: string | null;
+  ownerDisplayName?: string | null;
+  displayName: string;
+  platform: string;
+  botTypeKey?: string;
+  botTypeDisplayName?: string;
+  presence: string;
+  lastSeenAt?: string | null;
+  weeklyHistory: BotMonitorWeeklyBucket[];
+  recentCheckins?: BotMonitorCheckinPoint[];
+  healthMetrics?: BotMonitorHealthMetricsDto | null;
+}
+
+export interface BotMonitorPortalUserBotCount {
+  userId: string;
+  displayName: string;
+  email: string;
+  botCount: number;
+  typeCounts?: BotMonitorBotTypeCount[];
+}
+
+export interface BotMonitorPortalDashboard {
+  viewScope?: 'user' | 'organization';
+  totalBots: number;
+  onlineCount: number;
+  staleCount: number;
+  offlineCount: number;
+  averageUptimePercent: number;
+  userBotCounts?: BotMonitorPortalUserBotCount[];
+  typeCounts?: BotMonitorBotTypeCount[];
+  bots: BotMonitorPortalBot[];
 }

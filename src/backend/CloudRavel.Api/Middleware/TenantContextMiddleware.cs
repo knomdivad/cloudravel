@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
 using Microsoft.AspNetCore.Http;
@@ -23,11 +24,16 @@ namespace CloudRavel.Api.Middleware;
 public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
 {
     private readonly IUserRepository _userRepo;
+    private readonly IOrganizationRepository _orgRepo;
     private readonly ILogger<TenantContextMiddleware> _logger;
 
-    public TenantContextMiddleware(IUserRepository userRepo, ILogger<TenantContextMiddleware> logger)
+    public TenantContextMiddleware(
+        IUserRepository userRepo,
+        IOrganizationRepository orgRepo,
+        ILogger<TenantContextMiddleware> logger)
     {
         _userRepo = userRepo;
+        _orgRepo = orgRepo;
         _logger = logger;
     }
 
@@ -47,7 +53,7 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         }
 
         var path = httpRequestData.Url.AbsolutePath.ToLowerInvariant();
-        if (path.Contains("/health") || path.Contains("/auth/login"))
+        if (AnonymousApiPaths.IsAnonymousBypass(httpRequestData.Url.AbsolutePath))
         {
             await next(context);
             return;
@@ -105,29 +111,38 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         var isSystemAdmin = user.GlobalRole == "system_admin";
         context.Items["SystemRole"] = user.GlobalRole ?? "member";
 
-        // Tenant header optional for listing endpoints and /auth/me.
+        // Tenant header optional for org listing, auth profile, and global admin helpers.
         if (!httpRequestData.Headers.TryGetValues("X-Tenant-Id", out var tenantIdValues))
         {
-            if ((path.Contains("/tenants") || path.Contains("/organizations") || path.Contains("/auth/me")
-                 || path.Contains("/admin/"))
+            if (isSystemAdmin
+                && (path.Contains("/bot-monitor/registry", StringComparison.Ordinal)
+                    || path.Contains("/bot-monitor/ops/", StringComparison.Ordinal)))
+            {
+                context.SetFeatureEntitlements(FeatureEntitlements.Both);
+                await next(context);
+                return;
+            }
+
+            if ((path.Contains("/organizations", StringComparison.Ordinal) || path.Contains("/auth/me", StringComparison.Ordinal)
+                 || path.Contains("/admin/", StringComparison.Ordinal) || path.Contains("/system/", StringComparison.Ordinal))
                 && (httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase)
-                    || path.Contains("/auth/me")
-                    || path.Contains("/admin/")))
+                    || path.Contains("/auth/me", StringComparison.Ordinal)))
             {
                 await next(context);
                 return;
             }
 
             // POST /organizations (create) and some admin mutations don't need a workspace header.
-            if (path.Contains("/organizations")
+            if (path.Contains("/organizations", StringComparison.Ordinal)
                 && httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
-                && !path.Contains("/azure") && !path.Contains("/users") && !path.Contains("/sso"))
+                && !path.Contains("/azure", StringComparison.Ordinal) && !path.Contains("/users", StringComparison.Ordinal)
+                && !path.Contains("/sso", StringComparison.Ordinal))
             {
                 await next(context);
                 return;
             }
 
-            if (path.Contains("/admin/")
+            if ((path.Contains("/admin/", StringComparison.Ordinal) || path.Contains("/system/", StringComparison.Ordinal))
                 && (httpRequestData.Method.Equals("PUT", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("PATCH", StringComparison.OrdinalIgnoreCase)))
@@ -153,8 +168,8 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
 
         if (tenantId == Guid.Empty)
         {
-            // Global / registry scope (NO_WORKSPACE sentinel).
             context.Items["OrgRole"] = string.Empty;
+            context.SetFeatureEntitlements(FeatureEntitlements.None);
         }
         else
         {
@@ -167,6 +182,17 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
                 return;
             }
             context.Items["OrgRole"] = orgRole ?? string.Empty;
+
+            if (isSystemAdmin)
+                context.SetFeatureEntitlements(FeatureEntitlements.Both);
+            else
+            {
+                var memberEntitlements = await _userRepo.GetFeatureEntitlementsAsync(userId.Value, tenantId)
+                                         ?? FeatureEntitlements.None;
+                var orgEntitlements = await _orgRepo.GetFeatureEntitlementsAsync(tenantId);
+                context.SetFeatureEntitlements(
+                    FeatureEntitlements.IntersectWithOrg(memberEntitlements, orgEntitlements));
+            }
         }
 
         context.Items["TenantId"] = tenantId;
