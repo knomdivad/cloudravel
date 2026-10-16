@@ -1,5 +1,5 @@
-using CloudRavel.Core.BotMonitor;
 using CloudRavel.Api.BotMonitor;
+using CloudRavel.Core.BotMonitor;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
