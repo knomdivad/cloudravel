@@ -7,11 +7,24 @@ internal static class PersonaFieldLeakAssertions
         if (string.IsNullOrWhiteSpace(json))
             return "empty";
 
-        if (personaName == "bot-only" && CloudFieldLeakDetector.ContainsCloudField(json))
-            return "cloud-leak";
+        var propertyNames = JsonPropertyNameWalker.CollectPropertyNames(json);
+        if (propertyNames.Count == 0 && json.TrimStart().StartsWith('{'))
+            return "invalid-json";
 
-        if (personaName == "cloud-only" && BotFieldLeakDetector.ContainsBotField(json))
-            return "bot-leak";
+        var allowed = PersonaPropertyAllowLists.AllowedFor(personaName);
+        foreach (var name in propertyNames)
+        {
+            if (allowed.Contains(name))
+                continue;
+
+            if (personaName == "bot-only" && PersonaPropertyAllowLists.IsCloudProperty(name))
+                return $"cloud-leak:{name}";
+
+            if (personaName == "cloud-only" && PersonaPropertyAllowLists.IsBotProperty(name))
+                return $"bot-leak:{name}";
+
+            return $"unknown-leak:{name}";
+        }
 
         return "ok";
     }
@@ -19,44 +32,13 @@ internal static class PersonaFieldLeakAssertions
     internal static void AssertNoLeak(string personaName, string routeTemplate, string method, string json)
     {
         var verdict = Evaluate(personaName, json);
-        if (verdict is "cloud-leak" or "bot-leak")
-        {
-            throw new Xunit.Sdk.XunitException(
-                $"{personaName} {method} {routeTemplate}: {verdict} in body: {Truncate(json)}");
-        }
+        if (verdict is "ok" or "empty")
+            return;
+
+        throw new Xunit.Sdk.XunitException(
+            $"{personaName} {method} {routeTemplate}: {verdict} in body: {Truncate(json)}");
     }
 
     private static string Truncate(string json) =>
         json.Length <= 240 ? json : json[..240] + "...";
-}
-
-internal static class CloudFieldLeakDetector
-{
-    private static readonly string[] CloudTokens =
-    [
-        "resourceCount", "cloudCount", "azureConnected", "azureTenant", "inventory",
-        "recommendation", "subscription", "changes24h", "lastSnapshotAt",
-    ];
-
-    public static bool ContainsCloudField(string json)
-    {
-        var lower = json.ToLowerInvariant();
-        return CloudTokens.Any(t => lower.Contains(t, StringComparison.Ordinal));
-    }
-}
-
-internal static class BotFieldLeakDetector
-{
-    private static readonly string[] BotTokens =
-    [
-        "botid", "botcount", "onlinecount", "bottypekey", "magiclink", "heartbeat",
-        "fleettypecounts", "owneruserid", "keepcheck", "botmonitor", "lastheartbeat",
-        "\"bots\":[", "bottypes", "bot-monitor",
-    ];
-
-    public static bool ContainsBotField(string json)
-    {
-        var lower = json.ToLowerInvariant();
-        return BotTokens.Any(t => lower.Contains(t, StringComparison.Ordinal));
-    }
 }
