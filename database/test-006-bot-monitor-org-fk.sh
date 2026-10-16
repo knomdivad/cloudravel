@@ -9,7 +9,7 @@ DB_USER=${DB_USER:-sa}
 DB=${DB_NAME:-cloudraveldb}
 PASSWORD=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD}
 
-run() { "$SQLCMD" -S "$SERVER" -U "$DB_USER" -P "$PASSWORD" -I "$@"; }
+run() { "$SQLCMD" -S "$SERVER" -U "$DB_USER" -P "$PASSWORD" -I -b "$@"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
