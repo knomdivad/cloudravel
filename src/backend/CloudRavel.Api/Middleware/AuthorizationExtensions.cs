@@ -33,18 +33,31 @@ public static class AuthorizationExtensions
     {
         OrgRole.ReadOnly => 0,
         OrgRole.CloudAdmin => 1,
-        OrgRole.TenantAdmin => 2,
-        OrgRole.OrgAdmin => 3,
+        OrgRole.OrgAdmin => 2,
         _ => -1
     };
+
+    /// <summary>Tenant administrators may view bots in their tenant but must not perform cloud mutations.</summary>
+    public static bool IsTenantAdmin(this FunctionContext context) =>
+        string.Equals(context.GetOrgRole(), OrgRole.TenantAdmin, StringComparison.Ordinal);
+
+    public static bool CanPerformCloudWrite(this FunctionContext context) =>
+        context.IsSystemAdmin()
+        || context.GetOrgRole() is OrgRole.OrgAdmin or OrgRole.CloudAdmin;
 
     /// <summary>Customer tenant administrators (and org admins) may list every bot in the workspace.</summary>
     public static bool CanViewAllTenantBots(this FunctionContext context) =>
         context.IsSystemAdmin()
         || context.GetOrgRole() is OrgRole.TenantAdmin or OrgRole.OrgAdmin;
 
-    public static bool HasOrgRole(this FunctionContext context, string minRole) =>
-        Rank(context.GetOrgRole()) >= Rank(minRole);
+    public static bool HasOrgRole(this FunctionContext context, string minRole)
+    {
+        if (context.IsSystemAdmin()) return true;
+        var held = context.GetOrgRole();
+        if (string.Equals(held, OrgRole.TenantAdmin, StringComparison.Ordinal))
+            return string.Equals(minRole, OrgRole.ReadOnly, StringComparison.Ordinal);
+        return Rank(held) >= Rank(minRole);
+    }
 
     /// <summary>Returns a 403 response if the caller is not a system admin, else null.</summary>
     public static async Task<HttpResponseData?> RequireSystemAdminAsync(this FunctionContext context, HttpRequestData req)
@@ -61,6 +74,13 @@ public static class AuthorizationExtensions
     {
         if (context.IsSystemAdmin() || context.HasOrgRole(minRole)) return null;
         return await ForbidAsync(req, $"This action requires the '{minRole}' role in this organization.");
+    }
+
+    /// <summary>Cloud mutating endpoints: org_admin and cloud_admin only (not tenant_admin).</summary>
+    public static async Task<HttpResponseData?> RequireCloudWriteOrgRoleAsync(this FunctionContext context, HttpRequestData req)
+    {
+        if (context.CanPerformCloudWrite()) return null;
+        return await ForbidAsync(req, "This action requires cloud_admin or org_admin in this organization.");
     }
 
     /// <summary>

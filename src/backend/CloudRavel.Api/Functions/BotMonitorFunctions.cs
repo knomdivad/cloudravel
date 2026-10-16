@@ -15,6 +15,7 @@ namespace CloudRavel.Api.Functions;
 public sealed class BotMonitorFunctions
 {
     private readonly IBotMonitorRepository _repo;
+    private readonly IUserRepository _users;
     private readonly IOrganizationRepository _organizations;
     private readonly BotMonitorCredentialService _credentials;
     private readonly BotMonitorHeartbeatService _heartbeat;
@@ -24,6 +25,7 @@ public sealed class BotMonitorFunctions
 
     public BotMonitorFunctions(
         IBotMonitorRepository repo,
+        IUserRepository users,
         IOrganizationRepository organizations,
         BotMonitorCredentialService credentials,
         BotMonitorHeartbeatService heartbeat,
@@ -31,6 +33,7 @@ public sealed class BotMonitorFunctions
         ILogger<BotMonitorFunctions> logger)
     {
         _repo = repo;
+        _users = users;
         _organizations = organizations;
         _credentials = credentials;
         _heartbeat = heartbeat;
@@ -296,6 +299,9 @@ public sealed class BotMonitorFunctions
         var uptimeSum = 0.0;
         foreach (var row in rows)
         {
+            if (!BotVisibleToCaller(row.Bot, context))
+                continue;
+
             var history = await _repo.GetWeeklyHistoryAsync(tenantId, row.Bot.BotId, 8, now);
             var checkins = await _repo.GetRecentCheckinsAsync(tenantId, row.Bot.BotId, 48, now);
             var metricsSnap = await _repo.GetBotMetricsSnapshotAsync(tenantId, row.Bot.BotId, now);
@@ -398,6 +404,8 @@ public sealed class BotMonitorFunctions
         var bot = await _repo.GetBotByIdAsync(tenantId, botGuid);
         if (bot is null)
             return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("NOT_FOUND", "Bot not found in this organization."));
+        if (!BotVisibleToCaller(bot, context))
+            return await WriteJsonAsync(req, HttpStatusCode.Forbidden, Error("OWNER_REQUIRED", "This bot has no assigned owner visible to your role."));
         if (userId.HasValue && bot.OwnerUserId.HasValue && bot.OwnerUserId != userId
             && !context.CanViewAllTenantBots() && !context.IsSystemAdmin())
             return await WriteJsonAsync(req, HttpStatusCode.Forbidden, Error("USER_FORBIDDEN", "This bot belongs to another user in the organization."));
@@ -473,6 +481,10 @@ public sealed class BotMonitorFunctions
 
         if (body is null || body.TenantId == Guid.Empty || string.IsNullOrWhiteSpace(body.DisplayName))
             return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_BODY", "TenantId and displayName are required."));
+        if (!body.OwnerUserId.HasValue || body.OwnerUserId == Guid.Empty)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("OWNER_REQUIRED", "ownerUserId is required when creating a bot."));
+        if (!await _users.HasTenantAccessAsync(body.OwnerUserId.Value, body.TenantId))
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("OWNER_NOT_IN_TENANT", "ownerUserId must belong to a member of the organization."));
 
         if (await _organizations.GetByIdAsync(body.TenantId) is null)
             return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("UNKNOWN_ORGANIZATION", "Organization not found."));
@@ -610,6 +622,13 @@ public sealed class BotMonitorFunctions
     {
         if (!bool.TryParse(_config["BotMonitor:PortalMagicLinkEnabled"], out var enabled) || !enabled)
             return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("DISABLED", "Portal magic link is not enabled on this instance."));
+
+        var auth = await context.RequireAuthenticatedUserAsync(req);
+        if (auth != null) return auth;
+        var roleGate = await context.RequireOrgRoleAsync(req, OrgRole.ReadOnly);
+        if (roleGate != null) return roleGate;
+        var botGate = await context.RequireBotMonitoringEntitlementAsync(req);
+        if (botGate != null) return botGate;
 
         BotMonitorMagicLinkRequest? body;
         try
@@ -752,6 +771,12 @@ public sealed class BotMonitorFunctions
     {
         var raw = QueryParam(req.Url, "botTypeKey");
         return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+    }
+
+    private static bool BotVisibleToCaller(BotMonitorBot bot, FunctionContext context)
+    {
+        if (bot.OwnerUserId.HasValue) return true;
+        return context.IsSystemAdmin();
     }
 
     private static Guid? qTenantOverride(HttpRequestData req) =>

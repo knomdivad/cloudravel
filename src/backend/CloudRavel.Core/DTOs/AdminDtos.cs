@@ -32,6 +32,9 @@ public sealed class AdminUserDto
     public DateTime? LastLoginAt { get; set; }
     /// <summary>The user's org role — only populated in the per-organization listing.</summary>
     public string? OrgRole { get; set; }
+    /// <summary>Feature flags for this org membership (org user listing only).</summary>
+    public bool? EntitlementBotMonitor { get; set; }
+    public bool? EntitlementCloudMonitor { get; set; }
 }
 
 public sealed class AdminUsersResponse
@@ -66,13 +69,17 @@ public sealed class AddOrgUserRequest
     /// <summary>...or, if no existing user matches, create a new local user with these + Password.</summary>
     public string? DisplayName { get; set; }
     public string? Password { get; set; }
-    /// <summary>org_admin | cloud_admin | read_only.</summary>
+    /// <summary>org_admin | tenant_admin | cloud_admin | read_only.</summary>
     public string Role { get; set; } = "read_only";
+    public bool EntitlementBotMonitor { get; set; }
+    public bool EntitlementCloudMonitor { get; set; }
 }
 
 public sealed class UpdateOrgUserRoleRequest
 {
     public string Role { get; set; } = string.Empty;
+    public bool EntitlementBotMonitor { get; set; }
+    public bool EntitlementCloudMonitor { get; set; }
 }
 
 // --- Per-org SSO settings (org-admin only; stored, not yet enforced) ---

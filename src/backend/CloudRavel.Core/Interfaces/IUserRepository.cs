@@ -20,7 +20,7 @@ public interface IUserRepository
         Guid tenantId,
         string role,
         Guid grantedBy,
-        FeatureEntitlements? entitlements = null);
+        FeatureEntitlements entitlements);
     Task RevokeTenantAccessAsync(Guid userId, Guid tenantId);
 
     // --- RBAC / admin ---
@@ -34,7 +34,7 @@ public interface IUserRepository
     Task<IReadOnlyList<User>> ListAllAsync();
 
     /// <summary>Users with access to a workspace, paired with their org role.</summary>
-    Task<IReadOnlyList<(User User, string Role)>> ListByTenantAsync(Guid tenantId);
+    Task<IReadOnlyList<(User User, string Role, FeatureEntitlements Entitlements)>> ListByTenantAsync(Guid tenantId);
 
     /// <summary>Create a local username/password user. Returns the created row.</summary>
     Task<User> CreateLocalUserAsync(User user, string passwordHash);

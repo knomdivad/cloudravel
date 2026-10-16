@@ -157,14 +157,15 @@ public sealed class FeatureEntitlementGateTests
         return ctx;
     }
 
-    private static BotMonitorFunctions BuildBotMonitorFunctions(IBotMonitorRepository? repo = null)
+    internal static BotMonitorFunctions BuildBotMonitorFunctions(IBotMonitorRepository? repo = null)
     {
         repo ??= Substitute.For<IBotMonitorRepository>();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
         var cred = BotMonitorTestConfig.Credentials();
         var orgs = Substitute.For<IOrganizationRepository>();
         var hb = new BotMonitorHeartbeatService(repo, cred, config, () => DateTime.UtcNow);
-        return new BotMonitorFunctions(repo, orgs, cred, hb, config, NullLogger<BotMonitorFunctions>.Instance);
+        var users = Substitute.For<IUserRepository>();
+        return new BotMonitorFunctions(repo, users, orgs, cred, hb, config, NullLogger<BotMonitorFunctions>.Instance);
     }
 
     private static InventoryFunctions BuildInventoryFunctions(IInventoryRepository? inventoryRepo = null)

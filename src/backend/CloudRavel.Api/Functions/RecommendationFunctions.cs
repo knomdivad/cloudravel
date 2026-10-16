@@ -159,7 +159,7 @@ public sealed class RecommendationFunctions
         string recommendationId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         var tenantId = context.GetTenantId();

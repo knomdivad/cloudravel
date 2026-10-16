@@ -32,6 +32,8 @@ export interface AdminUser {
   lastLoginAt?: string | null;
   /** Only populated in the per-organization member listing. */
   orgRole?: string | null;
+  entitlementBotMonitor?: boolean;
+  entitlementCloudMonitor?: boolean;
 }
 
 export interface OrgSso {

@@ -46,8 +46,14 @@ SET bot_type_key = N'other_plugin'
 WHERE bot_type_key IS NULL;
 GO
 
-IF EXISTS (SELECT 1 FROM dbo.bot_monitor_bots WHERE bot_type_key IS NULL)
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    INNER JOIN sys.tables t ON t.object_id = c.object_id
+    WHERE t.name = N'bot_monitor_bots' AND c.name = N'bot_type_key' AND c.is_nullable = 0)
+AND NOT EXISTS (SELECT 1 FROM dbo.bot_monitor_bots WHERE bot_type_key IS NULL)
+BEGIN
     ALTER TABLE dbo.bot_monitor_bots ALTER COLUMN bot_type_key NVARCHAR(64) NOT NULL;
+END
 GO
 
 IF NOT EXISTS (

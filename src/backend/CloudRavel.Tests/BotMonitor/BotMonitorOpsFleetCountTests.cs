@@ -58,6 +58,7 @@ public sealed class BotMonitorOpsFleetCountTests
         var cred = BotMonitorTestConfig.Credentials();
         var orgs = Substitute.For<IOrganizationRepository>();
         var hb = new BotMonitorHeartbeatService(repo, cred, config, () => DateTime.UtcNow);
-        return new BotMonitorFunctions(repo, orgs, cred, hb, config, NullLogger<BotMonitorFunctions>.Instance);
+        var users = Substitute.For<IUserRepository>();
+        return new BotMonitorFunctions(repo, users, orgs, cred, hb, config, NullLogger<BotMonitorFunctions>.Instance);
     }
 }

@@ -2,31 +2,50 @@
 
 import React from 'react';
 
-const typePalette: Record<string, { bg: string; border: string; text: string }> = {
-  grokbot: { bg: '#2a1f33', border: '#7c4dff', text: '#e8deff' },
-  chatgpt: { bg: '#1a2a24', border: '#10a37f', text: '#d4f5ea' },
-  muse_meta: { bg: '#1f2433', border: '#0866ff', text: '#dbe8ff' },
-  openclaw: { bg: '#2a2218', border: '#c77800', text: '#ffe8c2' },
-  hermes: { bg: '#1a2830', border: '#00bcd4', text: '#ccf7ff' },
-  dot: { bg: '#252525', border: '#e3dbd3', text: '#f5f0ea' },
-  other_plugin: { bg: '#232427', border: '#46224d', text: '#e3dbd3' },
+const palette = {
+  bg: '#131315',
+  surface: '#232427',
+  accent: '#46224d',
+  text: '#e3dbd3',
 };
 
-export function botTypePalette(typeKey: string) {
-  return typePalette[typeKey] ?? typePalette.other_plugin;
+const typeIcons: Record<string, string> = {
+  grokbot: '\u2726',
+  chatgpt: '\u25C6',
+  muse_meta: '\u25CE',
+  openclaw: '\u2736',
+  hermes: '\u27E1',
+  dot: '\u2022',
+  other_plugin: '\u25AA',
+};
+
+function tintForType(typeKey: string): string {
+  const hash = typeKey.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const mix = hash % 3;
+  if (mix === 0) return palette.surface;
+  if (mix === 1) return palette.accent;
+  return palette.bg;
+}
+
+export function botTypePalette(_typeKey: string) {
+  return { bg: palette.bg, border: palette.accent, text: palette.text };
 }
 
 export function BotTypeBadge({ typeKey, displayName }: { typeKey: string; displayName: string }) {
-  const palette = botTypePalette(typeKey);
+  const icon = typeIcons[typeKey] ?? typeIcons.other_plugin;
+  const bg = tintForType(typeKey);
   return (
     <span
-      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+      className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium"
       style={{
-        backgroundColor: palette.bg,
+        backgroundColor: bg,
         color: palette.text,
-        border: `1px solid ${palette.border}`,
+        border: `1px solid ${palette.accent}`,
       }}
     >
+      <span aria-hidden style={{ color: palette.text, opacity: 0.85 }}>
+        {icon}
+      </span>
       {displayName}
     </span>
   );
@@ -43,7 +62,7 @@ export function BotTypeCountChips({
       {counts.map((c) => (
         <span key={c.typeKey} className="inline-flex items-center gap-1.5 text-xs">
           <BotTypeBadge typeKey={c.typeKey} displayName={c.displayName} />
-          <span className="opacity-80">{c.count}</span>
+          <span style={{ color: palette.text, opacity: 0.8 }}>{c.count}</span>
         </span>
       ))}
     </div>

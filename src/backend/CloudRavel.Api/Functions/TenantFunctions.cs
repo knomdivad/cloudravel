@@ -135,7 +135,7 @@ public sealed class TenantFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "tenants")] HttpRequestData req,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         var body = await req.ReadFromJsonAsync<OnboardTenantRequest>();
@@ -253,7 +253,7 @@ public sealed class TenantFunctions
         string tenantId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         if (!Guid.TryParse(tenantId, out var id))

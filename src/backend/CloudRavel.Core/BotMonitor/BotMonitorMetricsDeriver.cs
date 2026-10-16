@@ -34,9 +34,8 @@ public static class BotMonitorMetricsDeriver
         if (recentNewestFirst.Count > 0)
         {
             var last = recentNewestFirst[0].ReceivedAt;
-            var expectedAt = last.AddMinutes(-checkinIntervalMinutes);
-            var lateness = (int)Math.Max(0, (last - expectedAt).TotalMinutes);
-            derived.CheckInLatenessMinutes = lateness;
+            var minutesSinceLast = (nowUtc - last).TotalMinutes;
+            derived.CheckInLatenessMinutes = (int)Math.Max(0, minutesSinceLast - checkinIntervalMinutes);
         }
 
         return derived;

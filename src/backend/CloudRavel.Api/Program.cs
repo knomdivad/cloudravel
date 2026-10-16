@@ -41,6 +41,7 @@ var host = new HostBuilder()
         // then TenantContextMiddleware checks the authenticated user's tenant access.
         builder.UseMiddleware<AuthEnforcementMiddleware>();
         builder.UseMiddleware<TenantContextMiddleware>();
+        builder.UseMiddleware<FeatureRouteEntitlementMiddleware>();
         // Read-only service credentials (the standalone assessment tool) get
         // single-tenant scope + mutation refusal + audit + rate limiting.
         builder.UseMiddleware<AssessmentPrincipalMiddleware>();

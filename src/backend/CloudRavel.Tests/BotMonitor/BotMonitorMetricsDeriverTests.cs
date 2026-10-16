@@ -37,6 +37,18 @@ public sealed class BotMonitorMetricsDeriverTests
     }
 
     [Fact]
+    public void Check_in_lateness_is_minutes_since_last_minus_interval()
+    {
+        var last = Now.AddMinutes(-90);
+        var recent = new List<(DateTime, BotMonitorStatus, BotMonitorKeepCheck)>
+        {
+            (last, BotMonitorStatus.Ok, BotMonitorKeepCheck.Pass),
+        };
+        var derived = BotMonitorMetricsDeriver.Derive(null, recent, 60, Now);
+        Assert.Equal(30, derived.CheckInLatenessMinutes);
+    }
+
+    [Fact]
     public void Runs_per_day_counts_last_24h()
     {
         var recent = new List<(DateTime, BotMonitorStatus, BotMonitorKeepCheck)>

@@ -290,6 +290,12 @@ function normalizeAdminUser(raw: Record<string, unknown>): AdminUser {
     username: (raw.username ?? raw.Username ?? null) as string | null,
     lastLoginAt: (raw.lastLoginAt ?? raw.LastLoginAt ?? null) as string | null,
     orgRole: (raw.orgRole ?? raw.OrgRole ?? null) as string | null,
+    entitlementBotMonitor: Boolean(
+      raw.entitlementBotMonitor ?? raw.EntitlementBotMonitor ?? false
+    ),
+    entitlementCloudMonitor: Boolean(
+      raw.entitlementCloudMonitor ?? raw.EntitlementCloudMonitor ?? false
+    ),
   };
 }
 
@@ -349,7 +355,15 @@ export async function getOrgUsers(orgId: string): Promise<AdminUser[]> {
 
 export async function addOrgUser(
   orgId: string,
-  request: { username?: string; email?: string; displayName?: string; password?: string; role: string }
+  request: {
+    username?: string;
+    email?: string;
+    displayName?: string;
+    password?: string;
+    role: string;
+    entitlementBotMonitor: boolean;
+    entitlementCloudMonitor: boolean;
+  }
 ): Promise<AdminUser> {
   return apiCall<AdminUser>(`/organizations/${orgId}/users`, orgId, {
     method: 'POST',
@@ -357,10 +371,18 @@ export async function addOrgUser(
   });
 }
 
-export async function updateOrgUserRole(orgId: string, userId: string, role: string): Promise<void> {
+export async function updateOrgUserRole(
+  orgId: string,
+  userId: string,
+  request: {
+    role: string;
+    entitlementBotMonitor: boolean;
+    entitlementCloudMonitor: boolean;
+  }
+): Promise<void> {
   await apiCall(`/organizations/${orgId}/users/${userId}`, orgId, {
     method: 'PATCH',
-    body: JSON.stringify({ role }),
+    body: JSON.stringify(request),
   });
 }
 

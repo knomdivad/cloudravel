@@ -64,6 +64,8 @@ public sealed class OrgAdminFunctions
             {
                 var dto = AdminFunctions.ToDto(m.User);
                 dto.OrgRole = m.Role;
+                dto.EntitlementBotMonitor = m.Entitlements.BotMonitoring;
+                dto.EntitlementCloudMonitor = m.Entitlements.CloudMonitoring;
                 return dto;
             }).ToList()
         });
@@ -84,6 +86,10 @@ public sealed class OrgAdminFunctions
             return await BadRequest(req, "INVALID_REQUEST", "role is required.");
         if (!ValidOrgRoles.Contains(body.Role))
             return await BadRequest(req, "INVALID_ROLE", $"role must be one of: {string.Join(", ", ValidOrgRoles)}");
+        if (!body.EntitlementBotMonitor && !body.EntitlementCloudMonitor)
+            return await BadRequest(req, "INVALID_ENTITLEMENTS", "At least one of entitlementBotMonitor or entitlementCloudMonitor must be true.");
+
+        var entitlements = new FeatureEntitlements(body.EntitlementBotMonitor, body.EntitlementCloudMonitor);
 
         // Password present ⇒ create a new local user. Otherwise attach an existing one by email.
         var isCreate = !string.IsNullOrWhiteSpace(body.Password);
@@ -143,7 +149,7 @@ public sealed class OrgAdminFunctions
         {
             // user_tenant_access FK → tenants; materialize shell if missing.
             await EnsureWorkspaceTenantShellAsync(orgId, grantedBy);
-            await _userRepo.GrantTenantAccessAsync(user.UserId, orgId, body.Role, grantedBy);
+            await _userRepo.GrantTenantAccessAsync(user.UserId, orgId, body.Role, grantedBy, entitlements);
         }
         catch (Exception ex)
         {
@@ -173,9 +179,12 @@ public sealed class OrgAdminFunctions
         var body = await req.ReadFromJsonAsync<UpdateOrgUserRoleRequest>();
         if (body == null || !ValidOrgRoles.Contains(body.Role))
             return await BadRequest(req, "INVALID_ROLE", $"role must be one of: {string.Join(", ", ValidOrgRoles)}");
+        if (!body.EntitlementBotMonitor && !body.EntitlementCloudMonitor)
+            return await BadRequest(req, "INVALID_ENTITLEMENTS", "At least one of entitlementBotMonitor or entitlementCloudMonitor must be true.");
 
         var grantedBy = context.GetUserId() ?? Guid.Empty;
-        await _userRepo.GrantTenantAccessAsync(userId, orgId, body.Role, grantedBy);
+        var entitlements = new FeatureEntitlements(body.EntitlementBotMonitor, body.EntitlementCloudMonitor);
+        await _userRepo.GrantTenantAccessAsync(userId, orgId, body.Role, grantedBy, entitlements);
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { userId, orgId, role = body.Role });

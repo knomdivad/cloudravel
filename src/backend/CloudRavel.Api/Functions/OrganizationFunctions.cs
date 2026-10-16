@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using CloudRavel.Api.Middleware;
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.DTOs;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
@@ -145,7 +146,8 @@ public sealed class OrganizationFunctions
         // Creator is org_admin of the new workspace (system_admin already has
         // implicit access; this also keeps membership lists accurate).
         if (createdBy != Guid.Empty)
-            await _userRepo.GrantTenantAccessAsync(createdBy, orgId, OrgRole.OrgAdmin, createdBy);
+            await _userRepo.GrantTenantAccessAsync(
+                createdBy, orgId, OrgRole.OrgAdmin, createdBy, FeatureEntitlements.Both);
 
         _logger.LogInformation("Created organization {OrgId} ({Name})", org.OrgId, org.Name);
 
@@ -165,7 +167,7 @@ public sealed class OrganizationFunctions
         Guid orgId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         var mismatch = await context.RequirePathTenantMatchAsync(req, orgId);
@@ -218,7 +220,7 @@ public sealed class OrganizationFunctions
         Guid orgId,
         FunctionContext context)
     {
-        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.CloudAdmin);
+        var forbid = await context.RequireCloudWriteOrgRoleAsync(req);
         if (forbid != null) return forbid;
 
         var mismatch = await context.RequirePathTenantMatchAsync(req, orgId);

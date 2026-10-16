@@ -48,6 +48,7 @@ public sealed class BotMonitorHeartbeatHttpTests
         var hb = new BotMonitorHeartbeatService(repo, cred, new ConfigurationBuilder().Build(), () => fixedNow);
         var fn = new BotMonitorFunctions(
             repo,
+            Substitute.For<IUserRepository>(),
             Substitute.For<IOrganizationRepository>(),
             cred,
             hb,

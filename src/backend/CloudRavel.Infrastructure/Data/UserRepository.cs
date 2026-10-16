@@ -148,7 +148,7 @@ public sealed class UserRepository : IUserRepository
         return results.ToList();
     }
 
-    public async Task<IReadOnlyList<(User User, string Role)>> ListByTenantAsync(Guid tenantId)
+    public async Task<IReadOnlyList<(User User, string Role, FeatureEntitlements Entitlements)>> ListByTenantAsync(Guid tenantId)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
         const string sql = @"
@@ -156,14 +156,19 @@ public sealed class UserRepository : IUserRepository
                    u.global_role AS GlobalRole, u.is_active AS IsActive,
                    u.created_at AS CreatedAt, u.last_login_at AS LastLoginAt,
                    u.auth_provider AS AuthProvider, u.username AS Username, u.password_hash AS PasswordHash,
-                   uta.role AS Role
+                   uta.role AS Role,
+                   uta.entitlement_bot_monitor AS BotMonitor,
+                   uta.entitlement_cloud_monitor AS CloudMonitor
             FROM user_tenant_access uta
             INNER JOIN users u ON u.user_id = uta.user_id
             WHERE uta.tenant_id = @TenantId
             ORDER BY u.display_name";
 
-        var rows = await conn.QueryAsync<User, string, (User, string)>(
-            sql, (u, role) => (u, role), new { TenantId = tenantId }, splitOn: "Role");
+        var rows = await conn.QueryAsync<User, string, bool, bool, (User, string, FeatureEntitlements)>(
+            sql,
+            (u, role, bot, cloud) => (u, role, new FeatureEntitlements(bot, cloud)),
+            new { TenantId = tenantId },
+            splitOn: "Role,BotMonitor,CloudMonitor");
         return rows.ToList();
     }
 
@@ -225,9 +230,9 @@ public sealed class UserRepository : IUserRepository
         Guid tenantId,
         string role,
         Guid grantedBy,
-        FeatureEntitlements? entitlements = null)
+        FeatureEntitlements entitlements)
     {
-        var flags = entitlements ?? FeatureEntitlements.Both;
+        var flags = entitlements;
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
         const string sql = @"
             MERGE user_tenant_access AS target
