@@ -2,16 +2,23 @@
 -- LOCAL DEVELOPMENT ONLY: BotMonitor demo rows for /ops/bots and /portal/bots.
 -- Do not run against staging or production. Contains synthetic token hashes only.
 --
--- Guard: abort unless the instance is explicitly Development.
+-- Guard: pass sqlcmd -v PlatformEnvironment=Development (matches Platform__Environment).
 -- ============================================================================
 
 SET QUOTED_IDENTIFIER ON;
 SET ANSI_NULLS ON;
 GO
 
+DECLARE @PlatformEnvironment NVARCHAR(64) = LTRIM(RTRIM(N'$(PlatformEnvironment)'));
+IF @PlatformEnvironment <> N'Development'
+BEGIN
+    RAISERROR(N'seed-bot-monitor-demo.sql refused: set sqlcmd -v PlatformEnvironment=Development.', 16, 1);
+    RETURN;
+END
+
 IF EXISTS (SELECT 1 FROM organizations WHERE environment <> N'Development')
 BEGIN
-    RAISERROR(N'seed-bot-monitor-demo.sql is local-only and requires all organizations to be Development.', 16, 1);
+    RAISERROR(N'seed-bot-monitor-demo.sql refused: all organizations must be Development.', 16, 1);
     RETURN;
 END
 

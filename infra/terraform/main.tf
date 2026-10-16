@@ -305,7 +305,7 @@ resource "azurerm_linux_function_app" "main" {
     "AzureOpenAI__DeploymentName" = azurerm_cognitive_deployment.gpt.name
     "LocalAuth__JwtSigningKey"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.main.vault_uri}secrets/LocalAuthJwtSigningKey)"
     "Cors__AllowedOrigins"        = "https://${azurerm_static_web_app.main.default_host_name}"
-    "Platform__Environment"       = var.environment == "prod" ? "Production" : "Development"
+    "Platform__Environment"       = var.environment == "prod" ? "Production" : (var.environment == "staging" ? "Staging" : "Development")
     "AzureAd__TenantId"           = data.azurerm_client_config.current.tenant_id
     "AzureAd__ClientId"           = azuread_application.api.client_id
   }

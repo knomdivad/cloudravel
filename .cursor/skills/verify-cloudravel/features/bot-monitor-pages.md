@@ -12,6 +12,7 @@ Capture operator and customer BotMonitor routes after seeding demo rows.
 source /opt/cursor/artifacts/verify-cloudravel/state/run.env
 sudo docker compose -p "$COMPOSE_PROJECT_NAME" exec -T mssql \
   /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -d cloudraveldb -I \
+  -v PlatformEnvironment=Development \
   -i /database/seed-bot-monitor-demo.sql
 ```
 

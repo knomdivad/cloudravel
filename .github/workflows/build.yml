@@ -66,6 +66,9 @@ jobs:
           dotnet test CloudRavel.sln --configuration Release --no-build --verbosity normal
           --collect:"XPlat Code Coverage" --results-directory ./.coverage
 
+      - name: BotMonitor Python signer tests
+        run: python3 scripts/bot-monitor/test_send_heartbeat.py
+
       # No threshold yet: establish a baseline before it can be ratcheted.
       # Reports appear once coverlet.collector is referenced by the test project;
       # without it the collector emits nothing, hence warn rather than error.
@@ -88,6 +91,46 @@ jobs:
           path: ./publish/api
           include-hidden-files: true
           retention-days: 7
+
+  # ============================================================================
+  # BotMonitor migration 006 (orphan child cleanup + FK)
+  # ============================================================================
+  bot-monitor-migration-006:
+    name: BotMonitor migration 006 check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Start SQL Edge
+        env:
+          MSSQL_SA_PASSWORD: BotMonitor006CiTest!
+        run: |
+          docker run -d --name mssql-botmon006 \
+            -e ACCEPT_EULA=Y \
+            -e MSSQL_SA_PASSWORD="${MSSQL_SA_PASSWORD}" \
+            -p 1433:1433 \
+            mcr.microsoft.com/azure-sql-edge:latest
+
+      - name: Run 006 orphan cleanup script
+        env:
+          MSSQL_SA_PASSWORD: BotMonitor006CiTest!
+          DB_HOST: host.docker.internal
+        run: |
+          for i in $(seq 1 90); do
+            if docker run --rm mcr.microsoft.com/mssql-tools:latest \
+              /opt/mssql-tools/bin/sqlcmd -S host.docker.internal -U sa -P "${MSSQL_SA_PASSWORD}" -Q "SELECT 1" -b >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$i" -eq 90 ]; then exit 1; fi
+            sleep 2
+          done
+          docker run --rm \
+            -v "${{ github.workspace }}/database:/database" \
+            -e MSSQL_SA_PASSWORD="${MSSQL_SA_PASSWORD}" \
+            -e DB_HOST=host.docker.internal \
+            mcr.microsoft.com/mssql-tools:latest \
+            bash /database/test-006-bot-monitor-org-fk.sh
 
   # ============================================================================
   # Frontend Build
