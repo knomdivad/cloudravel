@@ -52,8 +52,14 @@ IF NOT EXISTS (
     WHERE t.name = N'bot_monitor_bots' AND c.name = N'bot_type_key' AND c.is_nullable = 0)
 AND NOT EXISTS (SELECT 1 FROM dbo.bot_monitor_bots WHERE bot_type_key IS NULL)
 BEGIN
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_bmb_bot_type' AND object_id = OBJECT_ID(N'dbo.bot_monitor_bots'))
+        DROP INDEX IX_bmb_bot_type ON dbo.bot_monitor_bots;
     ALTER TABLE dbo.bot_monitor_bots ALTER COLUMN bot_type_key NVARCHAR(64) NOT NULL;
 END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_bmb_bot_type' AND object_id = OBJECT_ID(N'dbo.bot_monitor_bots'))
+    CREATE INDEX IX_bmb_bot_type ON dbo.bot_monitor_bots(tenant_id, bot_type_key);
 GO
 
 IF NOT EXISTS (

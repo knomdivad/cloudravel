@@ -46,7 +46,7 @@ db_scratch="/tmp/cloudravel-verify-${VERIFY_RUN_ID}/database"
 sudo rm -rf "/tmp/cloudravel-verify-${VERIFY_RUN_ID}" 2>/dev/null || true
 mkdir -p "${db_scratch}"
 cp "${REPO_ROOT}/database/"*.sql "${db_scratch}/" 2>/dev/null || true
-cp "${SCRIPT_DIR}/apply-migrations-verify.sh" "${db_scratch}/apply-migrations.sh"
+cp "${REPO_ROOT}/database/apply-migrations.sh" "${db_scratch}/apply-migrations.sh"
 chmod +x "${db_scratch}/apply-migrations.sh"
 export VERIFY_DB_MOUNT="${db_scratch}"
 
@@ -93,7 +93,7 @@ export PATH="${DOTNET_ROOT}:${HOME}/.nvm/versions/node/v20.20.2/bin:${HOME}/.loc
 [[ -s "${HOME}/.nvm/nvm.sh" ]] && . "${HOME}/.nvm/nvm.sh" && nvm use 20 >/dev/null 2>&1 || true
 
 if ! command -v func >/dev/null 2>&1; then
-  echo "prove-local-login: func (Azure Functions Core Tools v4) required — run .cursor/install.sh" >&2
+  echo "prove-local-login: func (Azure Functions Core Tools v4) required: run .cursor/install.sh" >&2
   exit 1
 fi
 

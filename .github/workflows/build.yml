@@ -1,4 +1,4 @@
-name: CloudRavel — Build & Test
+name: 'CloudRavel: Build & Test'
 
 on:
   workflow_dispatch:
@@ -33,6 +33,22 @@ env:
   IMAGE_NAMESPACE: ${{ github.repository_owner }}
 
 jobs:
+  # ============================================================================
+  # Database migrations (list parity + optional SQL Edge smoke)
+  # ============================================================================
+  database-migrations:
+    name: Database migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check migration list vs files
+        run: ./database/check-migrations-list.sh
+
+      - name: Apply migrations against SQL Edge (fresh + 001-only ledger)
+        run: ./database/test-apply-migrations.sh
+
   # ============================================================================
   # Backend Build & Test
   # ============================================================================
