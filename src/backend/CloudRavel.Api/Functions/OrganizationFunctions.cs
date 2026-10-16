@@ -124,7 +124,9 @@ public sealed class OrganizationFunctions
             Name = name,
             Environment = environment,
             Status = "active",
-            CreatedBy = context.GetActor()
+            CreatedBy = context.GetActor(),
+            EntitlementBotMonitor = false,
+            EntitlementCloudMonitor = false,
         });
 
         // user_tenant_access.tenant_id FK → tenants.tenant_id. Materialize a
@@ -147,7 +149,7 @@ public sealed class OrganizationFunctions
         // implicit access; this also keeps membership lists accurate).
         if (createdBy != Guid.Empty)
             await _userRepo.GrantTenantAccessAsync(
-                createdBy, orgId, OrgRole.OrgAdmin, createdBy, FeatureEntitlements.Both);
+                createdBy, orgId, OrgRole.OrgAdmin, createdBy, FeatureEntitlements.None);
 
         _logger.LogInformation("Created organization {OrgId} ({Name})", org.OrgId, org.Name);
 

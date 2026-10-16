@@ -1,4 +1,5 @@
 using CloudRavel.Api.Middleware;
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
 using CloudRavel.Tests.Assessment;
@@ -31,7 +32,8 @@ public sealed class BotMonitorTenantAccessMiddlewareTests
         });
         users.GetTenantRoleAsync(userId, tenantB).Returns((string?)null);
 
-        var middleware = new TenantContextMiddleware(users, NullLogger<TenantContextMiddleware>.Instance);
+        var orgs = Substitute.For<IOrganizationRepository>();
+        var middleware = new TenantContextMiddleware(users, orgs, NullLogger<TenantContextMiddleware>.Instance);
         var ctx = new TestFunctionContext();
         ctx.Items["SystemRole"] = "member";
         ctx.SetUser(userId);

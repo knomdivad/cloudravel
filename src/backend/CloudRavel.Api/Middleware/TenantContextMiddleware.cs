@@ -24,11 +24,16 @@ namespace CloudRavel.Api.Middleware;
 public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
 {
     private readonly IUserRepository _userRepo;
+    private readonly IOrganizationRepository _orgRepo;
     private readonly ILogger<TenantContextMiddleware> _logger;
 
-    public TenantContextMiddleware(IUserRepository userRepo, ILogger<TenantContextMiddleware> logger)
+    public TenantContextMiddleware(
+        IUserRepository userRepo,
+        IOrganizationRepository orgRepo,
+        ILogger<TenantContextMiddleware> logger)
     {
         _userRepo = userRepo;
+        _orgRepo = orgRepo;
         _logger = logger;
     }
 
@@ -184,9 +189,11 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
                 context.SetFeatureEntitlements(FeatureEntitlements.Both);
             else
             {
-                var entitlements = await _userRepo.GetFeatureEntitlementsAsync(userId.Value, tenantId)
-                                   ?? FeatureEntitlements.None;
-                context.SetFeatureEntitlements(entitlements);
+                var memberEntitlements = await _userRepo.GetFeatureEntitlementsAsync(userId.Value, tenantId)
+                                         ?? FeatureEntitlements.None;
+                var orgEntitlements = await _orgRepo.GetFeatureEntitlementsAsync(tenantId);
+                context.SetFeatureEntitlements(
+                    FeatureEntitlements.IntersectWithOrg(memberEntitlements, orgEntitlements));
             }
         }
 

@@ -5,6 +5,9 @@ public sealed record FeatureEntitlements(bool BotMonitoring, bool CloudMonitorin
 {
     public static readonly FeatureEntitlements None = new(false, false);
     public static readonly FeatureEntitlements Both = new(true, true);
+
+    public static FeatureEntitlements IntersectWithOrg(FeatureEntitlements member, FeatureEntitlements org)
+        => new(member.BotMonitoring && org.BotMonitoring, member.CloudMonitoring && org.CloudMonitoring);
 }
 
 public static class FeatureEntitlementKeys
