@@ -4,7 +4,6 @@ using CloudRavel.Api.Middleware;
 using CloudRavel.Core.Auth;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
-using InventorySnapshot = CloudRavel.Core.Models.InventorySnapshot;
 using CloudRavel.Infrastructure.BotMonitor;
 using CloudRavel.Tests.Assessment;
 using CloudRavel.Tests.BotMonitor;
@@ -12,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
+using InventorySnapshot = CloudRavel.Core.Models.InventorySnapshot;
 
 namespace CloudRavel.Tests.Auth;
 

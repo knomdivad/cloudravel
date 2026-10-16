@@ -29,9 +29,8 @@ run -b -Q "IF DB_ID(N'${DB}') IS NULL CREATE DATABASE [${DB}];"
 
 has_bot_monitor=$(run -d "$DB" -h -1 -W -b -Q "SET NOCOUNT ON; SELECT CASE WHEN OBJECT_ID(N'dbo.bot_monitor_tenants') IS NULL THEN 0 ELSE 1 END;" | tr -d '[:space:]')
 if [ "$has_bot_monitor" != "1" ]; then
-  echo "Applying 001-schema and 005-bot-monitor..."
-  run -d "$DB" -b -i "${SCRIPT_DIR}/001-schema.sql"
-  run -d "$DB" -b -i "${SCRIPT_DIR}/005-bot-monitor.sql"
+  echo "Applying minimal BotMonitor schema for 006 test..."
+  run -d "$DB" -b -i "${SCRIPT_DIR}/test-006-bot-monitor-min-schema.sql"
 fi
 
 ORPHAN='A0000000-0000-0000-0000-000000000099'
