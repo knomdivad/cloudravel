@@ -1,9 +1,9 @@
+using System.Data.Common;
 using System.Net;
 using CloudRavel.Api.Auth;
 using CloudRavel.Api.Functions;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.Auth;
-using System.Data.Common;
 using CloudRavel.Core.BotMonitor;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
@@ -65,7 +65,7 @@ internal static class EntitlementSweepHandlers
     {
         return (m, r) switch
         {
-("GET", "admin/users") => await F.Admin.AdminUsers(req, ctx),
+            ("GET", "admin/users") => await F.Admin.AdminUsers(req, ctx),
             ("POST", "admin/users") => await F.Admin.AdminUsers(req, ctx),
             ("POST", "admin/users/create") => await F.Admin.CreateUser(req, ctx),
             ("POST", "ai/chat") => await F.Chat.Chat(req, ctx),
