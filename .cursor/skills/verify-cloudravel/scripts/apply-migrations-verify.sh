@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Verification copy of database/apply-migrations.sh — omits 002-assessment (no .sql
-# in tree; 003-drop-assessment is a no-op when assessment objects never existed).
-# Mounted over /database/apply-migrations.sh by compose.verify.yml only during verify runs.
+# DEPRECATED: verify harness now copies database/apply-migrations.sh from the repo.
+# Kept only so older skill revisions that still reference this file do not break.
 set -euo pipefail
 
 SQLCMD=/opt/mssql-tools/bin/sqlcmd

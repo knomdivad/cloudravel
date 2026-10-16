@@ -26,7 +26,8 @@ LEGACY_DB=aimdb
 # you want Contoso sample rows.
 MIGRATIONS=(
   001-schema
-  002-assessment
+  # 002-assessment.sql was removed in d06310f (assessment moved to cloudravel-assessment).
+  # Do not re-add: the file is gone and 003-drop-assessment is idempotent on fresh 001-only DBs.
   003-drop-assessment
   004-assessment-principal
   005-bot-monitor

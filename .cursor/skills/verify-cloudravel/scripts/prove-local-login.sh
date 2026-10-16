@@ -46,7 +46,7 @@ db_scratch="/tmp/cloudravel-verify-${VERIFY_RUN_ID}/database"
 sudo rm -rf "/tmp/cloudravel-verify-${VERIFY_RUN_ID}" 2>/dev/null || true
 mkdir -p "${db_scratch}"
 cp "${REPO_ROOT}/database/"*.sql "${db_scratch}/" 2>/dev/null || true
-cp "${SCRIPT_DIR}/apply-migrations-verify.sh" "${db_scratch}/apply-migrations.sh"
+cp "${REPO_ROOT}/database/apply-migrations.sh" "${db_scratch}/apply-migrations.sh"
 chmod +x "${db_scratch}/apply-migrations.sh"
 export VERIFY_DB_MOUNT="${db_scratch}"
 
