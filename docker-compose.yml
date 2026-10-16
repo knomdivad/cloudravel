@@ -133,6 +133,11 @@ services:
       #     (scheduled AND on-demand) so the fake seed clouds are never contacted.
       #     Set to Production when onboarding real clouds. ---
       Platform__Environment: ${PLATFORM_ENVIRONMENT:-Development}
+      # --- BotMonitor (startup validation: Production needs DataProtectionKeyBase64;
+      #     Development may use AllowDevKey + DevDataProtectionKeyBase64) ---
+      BotMonitor__DataProtectionKeyBase64: ${BOTMONITOR_DATA_PROTECTION_KEY_BASE64:-}
+      BotMonitor__AllowDevKey: ${BOTMONITOR_ALLOW_DEV_KEY:-}
+      BotMonitor__DevDataProtectionKeyBase64: ${BOTMONITOR_DEV_DATA_PROTECTION_KEY_BASE64:-}
       # --- Database (also backs the DatabaseJobQueue — no Service Bus needed) ---
       SqlConnectionString: "Server=mssql,1433;Database=cloudraveldb;User ID=sa;Password=${MSSQL_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;"
       # --- Secret store: OpenBao (cloud-agnostic) ---

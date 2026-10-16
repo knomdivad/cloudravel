@@ -70,7 +70,12 @@ if [[ "$(run_sql -d "${DB}" -h -1 -W -b -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM
   echo "ERROR: 002-assessment should not be in ledger after fix" >&2
   exit 1
 fi
-echo "Fresh DB: ${count_a} migrations applied."
+chat_a=$(run_sql -d "${DB}" -h -1 -W -b -Q "SET NOCOUNT ON; SELECT CASE WHEN OBJECT_ID(N'dbo.chat_usage_counters', N'U') IS NULL THEN 0 ELSE 1 END;" | tr -d '[:space:]')
+if [[ "${chat_a}" != "1" ]]; then
+  echo "ERROR: expected chat_usage_counters on fresh DB" >&2
+  exit 1
+fi
+echo "Fresh DB: ${count_a} migrations applied, chat_usage_counters present."
 
 echo "=== Scenario B: 001-only ledger (stuck dev volume) ==="
 DB_B=cloudraveldb_001only
@@ -95,6 +100,11 @@ if [[ "${bot}" != "1" ]]; then
   echo "ERROR: expected bot_monitor schema after catching up from 001-only ledger" >&2
   exit 1
 fi
-echo "001-only ledger catch-up: ${count_b} migrations, bot_monitor present."
+chat_b=$(run_sql -d "${DB_B}" -h -1 -W -b -Q "SET NOCOUNT ON; SELECT CASE WHEN OBJECT_ID(N'dbo.chat_usage_counters', N'U') IS NULL THEN 0 ELSE 1 END;" | tr -d '[:space:]')
+if [[ "${chat_b}" != "1" ]]; then
+  echo "ERROR: expected chat_usage_counters after 001-only catch-up" >&2
+  exit 1
+fi
+echo "001-only ledger catch-up: ${count_b} migrations, bot_monitor and chat_usage_counters present."
 
 echo "apply-migrations integration test passed."
