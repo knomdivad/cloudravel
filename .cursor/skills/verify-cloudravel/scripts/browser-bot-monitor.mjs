@@ -52,6 +52,7 @@ if (await orgSelect.count()) {
 await page.goto(`${webUrl}/portal/bots`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
 await page.screenshot({ path: path.join(outDir, 'portal-dashboard.png'), fullPage: true });
+await page.screenshot({ path: path.join(outDir, 'portal-tenant-admin.png'), fullPage: true });
 
 fs.writeFileSync(
   path.join(outDir, 'proof.json'),
