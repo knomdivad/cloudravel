@@ -26,16 +26,14 @@ public sealed class FeatureRouteEntitlementMiddleware : IFunctionsWorkerMiddlewa
             return;
         }
 
-        var path = httpRequestData.Url.AbsolutePath;
-        if (path.Contains("/health", StringComparison.OrdinalIgnoreCase)
-            || path.Contains("/auth/login", StringComparison.OrdinalIgnoreCase)
-            || path.Contains("/bot-monitor/heartbeat", StringComparison.OrdinalIgnoreCase))
+        if (AnonymousApiPaths.IsAnonymousBypass(httpRequestData.Url.AbsolutePath))
         {
             await next(context);
             return;
         }
 
-        var requirement = RouteEntitlementCatalog.ResolveRequirement(path);
+        var path = httpRequestData.Url.AbsolutePath;
+        var requirement = RouteEntitlementCatalog.ResolveRequirement(path, httpRequestData.Method);
         if (requirement is null)
         {
             var deny = httpRequestData.CreateCorsResponse(HttpStatusCode.Forbidden);
@@ -62,6 +60,12 @@ public sealed class FeatureRouteEntitlementMiddleware : IFunctionsWorkerMiddlewa
 
         if (string.Equals(requirement, RouteEntitlementCatalog.RequirementCloudMonitoring, StringComparison.Ordinal))
         {
+            if (RouteEntitlementCatalog.IsGetTenantList(path, httpRequestData.Method))
+            {
+                await next(context);
+                return;
+            }
+
             if (!context.GetFeatureEntitlements().CloudMonitoring)
             {
                 context.GetInvocationResult().Value = await EntitlementForbidAsync(

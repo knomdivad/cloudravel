@@ -48,8 +48,7 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         }
 
         var path = httpRequestData.Url.AbsolutePath.ToLowerInvariant();
-        if (path.Contains("/health") || path.Contains("/auth/login")
-            || path.Contains("/bot-monitor/heartbeat"))
+        if (AnonymousApiPaths.IsAnonymousBypass(httpRequestData.Url.AbsolutePath))
         {
             await next(context);
             return;

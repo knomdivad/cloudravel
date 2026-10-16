@@ -13,29 +13,62 @@ public sealed class RouteEntitlementCatalogTests
         Assert.NotEmpty(discovered);
 
         var unmapped = new List<string>();
-        foreach (var route in discovered)
+        foreach (var (method, route) in discovered)
         {
-            var requirement = RouteEntitlementCatalog.ResolveRequirement("/api/" + route);
+            var requirement = RouteEntitlementCatalog.ResolveRequirement("/api/" + route, method);
             if (requirement is null)
-                unmapped.Add(route);
+                unmapped.Add($"{method} {route}");
         }
 
         Assert.True(unmapped.Count == 0, "Unmapped routes: " + string.Join(", ", unmapped));
     }
 
-    internal static IEnumerable<string> DiscoverHttpRoutesFromSource()
+    [Fact]
+    public void Get_tenants_is_cloud_route()
+    {
+        var requirement = RouteEntitlementCatalog.ResolveRequirement("/api/tenants", "GET");
+        Assert.Equal(RouteEntitlementCatalog.RequirementCloudMonitoring, requirement);
+    }
+
+    [Fact]
+    public void Post_tenants_is_cloud_route()
+    {
+        var requirement = RouteEntitlementCatalog.ResolveRequirement("/api/tenants", "POST");
+        Assert.Equal(RouteEntitlementCatalog.RequirementCloudMonitoring, requirement);
+    }
+
+    private static readonly HashSet<string> HttpMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD",
+    };
+
+    internal static IEnumerable<(string Method, string Route)> DiscoverHttpRoutesFromSource()
     {
         var functionsDir = LocateFunctionsDirectory();
-        var pattern = new Regex(@"Route\s*=\s*""([^""]+)""", RegexOptions.Compiled);
+        var triggerPattern = new Regex(
+            @"HttpTrigger\((.*?)\)\]\s*HttpRequestData",
+            RegexOptions.Compiled | RegexOptions.Singleline);
+
         foreach (var file in Directory.EnumerateFiles(functionsDir, "*.cs", SearchOption.TopDirectoryOnly))
         {
-            foreach (Match match in pattern.Matches(File.ReadAllText(file)))
+            var text = File.ReadAllText(file);
+            foreach (Match match in triggerPattern.Matches(text))
             {
-                var route = match.Groups[1].Value.Trim().TrimStart('/').ToLowerInvariant();
+                var inner = match.Groups[1].Value;
+                var routeMatch = Regex.Match(inner, @"Route\s*=\s*""([^""]+)""");
+                if (!routeMatch.Success) continue;
+
+                var route = routeMatch.Groups[1].Value.Trim().TrimStart('/').ToLowerInvariant();
                 if (route.Contains("{*route}", StringComparison.Ordinal)
                     || route.Equals("bot-monitor/heartbeat", StringComparison.Ordinal))
                     continue;
-                yield return route;
+
+                foreach (Match methodMatch in Regex.Matches(inner, @"""([^""]+)"""))
+                {
+                    var token = methodMatch.Groups[1].Value;
+                    if (!HttpMethods.Contains(token)) continue;
+                    yield return (token.ToUpperInvariant(), route);
+                }
             }
         }
     }

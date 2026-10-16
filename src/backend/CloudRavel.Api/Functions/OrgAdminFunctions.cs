@@ -90,6 +90,8 @@ public sealed class OrgAdminFunctions
             return await BadRequest(req, "INVALID_ENTITLEMENTS", "At least one of entitlementBotMonitor or entitlementCloudMonitor must be true.");
 
         var entitlements = new FeatureEntitlements(body.EntitlementBotMonitor, body.EntitlementCloudMonitor);
+        var cap = await ValidateMemberEntitlementsAgainstOrgAsync(req, context, orgId, entitlements);
+        if (cap != null) return cap;
 
         // Password present ⇒ create a new local user. Otherwise attach an existing one by email.
         var isCreate = !string.IsNullOrWhiteSpace(body.Password);
@@ -184,6 +186,8 @@ public sealed class OrgAdminFunctions
 
         var grantedBy = context.GetUserId() ?? Guid.Empty;
         var entitlements = new FeatureEntitlements(body.EntitlementBotMonitor, body.EntitlementCloudMonitor);
+        var cap = await ValidateMemberEntitlementsAgainstOrgAsync(req, context, orgId, entitlements);
+        if (cap != null) return cap;
         await _userRepo.GrantTenantAccessAsync(userId, orgId, body.Role, grantedBy, entitlements);
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
@@ -278,6 +282,30 @@ public sealed class OrgAdminFunctions
 
     // ---- helpers ----
 
+    private async Task<HttpResponseData?> ValidateMemberEntitlementsAgainstOrgAsync(
+        HttpRequestData req,
+        FunctionContext context,
+        Guid orgId,
+        FeatureEntitlements requested)
+    {
+        if (context.IsSystemAdmin()) return null;
+
+        var orgEnt = await _orgRepo.GetFeatureEntitlementsAsync(orgId);
+        if (requested.BotMonitoring && !orgEnt.BotMonitoring)
+        {
+            return await Forbidden(req, "ENTITLEMENT_EXCEEDS_ORG",
+                "Bot monitoring is not licensed for this organization.");
+        }
+
+        if (requested.CloudMonitoring && !orgEnt.CloudMonitoring)
+        {
+            return await Forbidden(req, "ENTITLEMENT_EXCEEDS_ORG",
+                "Cloud monitoring is not licensed for this organization.");
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// org_admin gate + path/header consistency: the {orgId} in the route must
     /// equal the X-Tenant-Id the role was evaluated against, so the role check
@@ -323,6 +351,13 @@ public sealed class OrgAdminFunctions
     private static async Task<HttpResponseData> Conflict(HttpRequestData req, string code, string message)
     {
         var response = req.CreateCorsResponse(HttpStatusCode.Conflict);
+        await response.WriteAsJsonAsync(new ErrorResponse { Code = code, Message = message });
+        return response;
+    }
+
+    private static async Task<HttpResponseData> Forbidden(HttpRequestData req, string code, string message)
+    {
+        var response = req.CreateCorsResponse(HttpStatusCode.Forbidden);
         await response.WriteAsJsonAsync(new ErrorResponse { Code = code, Message = message });
         return response;
     }

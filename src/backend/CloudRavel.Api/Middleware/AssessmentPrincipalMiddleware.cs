@@ -57,12 +57,13 @@ public sealed class AssessmentPrincipalMiddleware : IFunctionsWorkerMiddleware
             return;
         }
 
-        var path = httpRequestData.Url.AbsolutePath.ToLowerInvariant();
-        if (path.Contains("/health") || path.Contains("/auth/login"))
+        if (AnonymousApiPaths.IsAnonymousBypass(httpRequestData.Url.AbsolutePath))
         {
             await next(context);
             return;
         }
+
+        var path = httpRequestData.Url.AbsolutePath.ToLowerInvariant();
 
         // Only service principals are subject to this middleware; human callers
         // (system_admin / member with their own grants) pass straight through.

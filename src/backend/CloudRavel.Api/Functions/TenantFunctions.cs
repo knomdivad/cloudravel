@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using CloudRavel.Api.Middleware;
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.DTOs;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
@@ -17,6 +18,7 @@ namespace CloudRavel.Api.Functions;
 public sealed class TenantFunctions
 {
     private readonly ITenantRepository _tenantRepo;
+    private readonly IUserRepository _userRepo;
     private readonly IInventoryRepository _inventoryRepo;
     private readonly IChangeRepository _changeRepo;
     private readonly IRecommendationRepository _recRepo;
@@ -27,6 +29,7 @@ public sealed class TenantFunctions
 
     public TenantFunctions(
         ITenantRepository tenantRepo,
+        IUserRepository userRepo,
         IInventoryRepository inventoryRepo,
         IChangeRepository changeRepo,
         IRecommendationRepository recRepo,
@@ -36,6 +39,7 @@ public sealed class TenantFunctions
         ISecretStore? secretStore = null)
     {
         _tenantRepo = tenantRepo;
+        _userRepo = userRepo;
         _inventoryRepo = inventoryRepo;
         _changeRepo = changeRepo;
         _recRepo = recRepo;
@@ -70,9 +74,28 @@ public sealed class TenantFunctions
         var summaries = new List<TenantSummaryDto>();
         foreach (var tenant in tenants)
         {
+            var includeCloudStats = context.IsSystemAdmin();
+            if (!includeCloudStats && userId.HasValue)
+            {
+                var entitlements = await _userRepo.GetFeatureEntitlementsAsync(userId.Value, tenant.TenantId)
+                                   ?? FeatureEntitlements.None;
+                includeCloudStats = entitlements.CloudMonitoring;
+            }
+
+            if (!includeCloudStats)
+            {
+                summaries.Add(new TenantSummaryDto
+                {
+                    TenantId = tenant.TenantId,
+                    DisplayName = tenant.DisplayName,
+                    AzureTenantId = tenant.AzureTenantId,
+                    Status = tenant.Status.ToString().ToLowerInvariant(),
+                });
+                continue;
+            }
+
             var resourceCount = await _inventoryRepo.GetResourceCountAsync(tenant.TenantId);
             var latestSnapshot = await _inventoryRepo.GetLatestSnapshotAsync(tenant.TenantId);
-            var recentChanges = await _changeRepo.GetRecentChangesAsync(tenant.TenantId, hours: 24, limit: 1);
             var changeCount = await _changeRepo.GetChangeCountAsync(tenant.TenantId,
                 DateTime.UtcNow.AddDays(-1), DateTime.UtcNow);
 

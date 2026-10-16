@@ -36,6 +36,7 @@ MIGRATIONS=(
   009-tenant-admin-role
   010-bot-monitor-bot-types
   011-entitlement-backfill-cloud-only
+  012-organization-feature-entitlements
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

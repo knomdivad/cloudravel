@@ -82,6 +82,12 @@ public sealed class UpdateOrgUserRoleRequest
     public bool EntitlementCloudMonitor { get; set; }
 }
 
+public sealed class UpdateOrgEntitlementsRequest
+{
+    public bool EntitlementBotMonitor { get; set; }
+    public bool EntitlementCloudMonitor { get; set; }
+}
+
 // --- Per-org SSO settings (org-admin only; stored, not yet enforced) ---
 
 public sealed class OrgSsoDto

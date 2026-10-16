@@ -1,3 +1,4 @@
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.Models;
 
 namespace CloudRavel.Core.Interfaces;
@@ -88,6 +89,8 @@ public interface IOrganizationRepository
 {
     Task<IReadOnlyList<Organization>> GetAllAsync();
     Task<Organization?> GetByIdAsync(Guid orgId);
+    Task<FeatureEntitlements> GetFeatureEntitlementsAsync(Guid orgId);
+    Task UpdateFeatureEntitlementsAsync(Guid orgId, FeatureEntitlements entitlements);
     Task<Organization> CreateAsync(Organization org);
     /// <summary>
     /// Soft-delete: status → suspended. Active cloud connections should be

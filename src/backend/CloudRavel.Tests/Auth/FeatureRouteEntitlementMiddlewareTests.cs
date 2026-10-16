@@ -29,6 +29,31 @@ public sealed class FeatureRouteEntitlementMiddlewareTests
         Assert.Equal(HttpStatusCode.Forbidden, response!.StatusCode);
     }
 
+    [Fact]
+    public async Task Get_tenants_allowed_without_cloud_entitlement()
+    {
+        var (ctx, _) = ContextFor("/api/tenants", cloud: false, bot: true);
+        var middleware = new FeatureRouteEntitlementMiddleware();
+        var nextCalled = false;
+        await middleware.Invoke(ctx, _ => { nextCalled = true; return Task.CompletedTask; });
+        Assert.True(nextCalled);
+    }
+
+    [Fact]
+    public async Task Post_tenants_blocked_without_cloud_entitlement()
+    {
+        var ctx = new TestFunctionContext();
+        ctx.Items["SystemRole"] = SystemRole.Member;
+        ctx.SetFeatureEntitlements(new FeatureEntitlements(true, false));
+        var req = new FakeHttpRequestData(ctx, "POST", tenantIdHeaders: [Guid.NewGuid().ToString()],
+            url: "http://localhost:7071/api/tenants");
+        ctx.SetRequest(req);
+        var nextCalled = false;
+        var middleware = new FeatureRouteEntitlementMiddleware();
+        await middleware.Invoke(ctx, _ => { nextCalled = true; return Task.CompletedTask; });
+        Assert.False(nextCalled);
+    }
+
     [Theory]
     [InlineData("/api/inventory/resources")]
     [InlineData("/api/bot-monitor/portal/bots")]

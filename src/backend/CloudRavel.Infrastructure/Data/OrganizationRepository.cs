@@ -1,3 +1,4 @@
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
 using Dapper;
@@ -14,7 +15,9 @@ public sealed class OrganizationRepository : IOrganizationRepository
 {
     private const string SelectColumns = @"
         SELECT org_id AS OrgId, name AS Name, environment AS Environment,
-               status AS Status, created_at AS CreatedAt, created_by AS CreatedBy
+               status AS Status, created_at AS CreatedAt, created_by AS CreatedBy,
+               entitlement_bot_monitor AS EntitlementBotMonitor,
+               entitlement_cloud_monitor AS EntitlementCloudMonitor
         FROM organizations";
 
     private readonly ITenantDbConnectionFactory _connectionFactory;
@@ -41,14 +44,40 @@ public sealed class OrganizationRepository : IOrganizationRepository
             SelectColumns + " WHERE org_id = @OrgId", new { OrgId = orgId });
     }
 
+    public async Task<FeatureEntitlements> GetFeatureEntitlementsAsync(Guid orgId)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var row = await conn.QuerySingleOrDefaultAsync(
+            @"SELECT entitlement_bot_monitor AS BotMonitor, entitlement_cloud_monitor AS CloudMonitor
+              FROM organizations WHERE org_id = @OrgId",
+            new { OrgId = orgId });
+        if (row is null)
+            return FeatureEntitlements.None;
+        return new FeatureEntitlements((bool)row.BotMonitor, (bool)row.CloudMonitor);
+    }
+
+    public async Task UpdateFeatureEntitlementsAsync(Guid orgId, FeatureEntitlements entitlements)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var affected = await conn.ExecuteAsync(
+            @"UPDATE organizations
+              SET entitlement_bot_monitor = @Bot, entitlement_cloud_monitor = @Cloud
+              WHERE org_id = @OrgId",
+            new { OrgId = orgId, Bot = entitlements.BotMonitoring, Cloud = entitlements.CloudMonitoring });
+        if (affected == 0)
+            throw new KeyNotFoundException($"Organization {orgId} not found.");
+    }
+
     public async Task<Organization> CreateAsync(Organization org)
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
         org.OrgId = org.OrgId == Guid.Empty ? Guid.NewGuid() : org.OrgId;
 
         const string sql = @"
-            INSERT INTO organizations (org_id, name, environment, status, created_by)
-            VALUES (@OrgId, @Name, @Environment, @Status, @CreatedBy)";
+            INSERT INTO organizations (org_id, name, environment, status, created_by,
+                                       entitlement_bot_monitor, entitlement_cloud_monitor)
+            VALUES (@OrgId, @Name, @Environment, @Status, @CreatedBy,
+                    @EntitlementBotMonitor, @EntitlementCloudMonitor)";
 
         await conn.ExecuteAsync(sql, new
         {
@@ -56,7 +85,9 @@ public sealed class OrganizationRepository : IOrganizationRepository
             org.Name,
             org.Environment,
             org.Status,
-            org.CreatedBy
+            org.CreatedBy,
+            org.EntitlementBotMonitor,
+            org.EntitlementCloudMonitor,
         });
 
         _logger.LogInformation("Created organization '{Name}' ({OrgId}) [{Environment}]",

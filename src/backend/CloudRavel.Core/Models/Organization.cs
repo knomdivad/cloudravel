@@ -35,6 +35,8 @@ public sealed class Organization
     public string Status { get; set; } = "active";
     public DateTime CreatedAt { get; set; }
     public string CreatedBy { get; set; } = "system";
+    public bool EntitlementBotMonitor { get; set; } = true;
+    public bool EntitlementCloudMonitor { get; set; } = true;
 }
 
 /// <summary>

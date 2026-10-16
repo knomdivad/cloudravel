@@ -1,7 +1,7 @@
 namespace CloudRavel.Api.Middleware;
 
 /// <summary>
-/// Maps every HTTP route template to a feature entitlement requirement. Unlisted routes are denied.
+/// Maps every HTTP route template and method to a feature entitlement requirement. Unlisted routes are denied.
 /// </summary>
 public static class RouteEntitlementCatalog
 {
@@ -10,101 +10,108 @@ public static class RouteEntitlementCatalog
     public const string RequirementBotMonitoring = "bot_monitoring";
 
     /// <summary>Every registered Functions route and its requirement (source of truth for audits).</summary>
-    public static IReadOnlyList<(string RouteTemplate, string Requirement)> AllRouteMappings { get; } =
-        new (string, string)[]
+    public static IReadOnlyList<(string RouteTemplate, string? HttpMethod, string Requirement)> AllRouteMappings { get; } =
+        new (string, string?, string)[]
         {
-            ("health", RequirementAuthenticated),
-            ("health/ready", RequirementAuthenticated),
-            ("auth/login", RequirementAuthenticated),
-            ("auth/me", RequirementAuthenticated),
+            ("health", null, RequirementAuthenticated),
+            ("health/ready", null, RequirementAuthenticated),
+            ("auth/login", null, RequirementAuthenticated),
+            ("auth/me", null, RequirementAuthenticated),
 
-            ("tenants", RequirementAuthenticated),
-            ("tenants/{tenantid:guid}", RequirementAuthenticated),
-            ("tenants/{tenantid:guid}/status", RequirementAuthenticated),
-            ("dashboard", RequirementCloudMonitoring),
+            ("tenants", "GET", RequirementCloudMonitoring),
+            ("tenants", "POST", RequirementCloudMonitoring),
+            ("tenants/{tenantid:guid}", "GET", RequirementAuthenticated),
+            ("tenants/{tenantid:guid}/status", "PATCH", RequirementCloudMonitoring),
+            ("dashboard", null, RequirementCloudMonitoring),
 
-            ("organizations", RequirementAuthenticated),
-            ("organizations/{orgid:guid}", RequirementAuthenticated),
-            ("organizations/{orgid:guid}/azure", RequirementAuthenticated),
-            ("organizations/{orgid:guid}/users", RequirementAuthenticated),
-            ("organizations/{orgid:guid}/users/{userid:guid}", RequirementAuthenticated),
-            ("organizations/{orgid:guid}/sso", RequirementAuthenticated),
+            ("organizations", "GET", RequirementAuthenticated),
+            ("organizations", "POST", RequirementAuthenticated),
+            ("organizations/{orgid:guid}", "DELETE", RequirementAuthenticated),
+            ("organizations/{orgid:guid}/azure", "POST", RequirementCloudMonitoring),
+            ("organizations/{orgid:guid}/users", null, RequirementAuthenticated),
+            ("organizations/{orgid:guid}/users/{userid:guid}", null, RequirementAuthenticated),
+            ("organizations/{orgid:guid}/sso", null, RequirementAuthenticated),
 
-            ("admin/users", RequirementAuthenticated),
-            ("admin/users/create", RequirementAuthenticated),
-            ("system/settings", RequirementAuthenticated),
-            ("system/users", RequirementAuthenticated),
-            ("system/users/{userid:guid}", RequirementAuthenticated),
-            ("system/ai/test", RequirementAuthenticated),
+            ("admin/users", null, RequirementAuthenticated),
+            ("admin/users/create", null, RequirementAuthenticated),
+            ("system/settings", null, RequirementAuthenticated),
+            ("system/users", null, RequirementAuthenticated),
+            ("system/users/{userid:guid}", null, RequirementAuthenticated),
+            ("system/ai/test", null, RequirementAuthenticated),
+            ("system/organizations/{orgid:guid}/entitlements", "PATCH", RequirementAuthenticated),
 
-            ("inventory/resources", RequirementCloudMonitoring),
-            ("inventory/resource/{*resourceid}", RequirementCloudMonitoring),
-            ("inventory/summary", RequirementCloudMonitoring),
-            ("inventory/snapshots", RequirementCloudMonitoring),
-            ("inventory/snapshots/trigger", RequirementCloudMonitoring),
+            ("inventory/resources", null, RequirementCloudMonitoring),
+            ("inventory/resource/{*resourceid}", null, RequirementCloudMonitoring),
+            ("inventory/summary", null, RequirementCloudMonitoring),
+            ("inventory/snapshots", null, RequirementCloudMonitoring),
+            ("inventory/snapshots/trigger", null, RequirementCloudMonitoring),
 
-            ("recommendations/advisor", RequirementCloudMonitoring),
-            ("recommendations/policy", RequirementCloudMonitoring),
-            ("recommendations/defender", RequirementCloudMonitoring),
-            ("recommendations/advisor/{recommendationid}/lifecycle", RequirementCloudMonitoring),
+            ("recommendations/advisor", null, RequirementCloudMonitoring),
+            ("recommendations/policy", null, RequirementCloudMonitoring),
+            ("recommendations/defender", null, RequirementCloudMonitoring),
+            ("recommendations/advisor/{recommendationid}/lifecycle", null, RequirementCloudMonitoring),
 
-            ("changes", RequirementCloudMonitoring),
-            ("changes/recent", RequirementCloudMonitoring),
-            ("changes/timeline", RequirementCloudMonitoring),
+            ("changes", null, RequirementCloudMonitoring),
+            ("changes/recent", null, RequirementCloudMonitoring),
+            ("changes/timeline", null, RequirementCloudMonitoring),
 
-            ("ai/query", RequirementCloudMonitoring),
-            ("ai/chat", RequirementCloudMonitoring),
+            ("ai/query", null, RequirementCloudMonitoring),
+            ("ai/chat", null, RequirementCloudMonitoring),
 
-            ("anomalies", RequirementCloudMonitoring),
-            ("anomalies/{id:long}/status", RequirementCloudMonitoring),
-            ("incidents", RequirementCloudMonitoring),
-            ("incidents/{id:long}", RequirementCloudMonitoring),
-            ("remediations", RequirementCloudMonitoring),
-            ("remediations/{id:long}/approve", RequirementCloudMonitoring),
-            ("remediations/{id:long}/reject", RequirementCloudMonitoring),
-            ("remediations/playbooks", RequirementCloudMonitoring),
+            ("anomalies", null, RequirementCloudMonitoring),
+            ("anomalies/{id:long}/status", null, RequirementCloudMonitoring),
+            ("incidents", null, RequirementCloudMonitoring),
+            ("incidents/{id:long}", null, RequirementCloudMonitoring),
+            ("remediations", null, RequirementCloudMonitoring),
+            ("remediations/{id:long}/approve", null, RequirementCloudMonitoring),
+            ("remediations/{id:long}/reject", null, RequirementCloudMonitoring),
+            ("remediations/playbooks", null, RequirementCloudMonitoring),
 
-            ("cloud-orgs", RequirementCloudMonitoring),
-            ("cloud-orgs/{orgid:guid}/status", RequirementCloudMonitoring),
-            ("cloud-orgs/{orgid:guid}", RequirementCloudMonitoring),
-            ("cloud-orgs/{orgid:guid}/credentials", RequirementCloudMonitoring),
-            ("cloud-orgs/governance/sync", RequirementCloudMonitoring),
-            ("cloud-accounts", RequirementCloudMonitoring),
-            ("cloud-accounts/{id:guid}/collect", RequirementCloudMonitoring),
-            ("cloud-accounts/{id:guid}", RequirementCloudMonitoring),
-            ("cloud-accounts/{id:guid}/credentials", RequirementCloudMonitoring),
-            ("operations/summary", RequirementCloudMonitoring),
+            ("cloud-orgs", null, RequirementCloudMonitoring),
+            ("cloud-orgs/{orgid:guid}/status", null, RequirementCloudMonitoring),
+            ("cloud-orgs/{orgid:guid}", null, RequirementCloudMonitoring),
+            ("cloud-orgs/{orgid:guid}/credentials", null, RequirementCloudMonitoring),
+            ("cloud-orgs/governance/sync", null, RequirementCloudMonitoring),
+            ("cloud-accounts", null, RequirementCloudMonitoring),
+            ("cloud-accounts/{id:guid}/collect", null, RequirementCloudMonitoring),
+            ("cloud-accounts/{id:guid}", null, RequirementCloudMonitoring),
+            ("cloud-accounts/{id:guid}/credentials", null, RequirementCloudMonitoring),
+            ("operations/summary", null, RequirementCloudMonitoring),
 
-            ("bot-monitor/portal/metrics", RequirementBotMonitoring),
-            ("bot-monitor/portal/bots", RequirementBotMonitoring),
-            ("bot-monitor/portal/bot-types", RequirementBotMonitoring),
-            ("bot-monitor/portal/bots/{botid:guid}", RequirementBotMonitoring),
-            ("bot-monitor/portal/magic-link", RequirementBotMonitoring),
+            ("bot-monitor/portal/metrics", null, RequirementBotMonitoring),
+            ("bot-monitor/portal/bots", null, RequirementBotMonitoring),
+            ("bot-monitor/portal/bot-types", null, RequirementBotMonitoring),
+            ("bot-monitor/portal/bots/{botid:guid}", null, RequirementBotMonitoring),
+            ("bot-monitor/portal/magic-link", null, RequirementBotMonitoring),
 
-            ("bot-monitor/ops/fleet", RequirementBotMonitoring),
-            ("bot-monitor/ops/fleet/tenants/{tenantid:guid}/users", RequirementBotMonitoring),
-            ("bot-monitor/ops/fleet/tenants/{tenantid:guid}/users/{userid:guid}/bots", RequirementBotMonitoring),
-            ("bot-monitor/ops/bots", RequirementBotMonitoring),
-            ("bot-monitor/ops/metrics", RequirementBotMonitoring),
+            ("bot-monitor/ops/fleet", null, RequirementBotMonitoring),
+            ("bot-monitor/ops/fleet/tenants/{tenantid:guid}/users", null, RequirementBotMonitoring),
+            ("bot-monitor/ops/fleet/tenants/{tenantid:guid}/users/{userid:guid}/bots", null, RequirementBotMonitoring),
+            ("bot-monitor/ops/bots", null, RequirementBotMonitoring),
+            ("bot-monitor/ops/metrics", null, RequirementBotMonitoring),
 
-            ("bot-monitor/registry/tenants", RequirementBotMonitoring),
-            ("bot-monitor/registry/bots", RequirementBotMonitoring),
-            ("bot-monitor/registry/bot-types", RequirementBotMonitoring),
-            ("bot-monitor/registry/bots/{botid:guid}/revoke", RequirementBotMonitoring),
-            ("bot-monitor/registry/bots/{botid:guid}/rotate", RequirementBotMonitoring),
+            ("bot-monitor/registry/tenants", null, RequirementBotMonitoring),
+            ("bot-monitor/registry/bots", null, RequirementBotMonitoring),
+            ("bot-monitor/registry/bot-types", null, RequirementBotMonitoring),
+            ("bot-monitor/registry/bots/{botid:guid}/revoke", null, RequirementBotMonitoring),
+            ("bot-monitor/registry/bots/{botid:guid}/rotate", null, RequirementBotMonitoring),
         };
 
-    public static string? ResolveRequirement(string absolutePath)
+    public static string? ResolveRequirement(string absolutePath, string httpMethod)
     {
         var path = NormalizePath(absolutePath);
         if (path.Length == 0) return null;
 
+        var method = httpMethod.Trim().ToUpperInvariant();
         string? best = null;
         var bestScore = -1;
-        foreach (var (template, requirement) in AllRouteMappings)
+        foreach (var (template, routeMethod, requirement) in AllRouteMappings)
         {
+            if (routeMethod != null
+                && !string.Equals(routeMethod, method, StringComparison.OrdinalIgnoreCase))
+                continue;
             if (!RouteMatches(template, path)) continue;
-            var score = template.Length;
+            var score = template.Length + (routeMethod != null ? 1000 : 0);
             if (score > bestScore)
             {
                 bestScore = score;
@@ -114,6 +121,10 @@ public static class RouteEntitlementCatalog
 
         return best;
     }
+
+    public static bool IsGetTenantList(string absolutePath, string httpMethod)
+        => httpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase)
+           && string.Equals(NormalizePath(absolutePath), "tenants", StringComparison.Ordinal);
 
     internal static string NormalizePath(string absolutePath)
     {
