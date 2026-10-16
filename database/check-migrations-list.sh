@@ -11,7 +11,7 @@ if [[ ! -f "${APPLY}" ]]; then
   exit 1
 fi
 
-# Utility / manual scripts — not applied by the migrator ledger.
+# Utility / manual scripts: not applied by the migrator ledger.
 EXCLUDED=(
   repair-org-workspace-shell
   reset-admin-password

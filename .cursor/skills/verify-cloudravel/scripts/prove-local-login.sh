@@ -93,7 +93,7 @@ export PATH="${DOTNET_ROOT}:${HOME}/.nvm/versions/node/v20.20.2/bin:${HOME}/.loc
 [[ -s "${HOME}/.nvm/nvm.sh" ]] && . "${HOME}/.nvm/nvm.sh" && nvm use 20 >/dev/null 2>&1 || true
 
 if ! command -v func >/dev/null 2>&1; then
-  echo "prove-local-login: func (Azure Functions Core Tools v4) required — run .cursor/install.sh" >&2
+  echo "prove-local-login: func (Azure Functions Core Tools v4) required: run .cursor/install.sh" >&2
   exit 1
 fi
 

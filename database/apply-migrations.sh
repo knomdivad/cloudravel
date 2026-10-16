@@ -22,7 +22,7 @@ DB_USER=${DB_USER:-sa}
 DB=cloudraveldb
 LEGACY_DB=aimdb
 # Schema/RBAC migrations only. The bootstrap local admin is seeded by
-# 001-schema. Demo data is NOT applied — load seed-demo-data.sql manually if
+# 001-schema. Demo data is NOT applied: load seed-demo-data.sql manually if
 # you want Contoso sample rows.
 MIGRATIONS=(
   001-schema
