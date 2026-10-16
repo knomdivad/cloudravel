@@ -415,16 +415,19 @@ export async function updateOrgSso(
 // Tenant API
 // ============================================================================
 
-export async function getTenants(): Promise<TenantSummary[]> {
-  const token = await getAccessToken();
-  const response = await fetch(`${API_BASE}/tenants`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'X-Tenant-Id': '00000000-0000-0000-0000-000000000000',
-    },
-  });
-  const data = await response.json();
-  return data.tenants ?? data.Tenants;
+const EMPTY_WORKSPACE = '00000000-0000-0000-0000-000000000000';
+
+function assertWorkspaceId(workspaceId: string, apiName: string): void {
+  if (!workspaceId || workspaceId === EMPTY_WORKSPACE) {
+    throw new Error(`${apiName} requires a selected workspace id (X-Tenant-Id).`);
+  }
+}
+
+export async function getTenants(workspaceId: string): Promise<TenantSummary[]> {
+  assertWorkspaceId(workspaceId, 'getTenants');
+  return apiCall<{ tenants?: TenantSummary[]; Tenants?: TenantSummary[] }>('/tenants', workspaceId).then(
+    (data) => data.tenants ?? data.Tenants ?? []
+  );
 }
 
 // ============================================================================
@@ -581,30 +584,23 @@ export async function askCustomerChat(
 // Tenant Management API
 // ============================================================================
 
-export async function onboardTenant(request: {
-  displayName: string;
-  azureTenantId: string;
-  onboardingMethod: string;
-  clientId?: string;
-  clientSecret?: string;
-  lighthouseDelegationId?: string;
-  subscriptionIds?: string[];
-}): Promise<{ tenantId: string }> {
-  const token = await getAccessToken();
-  const response = await fetch(`${API_BASE}/tenants`, {
+export async function onboardTenant(
+  workspaceId: string,
+  request: {
+    displayName: string;
+    azureTenantId: string;
+    onboardingMethod: string;
+    clientId?: string;
+    clientSecret?: string;
+    lighthouseDelegationId?: string;
+    subscriptionIds?: string[];
+  }
+): Promise<{ tenantId: string }> {
+  assertWorkspaceId(workspaceId, 'onboardTenant');
+  return apiCall<{ tenantId: string }>('/tenants', workspaceId, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'X-Tenant-Id': '00000000-0000-0000-0000-000000000000',
-    },
     body: JSON.stringify(request),
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: `HTTP ${response.status}: ${response.statusText}` }));
-    throw new Error(error.message || `HTTP ${response.status}: ${response.statusText}`);
-  }
-  return response.json();
 }
 
 export async function updateTenantStatus(

@@ -82,7 +82,7 @@ export default function CloudsPage() {
   const fetchAzureTenant = useCallback(async () => {
     if (!tenantId) { setAzureTenant(null); setLoading(false); return; }
     try {
-      const data = await api.getTenants();
+      const data = await api.getTenants(tenantId);
       // org_id === the RLS tenant_id, so this org's Azure tenant is the matching row.
       setAzureTenant((data || []).find(t => t.tenantId === tenantId) ?? null);
     } catch {

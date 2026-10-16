@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CloudRavel.Api.Middleware;
 using CloudRavel.Core.Auth;
 using CloudRavel.Core.DTOs;
@@ -86,15 +87,61 @@ public sealed class OrganizationFunctions
             else if (access.TryGetValue(o.OrgId, out var r)) callerRole = r;
             else continue; // no access → omit from this user's list
 
-            var dto = await BuildDto(o);
-            dto.CallerRole = callerRole;
+            OrganizationDto dto;
+            if (isSystemAdmin)
+            {
+                dto = await BuildDto(o);
+                dto.CallerRole = callerRole;
+            }
+            else if (userId.HasValue)
+            {
+                var memberEnt = await _userRepo.GetFeatureEntitlementsAsync(userId.Value, o.OrgId)
+                                ?? FeatureEntitlements.None;
+                var orgEnt = await _orgRepo.GetFeatureEntitlementsAsync(o.OrgId);
+                var effective = FeatureEntitlements.IntersectWithOrg(memberEnt, orgEnt);
+                if (effective.CloudMonitoring)
+                {
+                    dto = await BuildDto(o);
+                    dto.CallerRole = callerRole;
+                }
+                else
+                {
+                    dto = new OrganizationDto
+                    {
+                        OrgId = o.OrgId,
+                        Name = o.Name,
+                        Status = o.Status,
+                        CallerRole = callerRole,
+                    };
+                }
+            }
+            else
+            {
+                dto = new OrganizationDto
+                {
+                    OrgId = o.OrgId,
+                    Name = o.Name,
+                    Status = o.Status,
+                    CallerRole = callerRole,
+                };
+            }
+
             dtos.Add(dto);
         }
 
         var response = req.CreateCorsResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(new OrganizationListResponse { Organizations = dtos });
+        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        await response.WriteStringAsync(JsonSerializer.Serialize(
+            new OrganizationListResponse { Organizations = dtos },
+            OrganizationJsonOptions));
         return response;
     }
+
+    private static readonly JsonSerializerOptions OrganizationJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
 
     /// <summary>POST /api/organizations — create a new workspace (no clouds yet).</summary>
     [Function("CreateOrganization")]

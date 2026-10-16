@@ -114,15 +114,18 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         // Tenant header optional for listing endpoints and /auth/me.
         if (!httpRequestData.Headers.TryGetValues("X-Tenant-Id", out var tenantIdValues))
         {
-            if ((path.Contains("/tenants") || path.Contains("/organizations") || path.Contains("/auth/me")
-                 || path.Contains("/admin/") || path.Contains("/bot-monitor/registry")
+            if ((path.Contains("/organizations") || path.Contains("/auth/me")
+                 || path.Contains("/admin/") || path.Contains("/system/")
+                 || path.Contains("/bot-monitor/registry")
                  || path.Contains("/bot-monitor/ops/"))
                 && (httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase)
                     || path.Contains("/auth/me")
                     || path.Contains("/admin/")
+                    || path.Contains("/system/")
                     || path.Contains("/bot-monitor/registry")
                     || path.Contains("/bot-monitor/ops/")))
             {
+                await ApplyOrgAgnosticEntitlementsAsync(context, userId.Value, isSystemAdmin);
                 await next(context);
                 return;
             }
@@ -132,15 +135,17 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
                 && httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
                 && !path.Contains("/azure") && !path.Contains("/users") && !path.Contains("/sso"))
             {
+                await ApplyOrgAgnosticEntitlementsAsync(context, userId.Value, isSystemAdmin);
                 await next(context);
                 return;
             }
 
-            if (path.Contains("/admin/")
+            if ((path.Contains("/admin/") || path.Contains("/system/"))
                 && (httpRequestData.Method.Equals("PUT", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("PATCH", StringComparison.OrdinalIgnoreCase)))
             {
+                await ApplyOrgAgnosticEntitlementsAsync(context, userId.Value, isSystemAdmin);
                 await next(context);
                 return;
             }
@@ -149,6 +154,7 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
                 && (httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("PUT", StringComparison.OrdinalIgnoreCase)))
             {
+                await ApplyOrgAgnosticEntitlementsAsync(context, userId.Value, isSystemAdmin);
                 await next(context);
                 return;
             }
@@ -201,6 +207,34 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
 
         _logger.LogDebug("Request scoped to tenant {TenantId} for user {UserId}", tenantId, userId);
         await next(context);
+    }
+
+    /// <summary>
+    /// When no workspace header is present, union effective entitlements across all granted orgs
+    /// so feature gates still apply on org-agnostic routes (registry, ops, org list).
+    /// </summary>
+    private async Task ApplyOrgAgnosticEntitlementsAsync(FunctionContext context, Guid userId, bool isSystemAdmin)
+    {
+        if (isSystemAdmin)
+        {
+            context.SetFeatureEntitlements(FeatureEntitlements.Both);
+            return;
+        }
+
+        var accesses = await _userRepo.GetUserTenantAccessAsync(userId);
+        var bot = false;
+        var cloud = false;
+        foreach (var access in accesses)
+        {
+            var member = await _userRepo.GetFeatureEntitlementsAsync(userId, access.TenantId)
+                         ?? FeatureEntitlements.None;
+            var org = await _orgRepo.GetFeatureEntitlementsAsync(access.TenantId);
+            var effective = FeatureEntitlements.IntersectWithOrg(member, org);
+            bot |= effective.BotMonitoring;
+            cloud |= effective.CloudMonitoring;
+        }
+
+        context.SetFeatureEntitlements(new FeatureEntitlements(bot, cloud));
     }
 
     private async Task<User> ProvisionEntraUserAsync(Guid userId, ClaimsPrincipal? principal)

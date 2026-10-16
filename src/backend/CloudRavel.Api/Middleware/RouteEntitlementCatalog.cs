@@ -136,16 +136,22 @@ public static class RouteEntitlementCatalog
     {
         var templateParts = routeTemplate.ToLowerInvariant().Split('/', StringSplitOptions.RemoveEmptyEntries);
         var pathParts = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (templateParts.Length != pathParts.Length) return false;
 
         for (var i = 0; i < templateParts.Length; i++)
         {
             var t = templateParts[i];
-            if (t is "{*route}" or "{*resourceid}") return true;
-            if (t.StartsWith('{') && t.EndsWith('}')) continue;
-            if (!string.Equals(t, pathParts[i], StringComparison.Ordinal)) return false;
+            if (t is "{*route}" or "{*resourceid}")
+                return pathParts.Length >= i;
+            if (t.StartsWith('{') && t.EndsWith('}'))
+            {
+                if (i >= pathParts.Length) return false;
+                continue;
+            }
+
+            if (i >= pathParts.Length || !string.Equals(t, pathParts[i], StringComparison.Ordinal))
+                return false;
         }
 
-        return true;
+        return pathParts.Length == templateParts.Length;
     }
 }
