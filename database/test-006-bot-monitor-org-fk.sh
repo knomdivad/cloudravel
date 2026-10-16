@@ -30,7 +30,7 @@ run -b -Q "IF DB_ID(N'${DB}') IS NULL CREATE DATABASE [${DB}];"
 has_bot_monitor=$(run -d "$DB" -h -1 -W -b -Q "SET NOCOUNT ON; SELECT CASE WHEN OBJECT_ID(N'dbo.bot_monitor_tenants') IS NULL THEN 0 ELSE 1 END;" | tr -d '[:space:]')
 if [ "$has_bot_monitor" != "1" ]; then
   echo "Applying minimal BotMonitor schema for 006 test..."
-  run -d "$DB" -b -i "${SCRIPT_DIR}/test-006-bot-monitor-min-schema.sql"
+  cat "${SCRIPT_DIR}/test-006-bot-monitor-min-schema.sql" | run -d "$DB" -b
 fi
 
 ORPHAN='A0000000-0000-0000-0000-000000000099'
@@ -60,7 +60,7 @@ IF NOT EXISTS (SELECT 1 FROM bot_monitor_magic_links WHERE link_id = '${BOT}')
 
 for pass in 1 2; do
   echo "Running 006-bot-monitor-org-fk.sql (pass ${pass})..."
-  run -d "$DB" -b -i "${SCRIPT_DIR}/006-bot-monitor-org-fk.sql"
+  cat "${SCRIPT_DIR}/006-bot-monitor-org-fk.sql" | run -d "$DB" -b
 done
 
 orphan_count=$(run -d "$DB" -h -1 -W -b -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM bot_monitor_tenants WHERE tenant_id = '${ORPHAN}';" | tr -d '[:space:]')
