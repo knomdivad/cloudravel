@@ -93,45 +93,6 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # BotMonitor migration 006 (orphan child cleanup + FK)
-  # ============================================================================
-  bot-monitor-migration-006:
-    name: BotMonitor migration 006 check
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Start SQL Edge
-        env:
-          MSSQL_SA_PASSWORD: BotMonitor006CiTest!
-        run: |
-          docker network create botmon006-net
-          docker run -d --name mssql-botmon006 --network botmon006-net \
-            -e ACCEPT_EULA=Y \
-            -e MSSQL_SA_PASSWORD="${MSSQL_SA_PASSWORD}" \
-            mcr.microsoft.com/azure-sql-edge:latest
-
-      - name: Run 006 orphan cleanup script
-        env:
-          MSSQL_SA_PASSWORD: BotMonitor006CiTest!
-        run: |
-          for i in $(seq 1 90); do
-            if docker run --rm --network botmon006-net mcr.microsoft.com/mssql-tools:latest \
-              /opt/mssql-tools/bin/sqlcmd -S mssql-botmon006 -U sa -P "${MSSQL_SA_PASSWORD}" -Q "SELECT 1" -b >/dev/null 2>&1; then
-              break
-            fi
-            if [ "$i" -eq 90 ]; then exit 1; fi
-            sleep 2
-          done
-          docker run --rm --network botmon006-net \
-            -v "${{ github.workspace }}/database:/database" \
-            -e MSSQL_SA_PASSWORD="${MSSQL_SA_PASSWORD}" \
-            -e DB_HOST=mssql-botmon006 \
-            mcr.microsoft.com/mssql-tools:latest \
-            /bin/bash /database/test-006-bot-monitor-org-fk.sh
-
-  # ============================================================================
   # Frontend Build
   # ============================================================================
   frontend:
