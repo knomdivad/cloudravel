@@ -40,7 +40,13 @@ if (await customerCard.count()) {
   if (await userCard.count()) {
     await userCard.click();
     await page.waitForTimeout(1200);
-    await page.screenshot({ path: path.join(outDir, 'ops-user-drill.png'), fullPage: true });
+    await page.screenshot({ path: path.join(outDir, 'ops-user-badges.png'), fullPage: true });
+    const typeFilter = page.locator('#ops-bot-type-filter');
+    if (await typeFilter.count()) {
+      await typeFilter.selectOption({ label: 'Grokbot' });
+      await page.waitForTimeout(1200);
+      await page.screenshot({ path: path.join(outDir, 'ops-user-type-filter.png'), fullPage: true });
+    }
   }
 }
 
@@ -51,8 +57,13 @@ if (await orgSelect.count()) {
 
 await page.goto(`${webUrl}/portal/bots`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
-await page.screenshot({ path: path.join(outDir, 'portal-dashboard.png'), fullPage: true });
-await page.screenshot({ path: path.join(outDir, 'portal-tenant-admin.png'), fullPage: true });
+await page.screenshot({ path: path.join(outDir, 'portal-badges.png'), fullPage: true });
+const portalFilter = page.locator('#portal-bot-type-filter');
+if (await portalFilter.count()) {
+  await portalFilter.selectOption({ label: 'Grokbot' });
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: path.join(outDir, 'portal-type-filter.png'), fullPage: true });
+}
 
 fs.writeFileSync(
   path.join(outDir, 'proof.json'),
