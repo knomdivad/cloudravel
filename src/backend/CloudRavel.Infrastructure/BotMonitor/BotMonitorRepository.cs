@@ -53,7 +53,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     public async Task<BotMonitorBot?> GetBotByIdAsync(Guid tenantId, Guid botId, CancellationToken ct = default)
     {
         await using var conn = await _db.CreateConnectionAsync(tenantId);
-        var row = await conn.QuerySingleOrDefaultAsync<dynamic>(
+        var row = await conn.QuerySingleOrDefaultAsync<BotMonitorBotOnlyRow>(
             BotSelectSql + " AND bot_id = @botId AND tenant_id = @tenantId",
             new { botId, tenantId });
         return row is null ? null : MapBotOnly(row);
@@ -62,7 +62,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     public async Task<BotMonitorBot?> GetBotByTokenHashAsync(string tokenHash, CancellationToken ct = default)
     {
         await using var conn = await _db.CreateAdminConnectionAsync();
-        var row = await conn.QuerySingleOrDefaultAsync<dynamic>(
+        var row = await conn.QuerySingleOrDefaultAsync<BotMonitorBotOnlyRow>(
             BotSelectSql + " AND token_hash = @tokenHash AND revoked_at IS NULL",
             new { tokenHash });
         return row is null ? null : MapBotOnly(row);
@@ -549,20 +549,35 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         WHERE 1=1
         """;
 
-    private static BotMonitorBot MapBotOnly(dynamic r) => new()
+    private static BotMonitorBot MapBotOnly(BotMonitorBotOnlyRow r) => new()
     {
         BotId = r.BotId,
         TenantId = r.TenantId,
         DisplayName = r.DisplayName,
-        Platform = ParsePlatform((string)r.Platform),
+        Platform = ParsePlatform(r.Platform),
         TokenHash = r.TokenHash,
         HmacSecretEnc = r.HmacSecretEnc,
         CheckinIntervalMinutes = r.CheckinIntervalMinutes,
         CreatedAt = r.CreatedAt,
         RevokedAt = r.RevokedAt,
         OwnerUserId = r.OwnerUserId,
-        BotTypeKey = r.BotTypeKey is null ? "other_plugin" : (string)r.BotTypeKey,
+        BotTypeKey = string.IsNullOrWhiteSpace(r.BotTypeKey) ? "other_plugin" : r.BotTypeKey,
     };
+
+    private sealed class BotMonitorBotOnlyRow
+    {
+        public Guid BotId { get; set; }
+        public Guid TenantId { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public string Platform { get; set; } = string.Empty;
+        public string? BotTypeKey { get; set; }
+        public string TokenHash { get; set; } = string.Empty;
+        public string HmacSecretEnc { get; set; } = string.Empty;
+        public int CheckinIntervalMinutes { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? RevokedAt { get; set; }
+        public Guid? OwnerUserId { get; set; }
+    }
 
     private static (BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck) MapBotRow(BotMonitorBotListRow r)
     {

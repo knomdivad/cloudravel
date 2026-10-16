@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -47,12 +48,24 @@ public sealed class FlexibleEnumConverter<TEnum> : JsonConverter<TEnum>
                 break;
             case JsonTokenType.String:
                 var raw = reader.GetString();
-                if (raw != null && Enum.TryParse<TEnum>(raw, ignoreCase: true, out var parsed))
+                if (raw != null
+                    && !raw.Contains(',', StringComparison.Ordinal)
+                    && !IsPureIntegerString(raw)
+                    && Enum.TryParse<TEnum>(raw, ignoreCase: true, out var parsed)
+                    && Enum.IsDefined(typeof(TEnum), parsed))
                     return parsed;
                 break;
         }
 
         throw new JsonException($"Unable to convert JSON value to {typeof(TEnum).Name}.");
+    }
+
+    private static bool IsPureIntegerString(string raw)
+    {
+        var trimmed = raw.Trim();
+        return trimmed.Length > 0
+               && (int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+                   || long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out _));
     }
 
     public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options) =>

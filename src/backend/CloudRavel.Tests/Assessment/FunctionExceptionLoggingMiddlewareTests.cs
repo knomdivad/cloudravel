@@ -31,6 +31,39 @@ public sealed class FunctionExceptionLoggingMiddlewareTests
         Assert.True(string.IsNullOrEmpty(body));
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Client_error_responses_from_pipeline_pass_through_unchanged(HttpStatusCode status)
+    {
+        var capture = new CaptureLogger<FunctionExceptionLoggingMiddleware>();
+        var middleware = new FunctionExceptionLoggingMiddleware(capture);
+        var context = new TestFunctionContext();
+        context.SetRequest(new FakeHttpRequestData(context, "GET", tenantIdHeaders: null,
+            url: "http://localhost:7071/api/bot-monitor/ops/bots"));
+
+        const string bodyJson = """{"code":"TEST","message":"denied"}""";
+        FunctionExecutionDelegate next = ctx =>
+        {
+            var req = ctx.GetHttpRequestDataAsync().GetAwaiter().GetResult()!;
+            var response = req.CreateResponse(status);
+            response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+            response.WriteString(bodyJson);
+            context.SetInvocationResult(response);
+            return Task.CompletedTask;
+        };
+
+        await middleware.Invoke(context, next);
+
+        Assert.Empty(capture.Entries);
+        var response = context.GetInvocationResult();
+        Assert.NotNull(response);
+        Assert.Equal(status, response!.StatusCode);
+        var body = await response.ReadBodyAsync();
+        Assert.Equal(bodyJson, body);
+    }
+
     private sealed class CaptureLogger<T> : ILogger<T>
     {
         public List<(LogLevel Level, Exception? Exception, string Message)> Entries { get; } = new();
