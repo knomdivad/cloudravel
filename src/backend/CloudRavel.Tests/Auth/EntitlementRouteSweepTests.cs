@@ -44,7 +44,7 @@ public sealed class EntitlementRouteSweepTests
         foreach (var persona in Personas.All)
         {
             var host = new EntitlementMiddlewarePipelineHost(persona.Member, persona.Org, persona.SystemAdmin);
-            var (status, next) = await host.InvokeAsync(method, path);
+            var (status, next, _) = await host.InvokeAsync(method, path);
             var expectedAllow = EntitlementExpectations.MiddlewareAllows(requirement, persona);
 
             if (expectedAllow)
@@ -75,20 +75,27 @@ public sealed class EntitlementRouteSweepTests
             var path = HttpRouteDiscovery.MaterializePath(routeTemplate);
             var requirement = RouteEntitlementCatalog.ResolveRequirement(path, method)!;
             var cells = new List<string>();
-            string leak = "n/a";
+            var leakMarks = new List<string>();
             foreach (var persona in Personas.All)
             {
                 var host = new EntitlementMiddlewarePipelineHost(persona.Member, persona.Org, persona.SystemAdmin);
-                var (status, next) = await host.InvokeAsync(method, path);
+                var (status, next, _) = await host.InvokeAsync(method, path);
                 var allowed = EntitlementExpectations.MiddlewareAllows(requirement, persona);
                 var code = allowed ? (next ? "200" : "blocked") : (status?.ToString() ?? "403");
                 cells.Add(code);
 
-                if (allowed && next && routeTemplate == "organizations" && method == "GET" && persona.Name == "bot-only")
-                    leak = await OrganizationListLeakCheckAsync(persona);
+                var body = await EntitlementSweepResponseRunner.GetResponseBodyAsync(persona, method, routeTemplate);
+                var verdict = PersonaFieldLeakAssertions.Evaluate(persona.Name, body);
+                var label = persona.Name switch
+                {
+                    "bot-only" => "bot",
+                    "cloud-only" => "cloud",
+                    _ => "both",
+                };
+                leakMarks.Add($"{label}:{verdict}");
             }
 
-            rows.Add($"| `{routeTemplate}` | {method} | {requirement} | {cells[0]} | {cells[1]} | {cells[2]} | {leak} |");
+            rows.Add($"| `{routeTemplate}` | {method} | {requirement} | {cells[0]} | {cells[1]} | {cells[2]} | {string.Join("|", leakMarks)} |");
         }
 
         var repoRoot = LocateRepoRoot();
@@ -103,9 +110,29 @@ public sealed class EntitlementRouteSweepTests
     {
         var persona = Personas.CloudOnly;
         var host = new EntitlementMiddlewarePipelineHost(persona.Member, persona.Org);
-        var (status, next) = await host.InvokeAsync("GET", "/api/tenants", sendTenantHeader: false);
+        var (status, next, _) = await host.InvokeAsync("GET", "/api/tenants", sendTenantHeader: false);
         Assert.False(next);
         Assert.Equal(HttpStatusCode.BadRequest, status);
+    }
+
+    public static IEnumerable<object[]> AllPersonaRoutePairs()
+    {
+        foreach (var route in AllRoutes())
+        {
+            var method = (string)route[0];
+            var template = (string)route[1];
+            foreach (var persona in Personas.All)
+                yield return new object[] { persona.Name, method, template };
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(AllPersonaRoutePairs))]
+    public async Task Field_leak_sweep_all_routes_all_personas(string personaName, string method, string routeTemplate)
+    {
+        var persona = Personas.All.Single(p => p.Name == personaName);
+        var json = await EntitlementSweepResponseRunner.GetResponseBodyAsync(persona, method, routeTemplate);
+        PersonaFieldLeakAssertions.AssertNoLeak(personaName, routeTemplate, method, json);
     }
 
     [Fact]
@@ -151,40 +178,6 @@ public sealed class EntitlementRouteSweepTests
         Assert.Contains("callerRole", json, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async Task<string> OrganizationListLeakCheckAsync(Persona persona)
-    {
-        var orgId = EntitlementMiddlewarePipelineHost.WorkspaceId;
-        var orgRepo = Substitute.For<IOrganizationRepository>();
-        orgRepo.GetAllAsync().Returns(new List<Organization> { new() { OrgId = orgId, Name = "Acme", Status = "active" } });
-        orgRepo.GetFeatureEntitlementsAsync(orgId).Returns(persona.Org);
-
-        var userRepo = Substitute.For<IUserRepository>();
-        userRepo.GetUserTenantAccessAsync(EntitlementMiddlewarePipelineHost.UserId).Returns(new List<UserTenantAccess>
-        {
-            new() { UserId = EntitlementMiddlewarePipelineHost.UserId, TenantId = orgId, Role = OrgRole.ReadOnly },
-        });
-        userRepo.GetFeatureEntitlementsAsync(EntitlementMiddlewarePipelineHost.UserId, orgId).Returns(persona.Member);
-
-        var fn = new OrganizationFunctions(
-            orgRepo,
-            Substitute.For<ITenantRepository>(),
-            Substitute.For<ICloudOrgRepository>(),
-            Substitute.For<ICloudAccountRepository>(),
-            userRepo,
-            Substitute.For<IInventoryCollectionService>(),
-            Substitute.For<IPlatformInfo>(),
-            NullLogger<OrganizationFunctions>.Instance);
-
-        var ctx = new Assessment.TestFunctionContext();
-        ctx.Items["SystemRole"] = SystemRole.Member;
-        ctx.SetUser(EntitlementMiddlewarePipelineHost.UserId);
-        var req = new FakeHttpRequestData(ctx, "GET", null, "http://localhost:7071/api/organizations");
-        ctx.SetRequest(req);
-        var json = await (await fn.ListOrganizations(req, ctx)).ReadBodyAsync();
-        var leak = CloudFieldLeakDetector.ContainsCloudField(json) ? "cloud leak" : "ok";
-        return leak;
-    }
-
     private static string LocateRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -223,18 +216,4 @@ public sealed class EntitlementRouteSweepTests
         }
     }
 
-    internal static class CloudFieldLeakDetector
-    {
-        private static readonly string[] CloudTokens =
-        [
-            "resourceCount", "cloudCount", "azureConnected", "azureTenant", "inventory",
-            "recommendation", "subscription", "changes24h", "lastSnapshotAt",
-        ];
-
-        public static bool ContainsCloudField(string json)
-        {
-            var lower = json.ToLowerInvariant();
-            return CloudTokens.Any(t => lower.Contains(t, StringComparison.Ordinal));
-        }
-    }
 }

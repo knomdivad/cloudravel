@@ -15,24 +15,101 @@ namespace CloudRavel.Tests.Auth;
 internal sealed class EntitlementMiddlewarePipelineHost
 {
     public static readonly Guid WorkspaceId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    public static readonly Guid OrgBId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     public static readonly Guid UserId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
 
     private readonly IUserRepository _users;
     private readonly IOrganizationRepository _orgs;
     private readonly TenantContextMiddleware _tenant;
     private readonly FeatureRouteEntitlementMiddleware _entitlements;
-
     private readonly bool _systemAdmin;
+    private readonly Guid _userId;
 
     public EntitlementMiddlewarePipelineHost(
         FeatureEntitlements memberEntitlements,
         FeatureEntitlements orgEntitlements,
         bool systemAdmin = false)
+        : this(BuildDefaultUsers(memberEntitlements, orgEntitlements, systemAdmin),
+            BuildDefaultOrgs(orgEntitlements),
+            UserId,
+            WorkspaceId,
+            systemAdmin)
     {
+    }
+
+    public EntitlementMiddlewarePipelineHost(
+        IUserRepository users,
+        IOrganizationRepository orgs,
+        Guid userId,
+        bool systemAdmin)
+        : this(users, orgs, userId, WorkspaceId, systemAdmin)
+    {
+    }
+
+    public EntitlementMiddlewarePipelineHost(
+        IUserRepository users,
+        IOrganizationRepository orgs,
+        Guid userId,
+        Guid defaultWorkspaceId,
+        bool systemAdmin)
+    {
+        _users = users;
+        _orgs = orgs;
+        _userId = userId;
         _systemAdmin = systemAdmin;
-        _users = Substitute.For<IUserRepository>();
-        _orgs = Substitute.For<IOrganizationRepository>();
-        _users.GetByIdAsync(UserId).Returns(new User
+
+        _tenant = new TenantContextMiddleware(_users, _orgs, NullLogger<TenantContextMiddleware>.Instance);
+        _entitlements = new FeatureRouteEntitlementMiddleware();
+    }
+
+    public IUserRepository Users => _users;
+    public IOrganizationRepository Orgs => _orgs;
+
+    public async Task<(HttpStatusCode? Status, bool NextCalled, FunctionContext Context)> InvokeAsync(
+        string method,
+        string absolutePath,
+        Guid? workspaceId = null,
+        bool? sendTenantHeader = null,
+        Func<FunctionContext, Task<HttpResponseData?>>? handler = null)
+    {
+        var ctx = new TestFunctionContext();
+        ctx.Items["SystemRole"] = _systemAdmin ? SystemRole.SystemAdmin : SystemRole.Member;
+        ctx.SetUser(_userId);
+
+        var tenant = workspaceId ?? WorkspaceId;
+        var needsTenant = sendTenantHeader ?? RequiresTenantHeader(absolutePath, method);
+        string[]? tenantHeaders = needsTenant ? new[] { tenant.ToString() } : null;
+        var req = new FakeHttpRequestData(ctx, method, tenantHeaders, url: "http://localhost:7071" + absolutePath);
+        ctx.SetRequest(req);
+
+        var nextCalled = false;
+        await _tenant.Invoke(ctx, async _ =>
+        {
+            await _entitlements.Invoke(ctx, async _ =>
+            {
+                nextCalled = true;
+                if (handler != null)
+                {
+                    var response = await handler(ctx);
+                    if (response != null)
+                        ctx.SetInvocationResult(response);
+                }
+            });
+        });
+
+        if (ctx.GetInvocationResult() is HttpResponseData response)
+            return (response.StatusCode, nextCalled, ctx);
+
+        return (null, nextCalled, ctx);
+    }
+
+    private static IUserRepository BuildDefaultUsers(
+        FeatureEntitlements memberEntitlements,
+        FeatureEntitlements orgEntitlements,
+        bool systemAdmin)
+    {
+        var users = Substitute.For<IUserRepository>();
+        users.GetByIdAsync(UserId).Returns(new User
         {
             UserId = UserId,
             DisplayName = "Sweep User",
@@ -41,46 +118,20 @@ internal sealed class EntitlementMiddlewarePipelineHost
             IsActive = true,
             AuthProvider = "local",
         });
-        _users.GetTenantRoleAsync(UserId, WorkspaceId).Returns(OrgRole.ReadOnly);
-        _users.GetFeatureEntitlementsAsync(UserId, WorkspaceId).Returns(memberEntitlements);
-        _orgs.GetFeatureEntitlementsAsync(WorkspaceId).Returns(orgEntitlements);
-        _users.GetUserTenantAccessAsync(UserId).Returns(new List<UserTenantAccess>
+        users.GetTenantRoleAsync(UserId, WorkspaceId).Returns(OrgRole.ReadOnly);
+        users.GetFeatureEntitlementsAsync(UserId, WorkspaceId).Returns(memberEntitlements);
+        users.GetUserTenantAccessAsync(UserId).Returns(new List<UserTenantAccess>
         {
             new() { UserId = UserId, TenantId = WorkspaceId, Role = OrgRole.ReadOnly },
         });
-
-        _tenant = new TenantContextMiddleware(_users, _orgs, NullLogger<TenantContextMiddleware>.Instance);
-        _entitlements = new FeatureRouteEntitlementMiddleware();
+        return users;
     }
 
-    public async Task<(HttpStatusCode? Status, bool NextCalled)> InvokeAsync(
-        string method,
-        string absolutePath,
-        bool? sendTenantHeader = null)
+    private static IOrganizationRepository BuildDefaultOrgs(FeatureEntitlements orgEntitlements)
     {
-        var ctx = new TestFunctionContext();
-        ctx.Items["SystemRole"] = _systemAdmin ? SystemRole.SystemAdmin : SystemRole.Member;
-        ctx.SetUser(UserId);
-
-        var needsTenant = sendTenantHeader ?? RequiresTenantHeader(absolutePath, method);
-        string[]? tenantHeaders = needsTenant ? new[] { WorkspaceId.ToString() } : null;
-        var req = new FakeHttpRequestData(ctx, method, tenantHeaders, url: "http://localhost:7071" + absolutePath);
-        ctx.SetRequest(req);
-
-        var nextCalled = false;
-        await _tenant.Invoke(ctx, async _ =>
-        {
-            await _entitlements.Invoke(ctx, _ =>
-            {
-                nextCalled = true;
-                return Task.CompletedTask;
-            });
-        });
-
-        if (ctx.GetInvocationResult() is HttpResponseData response)
-            return (response.StatusCode, nextCalled);
-
-        return (null, nextCalled);
+        var orgs = Substitute.For<IOrganizationRepository>();
+        orgs.GetFeatureEntitlementsAsync(WorkspaceId).Returns(orgEntitlements);
+        return orgs;
     }
 
     private static bool RequiresTenantHeader(string absolutePath, string method)
@@ -98,12 +149,8 @@ internal sealed class EntitlementMiddlewarePipelineHost
         if (normalized.StartsWith("admin/", StringComparison.Ordinal)
             || normalized.StartsWith("system/", StringComparison.Ordinal))
             return false;
-        if (normalized.StartsWith("bot-monitor/registry", StringComparison.Ordinal)
-            && (method.Equals("POST", StringComparison.OrdinalIgnoreCase)
-                || method.Equals("PUT", StringComparison.OrdinalIgnoreCase)))
-            return false;
-        if (normalized.StartsWith("bot-monitor/ops/", StringComparison.Ordinal))
-            return false;
+        if (normalized.StartsWith("bot-monitor/", StringComparison.Ordinal))
+            return true;
 
         return true;
     }

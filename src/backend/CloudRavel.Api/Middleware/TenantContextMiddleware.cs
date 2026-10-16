@@ -111,50 +111,42 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         var isSystemAdmin = user.GlobalRole == "system_admin";
         context.Items["SystemRole"] = user.GlobalRole ?? "member";
 
-        // Tenant header optional for listing endpoints and /auth/me.
+        // Tenant header optional for org listing, auth profile, and global admin helpers.
         if (!httpRequestData.Headers.TryGetValues("X-Tenant-Id", out var tenantIdValues))
         {
-            if ((path.Contains("/organizations") || path.Contains("/auth/me")
-                 || path.Contains("/admin/") || path.Contains("/system/")
-                 || path.Contains("/bot-monitor/registry")
-                 || path.Contains("/bot-monitor/ops/"))
-                && (httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase)
-                    || path.Contains("/auth/me")
-                    || path.Contains("/admin/")
-                    || path.Contains("/system/")
-                    || path.Contains("/bot-monitor/registry")
-                    || path.Contains("/bot-monitor/ops/")))
+            if (isSystemAdmin
+                && (path.Contains("/bot-monitor/registry", StringComparison.Ordinal)
+                    || path.Contains("/bot-monitor/ops/", StringComparison.Ordinal)))
             {
-                await ApplyOrgAgnosticEntitlementsAsync(context, userId.Value, isSystemAdmin);
+                context.SetFeatureEntitlements(FeatureEntitlements.Both);
+                await next(context);
+                return;
+            }
+
+            if ((path.Contains("/organizations", StringComparison.Ordinal) || path.Contains("/auth/me", StringComparison.Ordinal)
+                 || path.Contains("/admin/", StringComparison.Ordinal) || path.Contains("/system/", StringComparison.Ordinal))
+                && (httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase)
+                    || path.Contains("/auth/me", StringComparison.Ordinal)))
+            {
                 await next(context);
                 return;
             }
 
             // POST /organizations (create) and some admin mutations don't need a workspace header.
-            if (path.Contains("/organizations")
+            if (path.Contains("/organizations", StringComparison.Ordinal)
                 && httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
-                && !path.Contains("/azure") && !path.Contains("/users") && !path.Contains("/sso"))
+                && !path.Contains("/azure", StringComparison.Ordinal) && !path.Contains("/users", StringComparison.Ordinal)
+                && !path.Contains("/sso", StringComparison.Ordinal))
             {
-                await ApplyOrgAgnosticEntitlementsAsync(context, userId.Value, isSystemAdmin);
                 await next(context);
                 return;
             }
 
-            if ((path.Contains("/admin/") || path.Contains("/system/"))
+            if ((path.Contains("/admin/", StringComparison.Ordinal) || path.Contains("/system/", StringComparison.Ordinal))
                 && (httpRequestData.Method.Equals("PUT", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("PATCH", StringComparison.OrdinalIgnoreCase)))
             {
-                await ApplyOrgAgnosticEntitlementsAsync(context, userId.Value, isSystemAdmin);
-                await next(context);
-                return;
-            }
-
-            if (path.Contains("/bot-monitor/registry")
-                && (httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
-                    || httpRequestData.Method.Equals("PUT", StringComparison.OrdinalIgnoreCase)))
-            {
-                await ApplyOrgAgnosticEntitlementsAsync(context, userId.Value, isSystemAdmin);
                 await next(context);
                 return;
             }
@@ -207,34 +199,6 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
 
         _logger.LogDebug("Request scoped to tenant {TenantId} for user {UserId}", tenantId, userId);
         await next(context);
-    }
-
-    /// <summary>
-    /// When no workspace header is present, union effective entitlements across all granted orgs
-    /// so feature gates still apply on org-agnostic routes (registry, ops, org list).
-    /// </summary>
-    private async Task ApplyOrgAgnosticEntitlementsAsync(FunctionContext context, Guid userId, bool isSystemAdmin)
-    {
-        if (isSystemAdmin)
-        {
-            context.SetFeatureEntitlements(FeatureEntitlements.Both);
-            return;
-        }
-
-        var accesses = await _userRepo.GetUserTenantAccessAsync(userId);
-        var bot = false;
-        var cloud = false;
-        foreach (var access in accesses)
-        {
-            var member = await _userRepo.GetFeatureEntitlementsAsync(userId, access.TenantId)
-                         ?? FeatureEntitlements.None;
-            var org = await _orgRepo.GetFeatureEntitlementsAsync(access.TenantId);
-            var effective = FeatureEntitlements.IntersectWithOrg(member, org);
-            bot |= effective.BotMonitoring;
-            cloud |= effective.CloudMonitoring;
-        }
-
-        context.SetFeatureEntitlements(new FeatureEntitlements(bot, cloud));
     }
 
     private async Task<User> ProvisionEntraUserAsync(Guid userId, ClaimsPrincipal? principal)
