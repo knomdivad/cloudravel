@@ -28,6 +28,8 @@ import type {
   SystemSettings,
   AdminUser,
   OrgSso,
+  BotMonitorListItem,
+  BotMonitorPortalBot,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/api';
@@ -110,6 +112,21 @@ async function apiCall<T>(
 // A sentinel used for workspace-registry endpoints (list/create) that aren't
 // scoped to any one workspace. A global admin passes the access check for it.
 const NO_WORKSPACE = '00000000-0000-0000-0000-000000000000';
+
+// ============================================================================
+// Bot monitor
+// ============================================================================
+
+export async function getOpsBots(tenantFilter?: string): Promise<BotMonitorListItem[]> {
+  const q = tenantFilter ? `?tenantId=${encodeURIComponent(tenantFilter)}` : '';
+  const data = await apiCall<{ bots: BotMonitorListItem[] }>(`/bot-monitor/ops/bots${q}`, NO_WORKSPACE);
+  return data.bots ?? [];
+}
+
+export async function getPortalBots(tenantId: string): Promise<BotMonitorPortalBot[]> {
+  const data = await apiCall<{ bots: BotMonitorPortalBot[] }>('/bot-monitor/portal/bots', tenantId);
+  return data.bots ?? [];
+}
 
 // ============================================================================
 // Organization API — the in-app workspace above clouds
@@ -814,4 +831,6 @@ export const api = {
   removeOrgUser,
   getOrgSso,
   updateOrgSso,
+  getOpsBots,
+  getPortalBots,
 };

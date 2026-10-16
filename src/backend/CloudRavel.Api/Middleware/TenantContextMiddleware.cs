@@ -47,7 +47,8 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         }
 
         var path = httpRequestData.Url.AbsolutePath.ToLowerInvariant();
-        if (path.Contains("/health") || path.Contains("/auth/login"))
+        if (path.Contains("/health") || path.Contains("/auth/login")
+            || path.Contains("/bot-monitor/heartbeat"))
         {
             await next(context);
             return;
@@ -109,10 +110,13 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
         if (!httpRequestData.Headers.TryGetValues("X-Tenant-Id", out var tenantIdValues))
         {
             if ((path.Contains("/tenants") || path.Contains("/organizations") || path.Contains("/auth/me")
-                 || path.Contains("/admin/"))
+                 || path.Contains("/admin/") || path.Contains("/bot-monitor/registry")
+                 || path.Contains("/bot-monitor/ops/"))
                 && (httpRequestData.Method.Equals("GET", StringComparison.OrdinalIgnoreCase)
                     || path.Contains("/auth/me")
-                    || path.Contains("/admin/")))
+                    || path.Contains("/admin/")
+                    || path.Contains("/bot-monitor/registry")
+                    || path.Contains("/bot-monitor/ops/")))
             {
                 await next(context);
                 return;
@@ -131,6 +135,14 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
                 && (httpRequestData.Method.Equals("PUT", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
                     || httpRequestData.Method.Equals("PATCH", StringComparison.OrdinalIgnoreCase)))
+            {
+                await next(context);
+                return;
+            }
+
+            if (path.Contains("/bot-monitor/registry")
+                && (httpRequestData.Method.Equals("POST", StringComparison.OrdinalIgnoreCase)
+                    || httpRequestData.Method.Equals("PUT", StringComparison.OrdinalIgnoreCase)))
             {
                 await next(context);
                 return;

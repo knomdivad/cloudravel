@@ -29,6 +29,7 @@ MIGRATIONS=(
   002-assessment
   003-drop-assessment
   004-assessment-principal
+  005-bot-monitor
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

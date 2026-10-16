@@ -47,7 +47,8 @@ public sealed class AuthEnforcementMiddleware : IFunctionsWorkerMiddleware
         }
 
         var path = httpRequestData.Url.AbsolutePath.ToLowerInvariant();
-        if (path.Contains("/health") || path.Contains("/auth/login"))
+        if (path.Contains("/health") || path.Contains("/auth/login")
+            || path.Contains("/bot-monitor/heartbeat"))
         {
             await next(context);
             return;

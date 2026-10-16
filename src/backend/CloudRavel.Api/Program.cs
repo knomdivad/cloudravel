@@ -9,6 +9,7 @@ using CloudRavel.Infrastructure;
 using CloudRavel.Infrastructure.AiOps;
 using CloudRavel.Infrastructure.Auth;
 using CloudRavel.Infrastructure.Azure;
+using CloudRavel.Infrastructure.BotMonitor;
 using CloudRavel.Infrastructure.Chat;
 using CloudRavel.Infrastructure.Data;
 using CloudRavel.Infrastructure.MultiCloud;
@@ -84,6 +85,9 @@ var host = new HostBuilder()
         services.AddScoped<ISystemSettingsRepository, SystemSettingsRepository>();
         services.AddScoped<ICloudOrgRepository, CloudOrgRepository>();
         services.AddScoped<ICloudAccountRepository, CloudAccountRepository>();
+        services.AddScoped<IBotMonitorRepository, BotMonitorRepository>();
+        services.AddSingleton<BotMonitorCredentialService>();
+        services.AddScoped<BotMonitorHeartbeatService>();
 
         // Azure services — Scoped to avoid singleton-depends-on-scoped issue
         services.AddScoped<IAzureCredentialFactory, AzureCredentialFactory>();

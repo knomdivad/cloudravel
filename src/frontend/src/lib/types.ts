@@ -407,3 +407,37 @@ export interface ApiError {
   message: string;
   traceId?: string;
 }
+
+// --- Bot monitor ---
+
+export interface BotMonitorListItem {
+  botId: string;
+  tenantId: string;
+  tenantName: string;
+  displayName: string;
+  platform: string;
+  presence: string;
+  lastSeenAt?: string | null;
+  lastError?: string | null;
+  lastKeepCheck?: string | null;
+  revokedAt?: string | null;
+}
+
+export interface BotMonitorWeeklyBucket {
+  isoYear: number;
+  isoWeek: number;
+  uptimePercent: number;
+  keepPassCount: number;
+  keepWarnCount: number;
+  keepFailCount: number;
+  errorCount: number;
+}
+
+export interface BotMonitorPortalBot {
+  botId: string;
+  displayName: string;
+  platform: string;
+  presence: string;
+  lastSeenAt?: string | null;
+  weeklyHistory: BotMonitorWeeklyBucket[];
+}
