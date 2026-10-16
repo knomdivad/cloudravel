@@ -55,7 +55,7 @@ public sealed class AuthEnforcementMiddleware : IFunctionsWorkerMiddleware
         var httpContext = context.GetHttpContext();
         if (httpContext == null)
         {
-            _logger.LogError("No HttpContext available for {Path} — AspNetCore integration misconfigured?",
+            _logger.LogError("No HttpContext available for {Path}; AspNetCore integration misconfigured?",
                 httpRequestData.Url.AbsolutePath);
             var errorResponse = httpRequestData.CreateCorsResponse(HttpStatusCode.InternalServerError);
             context.GetInvocationResult().Value = errorResponse;

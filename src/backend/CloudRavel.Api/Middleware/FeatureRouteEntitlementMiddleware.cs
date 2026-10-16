@@ -60,12 +60,6 @@ public sealed class FeatureRouteEntitlementMiddleware : IFunctionsWorkerMiddlewa
 
         if (string.Equals(requirement, RouteEntitlementCatalog.RequirementCloudMonitoring, StringComparison.Ordinal))
         {
-            if (RouteEntitlementCatalog.IsGetTenantList(path, httpRequestData.Method))
-            {
-                await next(context);
-                return;
-            }
-
             if (!context.GetFeatureEntitlements().CloudMonitoring)
             {
                 context.GetInvocationResult().Value = await EntitlementForbidAsync(

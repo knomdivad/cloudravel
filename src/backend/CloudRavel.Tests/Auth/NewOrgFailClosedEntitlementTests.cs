@@ -58,6 +58,7 @@ public sealed class NewOrgFailClosedEntitlementTests
         Assert.NotNull(captured);
         Assert.False(captured!.EntitlementBotMonitor);
         Assert.False(captured.EntitlementCloudMonitor);
+        Assert.True(captured.EntitlementBackfillV014);
         await userRepo.Received(1).GrantTenantAccessAsync(
             Arg.Any<Guid>(),
             Arg.Any<Guid>(),

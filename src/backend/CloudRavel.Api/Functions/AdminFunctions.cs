@@ -241,7 +241,7 @@ public sealed class AdminFunctions
         return response;
     }
 
-    /// <summary>PATCH /api/system/organizations/{orgId}/entitlements — raise org paid feature flags (system_admin only).</summary>
+    /// <summary>PATCH /api/system/organizations/{orgId}/entitlements: org paid feature flags (system_admin only).</summary>
     [Function("UpdateOrgEntitlements")]
     public async Task<HttpResponseData> UpdateOrgEntitlements(
         [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "system/organizations/{orgId:guid}/entitlements")] HttpRequestData req,
@@ -252,11 +252,8 @@ public sealed class AdminFunctions
         if (forbid != null) return forbid;
 
         var body = await req.ReadFromJsonAsync<UpdateOrgEntitlementsRequest>();
-        if (body == null || (!body.EntitlementBotMonitor && !body.EntitlementCloudMonitor))
-        {
-            return await BadRequest(req, "INVALID_ENTITLEMENTS",
-                "At least one of entitlementBotMonitor or entitlementCloudMonitor must be true.");
-        }
+        if (body == null)
+            return await BadRequest(req, "INVALID_REQUEST", "An entitlements body is required.");
 
         if (await _orgRepo.GetByIdAsync(orgId) == null)
             return await NotFound(req, $"Organization {orgId} not found.");

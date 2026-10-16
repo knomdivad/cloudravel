@@ -20,7 +20,7 @@ public static class RouteEntitlementCatalog
 
             ("tenants", "GET", RequirementCloudMonitoring),
             ("tenants", "POST", RequirementCloudMonitoring),
-            ("tenants/{tenantid:guid}", "GET", RequirementAuthenticated),
+            ("tenants/{tenantid:guid}", "GET", RequirementCloudMonitoring),
             ("tenants/{tenantid:guid}/status", "PATCH", RequirementCloudMonitoring),
             ("dashboard", null, RequirementCloudMonitoring),
 
@@ -121,10 +121,6 @@ public static class RouteEntitlementCatalog
 
         return best;
     }
-
-    public static bool IsGetTenantList(string absolutePath, string httpMethod)
-        => httpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase)
-           && string.Equals(NormalizePath(absolutePath), "tenants", StringComparison.Ordinal);
 
     internal static string NormalizePath(string absolutePath)
     {

@@ -17,7 +17,8 @@ public sealed class OrganizationRepository : IOrganizationRepository
         SELECT org_id AS OrgId, name AS Name, environment AS Environment,
                status AS Status, created_at AS CreatedAt, created_by AS CreatedBy,
                entitlement_bot_monitor AS EntitlementBotMonitor,
-               entitlement_cloud_monitor AS EntitlementCloudMonitor
+               entitlement_cloud_monitor AS EntitlementCloudMonitor,
+               entitlement_backfill_v014 AS EntitlementBackfillV014
         FROM organizations";
 
     private readonly ITenantDbConnectionFactory _connectionFactory;
@@ -75,9 +76,11 @@ public sealed class OrganizationRepository : IOrganizationRepository
 
         const string sql = @"
             INSERT INTO organizations (org_id, name, environment, status, created_by,
-                                       entitlement_bot_monitor, entitlement_cloud_monitor)
+                                       entitlement_bot_monitor, entitlement_cloud_monitor,
+                                       entitlement_backfill_v014)
             VALUES (@OrgId, @Name, @Environment, @Status, @CreatedBy,
-                    @EntitlementBotMonitor, @EntitlementCloudMonitor)";
+                    @EntitlementBotMonitor, @EntitlementCloudMonitor,
+                    @EntitlementBackfillV014)";
 
         await conn.ExecuteAsync(sql, new
         {
@@ -88,6 +91,7 @@ public sealed class OrganizationRepository : IOrganizationRepository
             org.CreatedBy,
             org.EntitlementBotMonitor,
             org.EntitlementCloudMonitor,
+            EntitlementBackfillV014 = org.EntitlementBackfillV014,
         });
 
         _logger.LogInformation("Created organization '{Name}' ({OrgId}) [{Environment}]",

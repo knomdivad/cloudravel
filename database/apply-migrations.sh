@@ -38,6 +38,7 @@ MIGRATIONS=(
   011-entitlement-backfill-cloud-only
   012-organization-feature-entitlements
   013-new-org-entitlements-fail-closed
+  014-org-entitlement-backfill-cloud-only
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

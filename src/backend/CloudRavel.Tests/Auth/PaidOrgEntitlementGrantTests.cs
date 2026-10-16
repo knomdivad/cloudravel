@@ -58,6 +58,55 @@ public sealed class PaidOrgEntitlementGrantTests
     }
 
     [Fact]
+    public async Task System_admin_can_license_bot_monitoring_for_organization()
+    {
+        var orgId = Guid.NewGuid();
+        var orgRepo = Substitute.For<IOrganizationRepository>();
+        orgRepo.GetByIdAsync(orgId).Returns(new Core.Models.Organization { OrgId = orgId, Name = "Acme" });
+
+        var fn = new AdminFunctions(
+            Substitute.For<ISystemSettingsRepository>(),
+            Substitute.For<IUserRepository>(),
+            orgRepo,
+            NullLogger<AdminFunctions>.Instance);
+
+        var ctx = new TestFunctionContext();
+        ctx.Items["SystemRole"] = SystemRole.SystemAdmin;
+        ctx.SetUser(Guid.NewGuid());
+        var req = JsonPost(ctx, $"http://localhost:7071/api/system/organizations/{orgId}/entitlements",
+            new { entitlementBotMonitor = true, entitlementCloudMonitor = false }, "PATCH");
+
+        var res = await fn.UpdateOrgEntitlements(req, orgId, ctx);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        await orgRepo.Received(1).UpdateFeatureEntitlementsAsync(orgId,
+            Arg.Is<FeatureEntitlements>(e => e.BotMonitoring && !e.CloudMonitoring));
+    }
+
+    [Fact]
+    public async Task System_admin_can_set_organization_fully_unlicensed()
+    {
+        var orgId = Guid.NewGuid();
+        var orgRepo = Substitute.For<IOrganizationRepository>();
+        orgRepo.GetByIdAsync(orgId).Returns(new Core.Models.Organization { OrgId = orgId, Name = "Acme" });
+
+        var fn = new AdminFunctions(
+            Substitute.For<ISystemSettingsRepository>(),
+            Substitute.For<IUserRepository>(),
+            orgRepo,
+            NullLogger<AdminFunctions>.Instance);
+
+        var ctx = new TestFunctionContext();
+        ctx.Items["SystemRole"] = SystemRole.SystemAdmin;
+        ctx.SetUser(Guid.NewGuid());
+        var req = JsonPost(ctx, $"http://localhost:7071/api/system/organizations/{orgId}/entitlements",
+            new { entitlementBotMonitor = false, entitlementCloudMonitor = false }, "PATCH");
+
+        var res = await fn.UpdateOrgEntitlements(req, orgId, ctx);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        await orgRepo.Received(1).UpdateFeatureEntitlementsAsync(orgId, FeatureEntitlements.None);
+    }
+
+    [Fact]
     public async Task System_admin_can_raise_organization_entitlements()
     {
         var orgId = Guid.NewGuid();

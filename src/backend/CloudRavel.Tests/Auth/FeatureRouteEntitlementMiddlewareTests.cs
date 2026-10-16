@@ -30,16 +30,6 @@ public sealed class FeatureRouteEntitlementMiddlewareTests
     }
 
     [Fact]
-    public async Task Get_tenants_allowed_without_cloud_entitlement()
-    {
-        var (ctx, _) = ContextFor("/api/tenants", cloud: false, bot: true);
-        var middleware = new FeatureRouteEntitlementMiddleware();
-        var nextCalled = false;
-        await middleware.Invoke(ctx, _ => { nextCalled = true; return Task.CompletedTask; });
-        Assert.True(nextCalled);
-    }
-
-    [Fact]
     public async Task Post_tenants_blocked_without_cloud_entitlement()
     {
         var ctx = new TestFunctionContext();

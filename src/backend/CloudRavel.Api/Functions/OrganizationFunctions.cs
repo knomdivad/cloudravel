@@ -127,6 +127,7 @@ public sealed class OrganizationFunctions
             CreatedBy = context.GetActor(),
             EntitlementBotMonitor = false,
             EntitlementCloudMonitor = false,
+            EntitlementBackfillV014 = true,
         });
 
         // user_tenant_access.tenant_id FK → tenants.tenant_id. Materialize a
