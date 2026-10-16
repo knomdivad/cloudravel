@@ -40,7 +40,23 @@ BEGIN
     UPDATE h SET reported_metrics = CASE b.display_name WHEN N'Keep probe alpha' THEN @MetricsAlpha ELSE @MetricsBeta END
     FROM bot_monitor_heartbeats h
     INNER JOIN bot_monitor_bots b ON b.bot_id = h.bot_id AND b.tenant_id = h.tenant_id
-    WHERE h.tenant_id = @TenantId AND h.reported_metrics IS NULL;
+    WHERE h.tenant_id = @TenantId AND (h.reported_metrics IS NULL OR LTRIM(RTRIM(h.reported_metrics)) = N'');
+    IF NOT EXISTS (SELECT 1 FROM bot_monitor_bots WHERE tenant_id = @TenantId)
+    BEGIN
+        DECLARE @AdminUserId2 UNIQUEIDENTIFIER = (SELECT TOP 1 user_id FROM users WHERE email = N'admin@local');
+        INSERT INTO bot_monitor_bots (bot_id, tenant_id, owner_user_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes)
+        VALUES
+            (@BotA, @TenantId, @AdminUserId2, N'Keep probe alpha', N'grok_bot', @TokenHashA, @EncSecret, 60),
+            (@BotB, @TenantId, @AdminUserId2, N'Mail collab beta', N'email', @TokenHashB, @EncSecret, 60);
+        INSERT INTO bot_monitor_heartbeats (bot_id, tenant_id, received_at, status, last_task, errors, keep_check, keep_check_detail, reported_metrics)
+        VALUES
+            (@BotA, @TenantId, DATEADD(MINUTE, -5, @Now), N'ok', N'Weekly Keep checks', NULL, N'pass', N'All probes succeeded', @MetricsAlpha),
+            (@BotB, @TenantId, DATEADD(HOUR, -3, @Now), N'error', N'Inbox polling', N'["timeout"]', N'warn', N'Retry scheduled', @MetricsBeta);
+        INSERT INTO bot_monitor_bot_state (bot_id, tenant_id, last_seen_at, last_status, last_error, last_error_at)
+        VALUES
+            (@BotA, @TenantId, DATEADD(MINUTE, -5, @Now), N'ok', NULL, NULL),
+            (@BotB, @TenantId, DATEADD(HOUR, -3, @Now), N'error', N'timeout', DATEADD(HOUR, -3, @Now));
+    END
     PRINT 'BotMonitor demo tenant already present (metrics patched if needed).';
     RETURN;
 END
