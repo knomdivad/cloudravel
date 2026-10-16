@@ -24,7 +24,7 @@ If checks fail, still post a heartbeat with `status` `error` so operators see th
 - `scripts/bot-monitor/send-heartbeat.sh` (bash, curl, openssl)
 - `scripts/bot-monitor/send-heartbeat.py` (Python 3)
 
-Both read token and secret from the environment, sign the payload, and POST once. They exit 0 on HTTP 200 and fail soft (exit 1 with a short message) on auth or network errors.
+Both read token and secret from the environment, sign the payload, and POST once. The bash helper decodes the base64 HMAC key into a private temp file, derives a hex key, and passes it to OpenSSL with `-mac HMAC -macopt hexkey:...` so the raw secret never appears on the command line. They exit 0 on HTTP 200 and fail soft (exit 1 with a short message) on auth or network errors.
 
 ## API contract
 
