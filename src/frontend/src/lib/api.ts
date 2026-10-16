@@ -29,7 +29,9 @@ import type {
   AdminUser,
   OrgSso,
   BotMonitorListItem,
-  BotMonitorPortalBot,
+  BotMonitorPortalDashboard,
+  BotMonitorFleetTenant,
+  BotMonitorFleetUser,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:7071/api';
@@ -123,9 +125,39 @@ export async function getOpsBots(tenantFilter?: string): Promise<BotMonitorListI
   return data.bots ?? [];
 }
 
-export async function getPortalBots(tenantId: string): Promise<BotMonitorPortalBot[]> {
-  const data = await apiCall<{ bots: BotMonitorPortalBot[] }>('/bot-monitor/portal/bots', tenantId);
+export async function getOpsFleet(): Promise<BotMonitorFleetTenant[]> {
+  const data = await apiCall<{ tenants: BotMonitorFleetTenant[] }>('/bot-monitor/ops/fleet', NO_WORKSPACE);
+  return data.tenants ?? [];
+}
+
+export async function getOpsFleetUsers(tenantId: string): Promise<BotMonitorFleetUser[]> {
+  const data = await apiCall<{ users: BotMonitorFleetUser[] }>(
+    `/bot-monitor/ops/fleet/tenants/${tenantId}/users`,
+    NO_WORKSPACE,
+  );
+  return data.users ?? [];
+}
+
+export async function getOpsFleetUserBots(tenantId: string, userId: string): Promise<BotMonitorListItem[]> {
+  const data = await apiCall<{ bots: BotMonitorListItem[] }>(
+    `/bot-monitor/ops/fleet/tenants/${tenantId}/users/${userId}/bots`,
+    NO_WORKSPACE,
+  );
   return data.bots ?? [];
+}
+
+export async function getPortalBotDashboard(tenantId: string): Promise<BotMonitorPortalDashboard> {
+  const data = await apiCall<{ dashboard: BotMonitorPortalDashboard }>('/bot-monitor/portal/bots', tenantId);
+  return (
+    data.dashboard ?? {
+      totalBots: 0,
+      onlineCount: 0,
+      staleCount: 0,
+      offlineCount: 0,
+      averageUptimePercent: 0,
+      bots: [],
+    }
+  );
 }
 
 // ============================================================================
@@ -832,5 +864,8 @@ export const api = {
   getOrgSso,
   updateOrgSso,
   getOpsBots,
-  getPortalBots,
+  getOpsFleet,
+  getOpsFleetUsers,
+  getOpsFleetUserBots,
+  getPortalBotDashboard,
 };

@@ -410,9 +410,29 @@ export interface ApiError {
 
 // --- Bot monitor ---
 
+export interface BotMonitorFleetTenant {
+  tenantId: string;
+  tenantName: string;
+  botCount: number;
+  onlineCount: number;
+}
+
+export interface BotMonitorFleetUser {
+  userId: string;
+  displayName: string;
+  email: string;
+  botCount: number;
+}
+
+export interface BotMonitorCheckinPoint {
+  receivedAt: string;
+  status: string;
+}
+
 export interface BotMonitorListItem {
   botId: string;
   tenantId: string;
+  ownerUserId?: string | null;
   tenantName: string;
   displayName: string;
   platform: string;
@@ -440,4 +460,14 @@ export interface BotMonitorPortalBot {
   presence: string;
   lastSeenAt?: string | null;
   weeklyHistory: BotMonitorWeeklyBucket[];
+  recentCheckins?: BotMonitorCheckinPoint[];
+}
+
+export interface BotMonitorPortalDashboard {
+  totalBots: number;
+  onlineCount: number;
+  staleCount: number;
+  offlineCount: number;
+  averageUptimePercent: number;
+  bots: BotMonitorPortalBot[];
 }

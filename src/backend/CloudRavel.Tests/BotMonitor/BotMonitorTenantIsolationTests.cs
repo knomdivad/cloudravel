@@ -1,4 +1,6 @@
 using CloudRavel.Api.Functions;
+using CloudRavel.Api.Middleware;
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.BotMonitor;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Infrastructure.BotMonitor;
@@ -23,6 +25,7 @@ public sealed class BotMonitorTenantIsolationTests
         var ctx = new TestFunctionContext();
         ctx.Items["TenantId"] = tenantA;
         ctx.Items["OrgRole"] = "read_only";
+        ctx.SetFeatureEntitlements(FeatureEntitlements.Both);
         ctx.SetUser(ctx.CredentialUserId);
         var req = new FakeHttpRequestData(
             ctx,
@@ -33,7 +36,7 @@ public sealed class BotMonitorTenantIsolationTests
 
         var res = await fn.PortalListBots(req, ctx);
         Assert.Equal(System.Net.HttpStatusCode.Forbidden, res.StatusCode);
-        await repo.DidNotReceive().ListBotsForTenantAsync(tenantB);
+        await repo.DidNotReceive().ListBotsForTenantAsync(tenantB, Arg.Any<Guid?>());
     }
 
     [Fact]
@@ -49,6 +52,7 @@ public sealed class BotMonitorTenantIsolationTests
         var ctx = new TestFunctionContext();
         ctx.Items["TenantId"] = tenantA;
         ctx.Items["OrgRole"] = "read_only";
+        ctx.SetFeatureEntitlements(FeatureEntitlements.Both);
         ctx.SetUser(ctx.CredentialUserId);
         var req = new FakeHttpRequestData(
             ctx,

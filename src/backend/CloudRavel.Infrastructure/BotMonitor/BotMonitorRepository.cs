@@ -69,22 +69,24 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     }
 
     public async Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantAsync(
-        Guid tenantId, CancellationToken ct = default)
+        Guid tenantId, Guid? ownerUserId = null, CancellationToken ct = default)
     {
         await using var conn = await _db.CreateConnectionAsync(tenantId);
         const string sql = """
             SELECT b.bot_id AS BotId, b.tenant_id AS TenantId, b.display_name AS DisplayName,
                    b.platform AS Platform, b.token_hash AS TokenHash, b.hmac_secret_enc AS HmacSecretEnc,
                    b.checkin_interval_minutes AS CheckinIntervalMinutes, b.created_at AS CreatedAt, b.revoked_at AS RevokedAt,
+                   b.owner_user_id AS OwnerUserId,
                    s.last_seen_at AS LastSeenAt, s.last_status AS LastStatus, s.last_error AS LastError, s.last_error_at AS LastErrorAt,
                    (SELECT TOP 1 keep_check FROM bot_monitor_heartbeats h
                     WHERE h.bot_id = b.bot_id AND h.tenant_id = b.tenant_id ORDER BY received_at DESC) AS LastKeepCheck
             FROM bot_monitor_bots b
             LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id AND s.tenant_id = b.tenant_id
             WHERE b.tenant_id = @tenantId
+              AND (@ownerUserId IS NULL OR b.owner_user_id = @ownerUserId)
             ORDER BY b.display_name
             """;
-        var rows = await conn.QueryAsync<dynamic>(sql, new { tenantId });
+        var rows = await conn.QueryAsync<dynamic>(sql, new { tenantId, ownerUserId });
         return rows.Select(MapBotRow).ToList();
     }
 
@@ -124,8 +126,8 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         await using var conn = await _db.CreateConnectionAsync(bot.TenantId);
         await conn.ExecuteAsync("""
             INSERT INTO bot_monitor_bots
-                (bot_id, tenant_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes)
-            VALUES (@BotId, @TenantId, @DisplayName, @PlatformDb, @TokenHash, @HmacSecretEnc, @CheckinIntervalMinutes)
+                (bot_id, tenant_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes, owner_user_id)
+            VALUES (@BotId, @TenantId, @DisplayName, @PlatformDb, @TokenHash, @HmacSecretEnc, @CheckinIntervalMinutes, @OwnerUserId)
             """, new
         {
             bot.BotId,
@@ -135,6 +137,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
             bot.TokenHash,
             bot.HmacSecretEnc,
             bot.CheckinIntervalMinutes,
+            bot.OwnerUserId,
         });
         return bot;
     }
@@ -308,10 +311,74 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         return row.TenantId;
     }
 
+    public async Task<IReadOnlyList<(DateTime ReceivedAt, string Status)>> GetRecentCheckinsAsync(
+        Guid tenantId, Guid botId, int hours, DateTime nowUtc, CancellationToken ct = default)
+    {
+        await using var conn = await _db.CreateConnectionAsync(tenantId);
+        var since = nowUtc.AddHours(-Math.Clamp(hours, 1, 168));
+        var rows = await conn.QueryAsync<(DateTime ReceivedAt, string Status)>(
+            "SELECT received_at AS ReceivedAt, status AS Status FROM bot_monitor_heartbeats "
+            + "WHERE tenant_id = @tenantId AND bot_id = @botId AND received_at >= @since ORDER BY received_at ASC",
+            new { tenantId, botId, since });
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<(Guid TenantId, string TenantName, int BotCount, int OnlineCount)>> ListFleetTenantSummariesAsync(
+        DateTime nowUtc, CancellationToken ct = default)
+    {
+        await using var conn = await _db.CreateAdminConnectionAsync();
+        var rows = await conn.QueryAsync<(Guid TenantId, string TenantName, int BotCount, int CheckinMinutes, DateTime? LastSeen)>(
+            """
+            SELECT t.tenant_id AS TenantId, t.name AS TenantName,
+                   COUNT(b.bot_id) AS BotCount,
+                   MAX(b.checkin_interval_minutes) AS CheckinMinutes,
+                   MAX(s.last_seen_at) AS LastSeen
+            FROM bot_monitor_tenants t
+            LEFT JOIN bot_monitor_bots b ON b.tenant_id = t.tenant_id AND b.revoked_at IS NULL
+            LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id
+            GROUP BY t.tenant_id, t.name
+            ORDER BY t.name
+            """);
+        return rows.Select(r =>
+        {
+            var online = 0;
+            if (r.LastSeen.HasValue && r.BotCount > 0)
+            {
+                var presence = BotMonitorStaleEvaluator.Evaluate(r.LastSeen, r.CheckinMinutes > 0 ? r.CheckinMinutes : 60, nowUtc);
+                if (presence == BotMonitorPresence.Online) online = r.BotCount;
+            }
+            return (r.TenantId, r.TenantName, r.BotCount, online);
+        }).ToList();
+    }
+
+    public async Task<IReadOnlyList<(Guid UserId, string DisplayName, string Email, int BotCount)>> ListFleetUsersForTenantAsync(
+        Guid tenantId, CancellationToken ct = default)
+    {
+        await using var conn = await _db.CreateAdminConnectionAsync();
+        var rows = await conn.QueryAsync<(Guid UserId, string DisplayName, string Email, int BotCount)>(
+            """
+            SELECT u.user_id AS UserId, u.display_name AS DisplayName, u.email AS Email,
+                   COUNT(b.bot_id) AS BotCount
+            FROM users u
+            INNER JOIN user_tenant_access uta ON uta.user_id = u.user_id AND uta.tenant_id = @tenantId
+            LEFT JOIN bot_monitor_bots b ON b.tenant_id = @tenantId AND b.owner_user_id = u.user_id AND b.revoked_at IS NULL
+            WHERE uta.entitlement_bot_monitor = 1
+            GROUP BY u.user_id, u.display_name, u.email
+            ORDER BY u.display_name
+            """,
+            new { tenantId });
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantUserAsync(
+        Guid tenantId, Guid userId, CancellationToken ct = default)
+        => await ListBotsForTenantAsync(tenantId, userId, ct);
+
     private const string BotSelectSql = """
         SELECT bot_id AS BotId, tenant_id AS TenantId, display_name AS DisplayName,
                platform AS Platform, token_hash AS TokenHash, hmac_secret_enc AS HmacSecretEnc,
-               checkin_interval_minutes AS CheckinIntervalMinutes, created_at AS CreatedAt, revoked_at AS RevokedAt
+               checkin_interval_minutes AS CheckinIntervalMinutes, created_at AS CreatedAt, revoked_at AS RevokedAt,
+               owner_user_id AS OwnerUserId
         FROM bot_monitor_bots
         WHERE 1=1
         """;
@@ -327,6 +394,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         CheckinIntervalMinutes = r.CheckinIntervalMinutes,
         CreatedAt = r.CreatedAt,
         RevokedAt = r.RevokedAt,
+        OwnerUserId = r.OwnerUserId,
     };
 
     private static (BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck) MapBotRow(dynamic r)
@@ -342,6 +410,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
             CheckinIntervalMinutes = r.CheckinIntervalMinutes,
             CreatedAt = r.CreatedAt,
             RevokedAt = r.RevokedAt,
+            OwnerUserId = r.OwnerUserId,
         };
         BotMonitorBotState? state = r.LastSeenAt is null && r.LastStatus is null
             ? null

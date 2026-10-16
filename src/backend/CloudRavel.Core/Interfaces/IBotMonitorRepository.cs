@@ -12,7 +12,7 @@ public interface IBotMonitorRepository
     Task<BotMonitorBot?> GetBotByIdAsync(Guid tenantId, Guid botId, CancellationToken ct = default);
     Task<BotMonitorBot?> GetBotByTokenHashAsync(string tokenHash, CancellationToken ct = default);
     Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantAsync(
-        Guid tenantId, CancellationToken ct = default);
+        Guid tenantId, Guid? ownerUserId = null, CancellationToken ct = default);
     Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>> ListAllBotsAsync(
         Guid? filterTenantId, CancellationToken ct = default);
 
@@ -32,6 +32,18 @@ public interface IBotMonitorRepository
 
     Task<IReadOnlyList<BotMonitorWeeklyBucket>> GetWeeklyHistoryAsync(
         Guid tenantId, Guid botId, int weeks, DateTime nowUtc, CancellationToken ct = default);
+
+    Task<IReadOnlyList<(DateTime ReceivedAt, string Status)>> GetRecentCheckinsAsync(
+        Guid tenantId, Guid botId, int hours, DateTime nowUtc, CancellationToken ct = default);
+
+    Task<IReadOnlyList<(Guid TenantId, string TenantName, int BotCount, int OnlineCount)>> ListFleetTenantSummariesAsync(
+        DateTime nowUtc, CancellationToken ct = default);
+
+    Task<IReadOnlyList<(Guid UserId, string DisplayName, string Email, int BotCount)>> ListFleetUsersForTenantAsync(
+        Guid tenantId, CancellationToken ct = default);
+
+    Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantUserAsync(
+        Guid tenantId, Guid userId, CancellationToken ct = default);
 
     Task<string?> StoreMagicLinkAsync(Guid tenantId, string tokenHash, DateTime expiresAtUtc, CancellationToken ct = default);
     Task<Guid?> RedeemMagicLinkAsync(string tokenHash, DateTime nowUtc, CancellationToken ct = default);

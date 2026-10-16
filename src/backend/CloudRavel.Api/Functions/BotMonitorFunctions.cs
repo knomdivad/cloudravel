@@ -75,6 +75,74 @@ public sealed class BotMonitorFunctions
         };
     }
 
+    [Function("BotMonitorOpsFleet")]
+    public async Task<HttpResponseData> OpsFleet(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "bot-monitor/ops/fleet")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
+
+        var now = _clock();
+        var rows = await _repo.ListFleetTenantSummariesAsync(now);
+        var tenants = rows.Select(r => new BotMonitorFleetTenantDto
+        {
+            TenantId = r.TenantId,
+            TenantName = r.TenantName,
+            BotCount = r.BotCount,
+            OnlineCount = r.OnlineCount,
+        }).ToList();
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new { tenants });
+    }
+
+    [Function("BotMonitorOpsFleetUsers")]
+    public async Task<HttpResponseData> OpsFleetUsers(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "bot-monitor/ops/fleet/tenants/{tenantId:guid}/users")] HttpRequestData req,
+        string tenantId,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
+
+        if (!Guid.TryParse(tenantId, out var tenantGuid) || tenantGuid == Guid.Empty)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_ID", "Invalid tenant id."));
+
+        if (await _repo.GetTenantAsync(tenantGuid) is null)
+            return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("NOT_FOUND", "Tenant not found."));
+
+        var rows = await _repo.ListFleetUsersForTenantAsync(tenantGuid);
+        var users = rows.Select(r => new BotMonitorFleetUserDto
+        {
+            UserId = r.UserId,
+            DisplayName = r.DisplayName,
+            Email = r.Email,
+            BotCount = r.BotCount,
+        }).ToList();
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new { tenantId = tenantGuid, users });
+    }
+
+    [Function("BotMonitorOpsFleetUserBots")]
+    public async Task<HttpResponseData> OpsFleetUserBots(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "bot-monitor/ops/fleet/tenants/{tenantId:guid}/users/{userId:guid}/bots")] HttpRequestData req,
+        string tenantId,
+        string userId,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
+
+        if (!Guid.TryParse(tenantId, out var tenantGuid) || !Guid.TryParse(userId, out var userGuid))
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_ID", "Invalid tenant or user id."));
+
+        if (await _repo.GetTenantAsync(tenantGuid) is null)
+            return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("NOT_FOUND", "Tenant not found."));
+
+        var now = _clock();
+        var rows = await _repo.ListBotsForTenantUserAsync(tenantGuid, userGuid);
+        var bots = rows.Select(r => ToListItem(r.Bot, r.State, r.LastKeepCheck, string.Empty, now)).ToList();
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new { tenantId = tenantGuid, userId = userGuid, bots });
+    }
+
     [Function("BotMonitorOpsBots")]
     public async Task<HttpResponseData> OpsListBots(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "bot-monitor/ops/bots")] HttpRequestData req,
@@ -101,6 +169,8 @@ public sealed class BotMonitorFunctions
         if (auth != null) return auth;
         var forbid = await context.RequireOrgRoleAsync(req, OrgRole.ReadOnly);
         if (forbid != null) return forbid;
+        var botGate = await context.RequireBotMonitoringEntitlementAsync(req);
+        if (botGate != null) return botGate;
 
         var tenantId = context.GetTenantId();
         if (tenantId == Guid.Empty)
@@ -110,18 +180,33 @@ public sealed class BotMonitorFunctions
         if (forged.HasValue && forged != tenantId)
             return await WriteJsonAsync(req, HttpStatusCode.Forbidden, Error("TENANT_FORBIDDEN", "Tenant cannot be overridden on this route."));
 
+        var userId = context.GetUserId();
+        if (!userId.HasValue)
+            return await WriteJsonAsync(req, HttpStatusCode.Unauthorized, Error("UNAUTHENTICATED", "User identity is required."));
+
         var now = _clock();
-        var rows = await _repo.ListBotsForTenantAsync(tenantId);
+        var rows = await _repo.ListBotsForTenantAsync(tenantId, userId.Value);
         var bots = new List<BotMonitorPortalBotDto>();
+        var online = 0;
+        var stale = 0;
+        var offline = 0;
+        var uptimeSum = 0.0;
         foreach (var row in rows)
         {
             var history = await _repo.GetWeeklyHistoryAsync(tenantId, row.Bot.BotId, 8, now);
+            var checkins = await _repo.GetRecentCheckinsAsync(tenantId, row.Bot.BotId, 48, now);
+            var presence = BotMonitorStaleEvaluator.Evaluate(row.State?.LastSeenAt, row.Bot.CheckinIntervalMinutes, now);
+            if (presence == BotMonitorPresence.Online) online++;
+            else if (presence == BotMonitorPresence.Stale) stale++;
+            else offline++;
+            if (history.Count > 0) uptimeSum += history.Average(h => h.UptimePercent);
+
             bots.Add(new BotMonitorPortalBotDto
             {
                 BotId = row.Bot.BotId,
                 DisplayName = row.Bot.DisplayName,
                 Platform = row.Bot.Platform.ToString(),
-                Presence = BotMonitorStaleEvaluator.Evaluate(row.State?.LastSeenAt, row.Bot.CheckinIntervalMinutes, now).ToString(),
+                Presence = presence.ToString(),
                 LastSeenAt = row.State?.LastSeenAt,
                 WeeklyHistory = history.Select(h => new BotMonitorWeeklyBucketDto
                 {
@@ -133,10 +218,25 @@ public sealed class BotMonitorFunctions
                     KeepFailCount = h.KeepFailCount,
                     ErrorCount = h.ErrorCount,
                 }).ToList(),
+                RecentCheckins = checkins.Select(c => new BotMonitorCheckinPointDto
+                {
+                    ReceivedAt = c.ReceivedAt,
+                    Status = c.Status,
+                }).ToList(),
             });
         }
 
-        return await WriteJsonAsync(req, HttpStatusCode.OK, new { bots });
+        var dashboard = new BotMonitorPortalDashboardDto
+        {
+            TotalBots = bots.Count,
+            OnlineCount = online,
+            StaleCount = stale,
+            OfflineCount = offline,
+            AverageUptimePercent = bots.Count == 0 ? 0 : Math.Round(uptimeSum / bots.Count, 1),
+            Bots = bots,
+        };
+
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new { dashboard });
     }
 
     [Function("BotMonitorPortalBotById")]
@@ -149,6 +249,8 @@ public sealed class BotMonitorFunctions
         if (auth != null) return auth;
         var forbid = await context.RequireOrgRoleAsync(req, OrgRole.ReadOnly);
         if (forbid != null) return forbid;
+        var botGate = await context.RequireBotMonitoringEntitlementAsync(req);
+        if (botGate != null) return botGate;
 
         if (!Guid.TryParse(botId, out var botGuid))
             return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_ID", "Invalid bot id."));
@@ -158,9 +260,12 @@ public sealed class BotMonitorFunctions
         if (forged.HasValue && forged != tenantId)
             return await WriteJsonAsync(req, HttpStatusCode.Forbidden, Error("TENANT_FORBIDDEN", "Tenant cannot be overridden on this route."));
 
+        var userId = context.GetUserId();
         var bot = await _repo.GetBotByIdAsync(tenantId, botGuid);
         if (bot is null)
             return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("NOT_FOUND", "Bot not found in this organization."));
+        if (userId.HasValue && bot.OwnerUserId.HasValue && bot.OwnerUserId != userId && !context.IsSystemAdmin())
+            return await WriteJsonAsync(req, HttpStatusCode.Forbidden, Error("USER_FORBIDDEN", "This bot belongs to another user in the organization."));
 
         return await WriteJsonAsync(req, HttpStatusCode.OK, new { botId = bot.BotId, displayName = bot.DisplayName });
     }
@@ -244,6 +349,7 @@ public sealed class BotMonitorFunctions
         var bot = await _repo.InsertBotAsync(new BotMonitorBot
         {
             TenantId = body.TenantId,
+            OwnerUserId = body.OwnerUserId,
             DisplayName = body.DisplayName,
             Platform = body.Platform,
             CheckinIntervalMinutes = body.CheckinIntervalMinutes,
@@ -357,6 +463,7 @@ public sealed class BotMonitorFunctions
         {
             BotId = bot.BotId,
             TenantId = bot.TenantId,
+            OwnerUserId = bot.OwnerUserId,
             TenantName = tenantName,
             DisplayName = bot.DisplayName,
             Platform = bot.Platform.ToString(),

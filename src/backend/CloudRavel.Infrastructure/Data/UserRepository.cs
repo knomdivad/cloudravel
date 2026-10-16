@@ -1,3 +1,4 @@
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
 using Dapper;
@@ -128,6 +129,18 @@ public sealed class UserRepository : IUserRepository
             new { UserId = userId, TenantId = tenantId });
     }
 
+    public async Task<FeatureEntitlements?> GetFeatureEntitlementsAsync(Guid userId, Guid tenantId)
+    {
+        await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
+        var row = await conn.QueryFirstOrDefaultAsync(
+            @"SELECT entitlement_bot_monitor AS BotMonitor, entitlement_cloud_monitor AS CloudMonitor
+              FROM user_tenant_access
+              WHERE user_id = @UserId AND tenant_id = @TenantId",
+            new { UserId = userId, TenantId = tenantId });
+        if (row is null) return null;
+        return new FeatureEntitlements((bool)row.BotMonitor, (bool)row.CloudMonitor);
+    }
+
     public async Task<IReadOnlyList<User>> ListAllAsync()
     {
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
@@ -207,17 +220,37 @@ public sealed class UserRepository : IUserRepository
             new { UserId = userId, IsActive = isActive });
     }
 
-    public async Task GrantTenantAccessAsync(Guid userId, Guid tenantId, string role, Guid grantedBy)
+    public async Task GrantTenantAccessAsync(
+        Guid userId,
+        Guid tenantId,
+        string role,
+        Guid grantedBy,
+        FeatureEntitlements? entitlements = null)
     {
+        var flags = entitlements ?? FeatureEntitlements.Both;
         await using var conn = await _connectionFactory.CreateAdminConnectionAsync();
         const string sql = @"
             MERGE user_tenant_access AS target
             USING (SELECT @UserId AS user_id, @TenantId AS tenant_id) AS source
             ON target.user_id = source.user_id AND target.tenant_id = source.tenant_id
-            WHEN MATCHED THEN UPDATE SET role = @Role, granted_by = @GrantedBy, granted_at = SYSUTCDATETIME()
-            WHEN NOT MATCHED THEN INSERT (user_id, tenant_id, role, granted_by) VALUES (@UserId, @TenantId, @Role, @GrantedBy);";
+            WHEN MATCHED THEN UPDATE SET
+                role = @Role,
+                granted_by = @GrantedBy,
+                granted_at = SYSUTCDATETIME(),
+                entitlement_bot_monitor = @Bot,
+                entitlement_cloud_monitor = @Cloud
+            WHEN NOT MATCHED THEN INSERT (user_id, tenant_id, role, granted_by, entitlement_bot_monitor, entitlement_cloud_monitor)
+                VALUES (@UserId, @TenantId, @Role, @GrantedBy, @Bot, @Cloud);";
 
-        await conn.ExecuteAsync(sql, new { UserId = userId, TenantId = tenantId, Role = role, GrantedBy = grantedBy });
+        await conn.ExecuteAsync(sql, new
+        {
+            UserId = userId,
+            TenantId = tenantId,
+            Role = role,
+            GrantedBy = grantedBy,
+            Bot = flags.BotMonitoring,
+            Cloud = flags.CloudMonitoring,
+        });
         _logger.LogInformation("Granted {Role} access to user {UserId} for tenant {TenantId}", role, userId, tenantId);
     }
 

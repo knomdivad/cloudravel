@@ -1,3 +1,4 @@
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.Models;
 
 namespace CloudRavel.Core.Interfaces;
@@ -14,13 +15,20 @@ public interface IUserRepository
     Task UpdateLastLoginAsync(Guid userId);
     Task<IReadOnlyList<UserTenantAccess>> GetUserTenantAccessAsync(Guid userId);
     Task<bool> HasTenantAccessAsync(Guid userId, Guid tenantId);
-    Task GrantTenantAccessAsync(Guid userId, Guid tenantId, string role, Guid grantedBy);
+    Task GrantTenantAccessAsync(
+        Guid userId,
+        Guid tenantId,
+        string role,
+        Guid grantedBy,
+        FeatureEntitlements? entitlements = null);
     Task RevokeTenantAccessAsync(Guid userId, Guid tenantId);
 
     // --- RBAC / admin ---
 
     /// <summary>The caller's org role for a workspace (user_tenant_access.role), or null if none.</summary>
     Task<string?> GetTenantRoleAsync(Guid userId, Guid tenantId);
+
+    Task<FeatureEntitlements?> GetFeatureEntitlementsAsync(Guid userId, Guid tenantId);
 
     /// <summary>All users (system-admin global listing).</summary>
     Task<IReadOnlyList<User>> ListAllAsync();

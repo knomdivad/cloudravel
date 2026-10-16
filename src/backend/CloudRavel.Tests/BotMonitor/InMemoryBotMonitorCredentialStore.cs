@@ -52,7 +52,8 @@ internal sealed class InMemoryBotMonitorCredentialStore : IBotMonitorRepository
     public Task<IReadOnlyList<BotMonitorTenant>> ListTenantsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<BotMonitorTenant>>(Array.Empty<BotMonitorTenant>());
     public Task<BotMonitorTenant?> LinkOrganizationAsync(Guid organizationId, string organizationName, CancellationToken ct = default) => Task.FromResult<BotMonitorTenant?>(null);
     public Task<BotMonitorBot?> GetBotByIdAsync(Guid tenantId, Guid botId, CancellationToken ct = default) => Task.FromResult<BotMonitorBot?>(null);
-    public Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantAsync(Guid tenantId, CancellationToken ct = default) =>
+    public Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantAsync(
+        Guid tenantId, Guid? ownerUserId = null, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<(BotMonitorBot, BotMonitorBotState?, string?)>>(Array.Empty<(BotMonitorBot, BotMonitorBotState?, string?)>());
     public Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>> ListAllBotsAsync(Guid? filterTenantId, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<(BotMonitorBot, BotMonitorBotState?, string?, string)>>(Array.Empty<(BotMonitorBot, BotMonitorBotState?, string?, string)>());
@@ -61,4 +62,20 @@ internal sealed class InMemoryBotMonitorCredentialStore : IBotMonitorRepository
         Task.FromResult<IReadOnlyList<BotMonitorWeeklyBucket>>(Array.Empty<BotMonitorWeeklyBucket>());
     public Task<string?> StoreMagicLinkAsync(Guid tenantId, string tokenHash, DateTime expiresAtUtc, CancellationToken ct = default) => Task.FromResult<string?>(null);
     public Task<Guid?> RedeemMagicLinkAsync(string tokenHash, DateTime nowUtc, CancellationToken ct = default) => Task.FromResult<Guid?>(null);
+
+    public Task<IReadOnlyList<(DateTime ReceivedAt, string Status)>> GetRecentCheckinsAsync(
+        Guid tenantId, Guid botId, int hours, DateTime nowUtc, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<(DateTime, string)>>(Array.Empty<(DateTime, string)>());
+
+    public Task<IReadOnlyList<(Guid TenantId, string TenantName, int BotCount, int OnlineCount)>> ListFleetTenantSummariesAsync(
+        DateTime nowUtc, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<(Guid, string, int, int)>>(Array.Empty<(Guid, string, int, int)>());
+
+    public Task<IReadOnlyList<(Guid UserId, string DisplayName, string Email, int BotCount)>> ListFleetUsersForTenantAsync(
+        Guid tenantId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<(Guid, string, string, int)>>(Array.Empty<(Guid, string, string, int)>());
+
+    public Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantUserAsync(
+        Guid tenantId, Guid userId, CancellationToken ct = default) =>
+        ListBotsForTenantAsync(tenantId, userId, ct);
 }

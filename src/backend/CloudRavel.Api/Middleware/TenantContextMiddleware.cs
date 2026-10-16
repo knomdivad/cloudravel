@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using CloudRavel.Core.Auth;
 using CloudRavel.Core.Interfaces;
 using CloudRavel.Core.Models;
 using Microsoft.AspNetCore.Http;
@@ -165,8 +166,8 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
 
         if (tenantId == Guid.Empty)
         {
-            // Global / registry scope (NO_WORKSPACE sentinel).
             context.Items["OrgRole"] = string.Empty;
+            context.SetFeatureEntitlements(FeatureEntitlements.None);
         }
         else
         {
@@ -179,6 +180,15 @@ public sealed class TenantContextMiddleware : IFunctionsWorkerMiddleware
                 return;
             }
             context.Items["OrgRole"] = orgRole ?? string.Empty;
+
+            if (isSystemAdmin)
+                context.SetFeatureEntitlements(FeatureEntitlements.Both);
+            else
+            {
+                var entitlements = await _userRepo.GetFeatureEntitlementsAsync(userId.Value, tenantId)
+                                   ?? FeatureEntitlements.None;
+                context.SetFeatureEntitlements(entitlements);
+            }
         }
 
         context.Items["TenantId"] = tenantId;

@@ -15,23 +15,43 @@ fs.mkdirSync(outDir, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 
-await page.goto(webUrl, { waitUntil: 'networkidle' });
-await page.getByRole('heading', { name: 'CloudRavel' }).waitFor({ timeout: 30_000 });
-await page.getByText('Email', { exact: true }).locator('..').getByRole('textbox').fill('admin@local');
-await page.locator('input[type="password"]').fill('ChangeMe123!');
-await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-await page.getByRole('link', { name: 'Bot fleet' }).waitFor({ timeout: 60_000 });
+async function login() {
+  await page.goto(webUrl, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'CloudRavel' }).waitFor({ timeout: 30_000 });
+  await page.getByText('Email', { exact: true }).locator('..').getByRole('textbox').fill('admin@local');
+  await page.locator('input[type="password"]').fill('ChangeMe123!');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('link', { name: 'Bot fleet' }).waitFor({ timeout: 60_000 });
+}
+
+await login();
 
 await page.goto(`${webUrl}/ops/bots`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
-await page.screenshot({ path: path.join(outDir, 'ops-bots.png'), fullPage: true });
+await page.screenshot({ path: path.join(outDir, 'ops-fleet.png'), fullPage: true });
+
+const customerCard = page.getByRole('button').filter({ hasText: 'cloudravel-internal' }).first();
+if (await customerCard.count()) {
+  await customerCard.click();
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: path.join(outDir, 'ops-customer-drill.png'), fullPage: true });
+
+  const userCard = page.getByRole('button').filter({ hasText: '@' }).first();
+  if (await userCard.count()) {
+    await userCard.click();
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: path.join(outDir, 'ops-user-drill.png'), fullPage: true });
+  }
+}
 
 const orgSelect = page.locator('select').first();
-await orgSelect.waitFor({ timeout: 15_000 });
-await orgSelect.selectOption({ label: 'cloudravel-internal' });
+if (await orgSelect.count()) {
+  await orgSelect.selectOption({ label: 'cloudravel-internal' });
+}
+
 await page.goto(`${webUrl}/portal/bots`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
-await page.screenshot({ path: path.join(outDir, 'portal-bots.png'), fullPage: true });
+await page.screenshot({ path: path.join(outDir, 'portal-dashboard.png'), fullPage: true });
 
 fs.writeFileSync(
   path.join(outDir, 'proof.json'),

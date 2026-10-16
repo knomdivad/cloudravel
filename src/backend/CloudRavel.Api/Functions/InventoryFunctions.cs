@@ -55,6 +55,9 @@ public sealed class InventoryFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "inventory/resources")] HttpRequestData req,
         FunctionContext context)
     {
+        var cloudGate = await context.RequireCloudMonitoringEntitlementAsync(req);
+        if (cloudGate != null) return cloudGate;
+
         var tenantId = context.GetTenantId();
         var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
 
@@ -331,6 +334,9 @@ public sealed class InventoryFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "inventory/summary")] HttpRequestData req,
         FunctionContext context)
     {
+        var cloudGate = await context.RequireCloudMonitoringEntitlementAsync(req);
+        if (cloudGate != null) return cloudGate;
+
         var tenantId = context.GetTenantId();
 
         var summary = await _inventoryRepo.GetResourceTypeSummaryAsync(tenantId);

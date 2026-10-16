@@ -47,14 +47,14 @@ INSERT INTO bot_monitor_tenants (tenant_id, name) VALUES (@TenantId, N'cloudrave
 DECLARE @AdminUserId UNIQUEIDENTIFIER = (SELECT TOP 1 user_id FROM users WHERE email = N'admin@local');
 IF @AdminUserId IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM user_tenant_access WHERE user_id = @AdminUserId AND tenant_id = @TenantId)
-    INSERT INTO user_tenant_access (user_id, tenant_id, role, granted_by)
-    VALUES (@AdminUserId, @TenantId, N'org_admin', @AdminUserId);
+    INSERT INTO user_tenant_access (user_id, tenant_id, role, granted_by, entitlement_bot_monitor, entitlement_cloud_monitor)
+    VALUES (@AdminUserId, @TenantId, N'org_admin', @AdminUserId, 1, 1);
 
 INSERT INTO bot_monitor_bots
-    (bot_id, tenant_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes)
+    (bot_id, tenant_id, owner_user_id, display_name, platform, token_hash, hmac_secret_enc, checkin_interval_minutes)
 VALUES
-    (@BotA, @TenantId, N'Keep probe alpha', N'grok_bot', @TokenHashA, @EncSecret, 60),
-    (@BotB, @TenantId, N'Mail collab beta', N'email', @TokenHashB, @EncSecret, 60);
+    (@BotA, @TenantId, @AdminUserId, N'Keep probe alpha', N'grok_bot', @TokenHashA, @EncSecret, 60),
+    (@BotB, @TenantId, @AdminUserId, N'Mail collab beta', N'email', @TokenHashB, @EncSecret, 60);
 
 INSERT INTO bot_monitor_heartbeats
     (bot_id, tenant_id, received_at, status, last_task, errors, keep_check, keep_check_detail)

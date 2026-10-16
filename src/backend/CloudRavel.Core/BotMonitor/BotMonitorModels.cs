@@ -48,6 +48,7 @@ public sealed class BotMonitorBot
     public int CheckinIntervalMinutes { get; set; } = 60;
     public DateTime CreatedAt { get; set; }
     public DateTime? RevokedAt { get; set; }
+    public Guid? OwnerUserId { get; set; }
 }
 
 public sealed class BotMonitorBotState

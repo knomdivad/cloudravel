@@ -129,7 +129,7 @@ jobs:
             -e MSSQL_SA_PASSWORD="${MSSQL_SA_PASSWORD}" \
             -e DB_HOST=mssql-botmon006 \
             mcr.microsoft.com/mssql-tools:latest \
-            bash /database/test-006-bot-monitor-org-fk.sh
+            /bin/bash /database/test-006-bot-monitor-org-fk.sh
 
   # ============================================================================
   # Frontend Build
