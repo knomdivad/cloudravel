@@ -33,9 +33,15 @@ public static class AuthorizationExtensions
     {
         OrgRole.ReadOnly => 0,
         OrgRole.CloudAdmin => 1,
-        OrgRole.OrgAdmin => 2,
+        OrgRole.TenantAdmin => 2,
+        OrgRole.OrgAdmin => 3,
         _ => -1
     };
+
+    /// <summary>Customer tenant administrators (and org admins) may list every bot in the workspace.</summary>
+    public static bool CanViewAllTenantBots(this FunctionContext context) =>
+        context.IsSystemAdmin()
+        || context.GetOrgRole() is OrgRole.TenantAdmin or OrgRole.OrgAdmin;
 
     public static bool HasOrgRole(this FunctionContext context, string minRole) =>
         Rank(context.GetOrgRole()) >= Rank(minRole);
@@ -140,6 +146,7 @@ public static class SystemRole
 public static class OrgRole
 {
     public const string OrgAdmin = "org_admin";
+    public const string TenantAdmin = "tenant_admin";
     public const string CloudAdmin = "cloud_admin";
     public const string ReadOnly = "read_only";
 }

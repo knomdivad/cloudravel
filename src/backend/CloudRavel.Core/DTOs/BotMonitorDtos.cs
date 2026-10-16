@@ -57,9 +57,19 @@ public sealed class BotMonitorBotListItemDto
     public DateTime? RevokedAt { get; set; }
 }
 
+public sealed class BotMonitorPortalUserBotCountDto
+{
+    public Guid UserId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public int BotCount { get; set; }
+}
+
 public sealed class BotMonitorPortalBotDto
 {
     public Guid BotId { get; set; }
+    public Guid? OwnerUserId { get; set; }
+    public string? OwnerDisplayName { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string Platform { get; set; } = string.Empty;
     public string Presence { get; set; } = string.Empty;
@@ -71,11 +81,14 @@ public sealed class BotMonitorPortalBotDto
 
 public sealed class BotMonitorPortalDashboardDto
 {
+    /// <summary>user = only the signed in user's bots; organization = tenant administrator view.</summary>
+    public string ViewScope { get; set; } = "user";
     public int TotalBots { get; set; }
     public int OnlineCount { get; set; }
     public int StaleCount { get; set; }
     public int OfflineCount { get; set; }
     public double AverageUptimePercent { get; set; }
+    public IReadOnlyList<BotMonitorPortalUserBotCountDto> UserBotCounts { get; set; } = Array.Empty<BotMonitorPortalUserBotCountDto>();
     public IReadOnlyList<BotMonitorPortalBotDto> Bots { get; set; } = Array.Empty<BotMonitorPortalBotDto>();
 }
 

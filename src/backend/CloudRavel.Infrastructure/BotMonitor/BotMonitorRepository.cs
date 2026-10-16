@@ -77,12 +77,15 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
                    b.platform AS Platform, b.token_hash AS TokenHash, b.hmac_secret_enc AS HmacSecretEnc,
                    b.checkin_interval_minutes AS CheckinIntervalMinutes, b.created_at AS CreatedAt, b.revoked_at AS RevokedAt,
                    b.owner_user_id AS OwnerUserId,
+                   u.display_name AS OwnerDisplayName,
                    s.last_seen_at AS LastSeenAt, s.last_status AS LastStatus, s.last_error AS LastError, s.last_error_at AS LastErrorAt,
                    (SELECT TOP 1 keep_check FROM bot_monitor_heartbeats h
                     WHERE h.bot_id = b.bot_id AND h.tenant_id = b.tenant_id ORDER BY received_at DESC) AS LastKeepCheck
             FROM bot_monitor_bots b
+            LEFT JOIN users u ON u.user_id = b.owner_user_id
             LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id AND s.tenant_id = b.tenant_id
             WHERE b.tenant_id = @tenantId
+              AND b.revoked_at IS NULL
               AND (@ownerUserId IS NULL OR b.owner_user_id = @ownerUserId)
             ORDER BY b.display_name
             """;
@@ -331,28 +334,37 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         DateTime nowUtc, CancellationToken ct = default)
     {
         await using var conn = await _db.CreateAdminConnectionAsync();
-        var rows = await conn.QueryAsync<(Guid TenantId, string TenantName, int BotCount, int CheckinMinutes, DateTime? LastSeen)>(
+        var rows = await conn.QueryAsync<(Guid TenantId, string TenantName, Guid? BotId, int CheckinIntervalMinutes, DateTime? LastSeenAt)>(
             """
             SELECT t.tenant_id AS TenantId, t.name AS TenantName,
-                   COUNT(b.bot_id) AS BotCount,
-                   MAX(b.checkin_interval_minutes) AS CheckinMinutes,
-                   MAX(s.last_seen_at) AS LastSeen
+                   b.bot_id AS BotId,
+                   b.checkin_interval_minutes AS CheckinIntervalMinutes,
+                   s.last_seen_at AS LastSeenAt
             FROM bot_monitor_tenants t
             LEFT JOIN bot_monitor_bots b ON b.tenant_id = t.tenant_id AND b.revoked_at IS NULL
-            LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id
-            GROUP BY t.tenant_id, t.name
-            ORDER BY t.name
+            LEFT JOIN bot_monitor_bot_state s ON s.bot_id = b.bot_id AND s.tenant_id = b.tenant_id
+            ORDER BY t.name, b.display_name
             """);
-        return rows.Select(r =>
+        var grouped = new Dictionary<Guid, (string Name, int BotCount, int OnlineCount)>();
+        foreach (var row in rows)
         {
-            var online = 0;
-            if (r.LastSeen.HasValue && r.BotCount > 0)
+            if (!grouped.TryGetValue(row.TenantId, out var acc))
+                acc = (row.TenantName, 0, 0);
+
+            if (row.BotId.HasValue)
             {
-                var presence = BotMonitorStaleEvaluator.Evaluate(r.LastSeen, r.CheckinMinutes > 0 ? r.CheckinMinutes : 60, nowUtc);
-                if (presence == BotMonitorPresence.Online) online = r.BotCount;
+                acc.BotCount++;
+                var presence = BotMonitorStaleEvaluator.Evaluate(
+                    row.LastSeenAt,
+                    row.CheckinIntervalMinutes > 0 ? row.CheckinIntervalMinutes : 60,
+                    nowUtc);
+                if (presence == BotMonitorPresence.Online) acc.OnlineCount++;
             }
-            return (r.TenantId, r.TenantName, r.BotCount, online);
-        }).ToList();
+
+            grouped[row.TenantId] = acc;
+        }
+
+        return grouped.Select(kv => (kv.Key, kv.Value.Name, kv.Value.BotCount, kv.Value.OnlineCount)).OrderBy(x => x.Name).ToList();
     }
 
     public async Task<IReadOnlyList<(Guid UserId, string DisplayName, string Email, int BotCount)>> ListFleetUsersForTenantAsync(
@@ -420,8 +432,12 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         };
     }
 
-    public async Task<IReadOnlyList<(Guid BotId, string DisplayName, BotMonitorHealthMetricsSnapshot Snapshot)>> ListMetricsForTenantUserAsync(
+    public Task<IReadOnlyList<(Guid BotId, string DisplayName, BotMonitorHealthMetricsSnapshot Snapshot)>> ListMetricsForTenantUserAsync(
         Guid tenantId, Guid ownerUserId, DateTime nowUtc, CancellationToken ct = default)
+        => ListMetricsForTenantAsync(tenantId, ownerUserId, nowUtc, ct);
+
+    public async Task<IReadOnlyList<(Guid BotId, string DisplayName, BotMonitorHealthMetricsSnapshot Snapshot)>> ListMetricsForTenantAsync(
+        Guid tenantId, Guid? ownerUserId, DateTime nowUtc, CancellationToken ct = default)
     {
         var bots = await ListBotsForTenantAsync(tenantId, ownerUserId, ct);
         var result = new List<(Guid, string, BotMonitorHealthMetricsSnapshot)>();
@@ -433,6 +449,25 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         }
 
         return result;
+    }
+
+    public async Task<IReadOnlyList<(Guid UserId, string DisplayName, string Email, int BotCount)>> ListUserBotCountsForTenantAsync(
+        Guid tenantId, CancellationToken ct = default)
+    {
+        await using var conn = await _db.CreateConnectionAsync(tenantId);
+        var rows = await conn.QueryAsync<(Guid UserId, string DisplayName, string Email, int BotCount)>(
+            """
+            SELECT u.user_id AS UserId, u.display_name AS DisplayName, u.email AS Email,
+                   COUNT(b.bot_id) AS BotCount
+            FROM users u
+            INNER JOIN user_tenant_access uta ON uta.user_id = u.user_id AND uta.tenant_id = @tenantId
+            LEFT JOIN bot_monitor_bots b ON b.tenant_id = @tenantId AND b.owner_user_id = u.user_id AND b.revoked_at IS NULL
+            WHERE uta.entitlement_bot_monitor = 1
+            GROUP BY u.user_id, u.display_name, u.email
+            ORDER BY u.display_name
+            """,
+            new { tenantId });
+        return rows.ToList();
     }
 
     private const string BotSelectSql = """
@@ -472,6 +507,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
             CreatedAt = r.CreatedAt,
             RevokedAt = r.RevokedAt,
             OwnerUserId = r.OwnerUserId,
+            OwnerDisplayName = r.OwnerDisplayName as string,
         };
         BotMonitorBotState? state = r.LastSeenAt is null && r.LastStatus is null
             ? null

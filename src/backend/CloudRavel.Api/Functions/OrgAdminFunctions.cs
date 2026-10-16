@@ -18,7 +18,7 @@ namespace CloudRavel.Api.Functions;
 /// </summary>
 public sealed class OrgAdminFunctions
 {
-    private static readonly string[] ValidOrgRoles = { OrgRole.OrgAdmin, OrgRole.CloudAdmin, OrgRole.ReadOnly };
+    private static readonly string[] ValidOrgRoles = { OrgRole.OrgAdmin, OrgRole.TenantAdmin, OrgRole.CloudAdmin, OrgRole.ReadOnly };
 
     private readonly IUserRepository _userRepo;
     private readonly IOrgSsoRepository _ssoRepo;

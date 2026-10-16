@@ -49,6 +49,8 @@ public sealed class BotMonitorBot
     public DateTime CreatedAt { get; set; }
     public DateTime? RevokedAt { get; set; }
     public Guid? OwnerUserId { get; set; }
+    /// <summary>Hydrated on list queries when joined to users.</summary>
+    public string? OwnerDisplayName { get; set; }
 }
 
 public sealed class BotMonitorBotState

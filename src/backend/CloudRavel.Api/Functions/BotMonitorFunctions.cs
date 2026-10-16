@@ -183,7 +183,8 @@ public sealed class BotMonitorFunctions
             return await WriteJsonAsync(req, HttpStatusCode.Unauthorized, Error("UNAUTHENTICATED", "User identity is required."));
 
         var now = _clock();
-        var rows = await _repo.ListMetricsForTenantUserAsync(tenantId, userId.Value, now);
+        Guid? ownerFilter = context.CanViewAllTenantBots() ? null : userId.Value;
+        var rows = await _repo.ListMetricsForTenantAsync(tenantId, ownerFilter, now);
         var bots = rows.Select(r => new BotMonitorBotMetricsItemDto
         {
             BotId = r.BotId,
@@ -245,7 +246,12 @@ public sealed class BotMonitorFunctions
             return await WriteJsonAsync(req, HttpStatusCode.Unauthorized, Error("UNAUTHENTICATED", "User identity is required."));
 
         var now = _clock();
-        var rows = await _repo.ListBotsForTenantAsync(tenantId, userId.Value);
+        var organizationView = context.CanViewAllTenantBots();
+        Guid? ownerFilter = organizationView ? null : userId.Value;
+        var rows = await _repo.ListBotsForTenantAsync(tenantId, ownerFilter);
+        var userBotCounts = organizationView
+            ? await _repo.ListUserBotCountsForTenantAsync(tenantId)
+            : Array.Empty<(Guid UserId, string DisplayName, string Email, int BotCount)>();
         var bots = new List<BotMonitorPortalBotDto>();
         var online = 0;
         var stale = 0;
@@ -265,6 +271,8 @@ public sealed class BotMonitorFunctions
             bots.Add(new BotMonitorPortalBotDto
             {
                 BotId = row.Bot.BotId,
+                OwnerUserId = row.Bot.OwnerUserId,
+                OwnerDisplayName = row.Bot.OwnerDisplayName,
                 DisplayName = row.Bot.DisplayName,
                 Platform = row.Bot.Platform.ToString(),
                 Presence = presence.ToString(),
@@ -290,11 +298,19 @@ public sealed class BotMonitorFunctions
 
         var dashboard = new BotMonitorPortalDashboardDto
         {
+            ViewScope = organizationView ? "organization" : "user",
             TotalBots = bots.Count,
             OnlineCount = online,
             StaleCount = stale,
             OfflineCount = offline,
             AverageUptimePercent = bots.Count == 0 ? 0 : Math.Round(uptimeSum / bots.Count, 1),
+            UserBotCounts = userBotCounts.Select(u => new BotMonitorPortalUserBotCountDto
+            {
+                UserId = u.UserId,
+                DisplayName = u.DisplayName,
+                Email = u.Email,
+                BotCount = u.BotCount,
+            }).ToList(),
             Bots = bots,
         };
 
@@ -326,7 +342,8 @@ public sealed class BotMonitorFunctions
         var bot = await _repo.GetBotByIdAsync(tenantId, botGuid);
         if (bot is null)
             return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("NOT_FOUND", "Bot not found in this organization."));
-        if (userId.HasValue && bot.OwnerUserId.HasValue && bot.OwnerUserId != userId && !context.IsSystemAdmin())
+        if (userId.HasValue && bot.OwnerUserId.HasValue && bot.OwnerUserId != userId
+            && !context.CanViewAllTenantBots() && !context.IsSystemAdmin())
             return await WriteJsonAsync(req, HttpStatusCode.Forbidden, Error("USER_FORBIDDEN", "This bot belongs to another user in the organization."));
 
         return await WriteJsonAsync(req, HttpStatusCode.OK, new { botId = bot.BotId, displayName = bot.DisplayName });

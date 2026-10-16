@@ -18,7 +18,7 @@ import { BotMonitorMetricsTiles } from '../../../components/bot-monitor/BotMonit
 import { BotMonitorMetricsCharts } from '../../../components/bot-monitor/BotMonitorMetricsCharts';
 
 export default function PortalBotsPage() {
-  const { tenantId, currentOrg } = useTenantContext();
+  const { tenantId, currentOrg, canViewAllTenantBots, isTenantAdmin } = useTenantContext();
   const { data, error, isLoading } = useSWR(
     tenantId ? ['portal-bot-dashboard', tenantId] : null,
     () => getPortalBotDashboard(tenantId!),
@@ -40,7 +40,11 @@ export default function PortalBotsPage() {
   return (
     <BotMonitorShell
       title="Bot monitoring"
-      subtitle={`Heartbeat health for ${currentOrg?.name ?? 'this organization'}. Data is scoped to your user and organization from the signed in session.`}
+      subtitle={
+        canViewAllTenantBots
+          ? `Organization wide bot monitoring for ${currentOrg?.name ?? 'this workspace'}. ${isTenantAdmin ? 'You are signed in as a tenant administrator.' : 'You are signed in as an organization administrator.'}`
+          : `Heartbeat health for ${currentOrg?.name ?? 'this organization'}. Data is scoped to your user and organization from the signed in session.`
+      }
     >
       {isLoading && <p className="opacity-70">Loading dashboard...</p>}
       {error && <p style={{ color: '#e3dbd3', opacity: 0.9 }}>We could not load bot monitoring for this organization.</p>}
@@ -55,8 +59,28 @@ export default function PortalBotsPage() {
             avgUptime={dashboard.averageUptimePercent}
           />
 
+          {(dashboard.viewScope === 'organization' || canViewAllTenantBots) && (dashboard.userBotCounts?.length ?? 0) > 0 && (
+            <div className="mb-6 grid gap-2 md:grid-cols-3">
+              {dashboard.userBotCounts!.map((u) => (
+                <div
+                  key={u.userId}
+                  className="rounded-lg border px-3 py-2"
+                  style={{ backgroundColor: '#232427', borderColor: '#46224d', color: '#e3dbd3' }}
+                >
+                  <p className="text-sm font-medium">{u.displayName}</p>
+                  <p className="text-xs opacity-70">{u.email}</p>
+                  <p className="text-xs mt-1">{u.botCount} bots</p>
+                </div>
+              ))}
+            </div>
+          )}
+
           {dashboard.bots.length === 0 ? (
-            <p className="opacity-70">No bots are assigned to your user in this organization yet.</p>
+            <p className="opacity-70">
+              {canViewAllTenantBots
+                ? 'No bots are registered in this organization yet.'
+                : 'No bots are assigned to your user in this organization yet.'}
+            </p>
           ) : (
             <div className="space-y-8">
               {dashboard.bots.map((bot) => (
@@ -69,6 +93,9 @@ export default function PortalBotsPage() {
                     <div>
                       <h2 className="text-lg font-medium">{bot.displayName}</h2>
                       <p className="text-xs opacity-70 capitalize">{bot.platform.replace('_', ' ')}</p>
+                      {bot.ownerDisplayName && (
+                        <p className="text-xs opacity-70">Owner: {bot.ownerDisplayName}</p>
+                      )}
                     </div>
                     <PresenceBadge presence={bot.presence} />
                   </div>

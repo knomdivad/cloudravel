@@ -58,7 +58,7 @@ export interface Organization {
   /** Number of Azure tenant connections (an org can hold more than one). */
   azureOrgCount: number;
   /** The signed-in user's role in this organization. */
-  callerRole: 'org_admin' | 'cloud_admin' | 'read_only';
+  callerRole: 'org_admin' | 'tenant_admin' | 'cloud_admin' | 'read_only';
   awsOrgCount: number;
   gcpOrgCount: number;
   cloudCount: number;
@@ -497,6 +497,8 @@ export interface BotMonitorBotMetricsItem {
 
 export interface BotMonitorPortalBot {
   botId: string;
+  ownerUserId?: string | null;
+  ownerDisplayName?: string | null;
   displayName: string;
   platform: string;
   presence: string;
@@ -506,11 +508,20 @@ export interface BotMonitorPortalBot {
   healthMetrics?: BotMonitorHealthMetricsDto | null;
 }
 
+export interface BotMonitorPortalUserBotCount {
+  userId: string;
+  displayName: string;
+  email: string;
+  botCount: number;
+}
+
 export interface BotMonitorPortalDashboard {
+  viewScope?: 'user' | 'organization';
   totalBots: number;
   onlineCount: number;
   staleCount: number;
   offlineCount: number;
   averageUptimePercent: number;
+  userBotCounts?: BotMonitorPortalUserBotCount[];
   bots: BotMonitorPortalBot[];
 }

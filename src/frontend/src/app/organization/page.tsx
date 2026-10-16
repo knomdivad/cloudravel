@@ -6,7 +6,7 @@ import { useTenantContext } from '@/contexts/TenantContext';
 import { useAuth } from '@/contexts/AuthContext';
 import type { AdminUser, OrgSso } from '@/lib/types';
 import { Field, ModalShell, ModalActions, Spinner, ErrorBox, Toast, AccessDenied, type ToastType } from '@/components/admin-ui';
-const ORG_ROLES = ['org_admin', 'cloud_admin', 'read_only'];
+const ORG_ROLES = ['org_admin', 'tenant_admin', 'cloud_admin', 'read_only'];
 
 export default function OrganizationPage() {
   const { currentOrg, tenantId, isOrgAdmin, canManageClouds, refreshOrganizations } = useTenantContext();

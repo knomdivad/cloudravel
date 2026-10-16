@@ -85,5 +85,13 @@ internal sealed class InMemoryBotMonitorCredentialStore : IBotMonitorRepository
 
     public Task<IReadOnlyList<(Guid BotId, string DisplayName, BotMonitorHealthMetricsSnapshot Snapshot)>> ListMetricsForTenantUserAsync(
         Guid tenantId, Guid ownerUserId, DateTime nowUtc, CancellationToken ct = default) =>
+        ListMetricsForTenantAsync(tenantId, ownerUserId, nowUtc, ct);
+
+    public Task<IReadOnlyList<(Guid BotId, string DisplayName, BotMonitorHealthMetricsSnapshot Snapshot)>> ListMetricsForTenantAsync(
+        Guid tenantId, Guid? ownerUserId, DateTime nowUtc, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<(Guid, string, BotMonitorHealthMetricsSnapshot)>>(Array.Empty<(Guid, string, BotMonitorHealthMetricsSnapshot)>());
+
+    public Task<IReadOnlyList<(Guid UserId, string DisplayName, string Email, int BotCount)>> ListUserBotCountsForTenantAsync(
+        Guid tenantId, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<(Guid, string, string, int)>>(Array.Empty<(Guid, string, string, int)>());
 }

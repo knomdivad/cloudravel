@@ -107,6 +107,18 @@ export default function OpsBotsPage() {
       {drill.level === 'customer' && (
         <>
           {users.isLoading && <p className="opacity-70">Loading users...</p>}
+          {!users.isLoading && (
+            <p className="text-sm opacity-80 mb-4">
+              Organization total: {drill.tenant.botCount} bots
+              {(users.data ?? []).length > 0 && (
+                <>
+                  {' '}
+                  (assigned across users:{' '}
+                  {(users.data ?? []).reduce((sum, u) => sum + u.botCount, 0)})
+                </>
+              )}
+            </p>
+          )}
           <div className="grid gap-3 md:grid-cols-2">
             {(users.data ?? []).map((u) => (
               <button
