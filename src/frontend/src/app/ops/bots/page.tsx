@@ -3,11 +3,14 @@
 import React, { useState } from 'react';
 import useSWR from 'swr';
 import {
+  getOpsBotMetrics,
   getOpsFleet,
   getOpsFleetUserBots,
   getOpsFleetUsers,
 } from '../../../lib/api';
 import type { BotMonitorFleetTenant, BotMonitorFleetUser } from '../../../lib/types';
+import { BotMonitorMetricsTiles } from '../../../components/bot-monitor/BotMonitorMetricsTiles';
+import { BotMonitorMetricsCharts } from '../../../components/bot-monitor/BotMonitorMetricsCharts';
 import {
   BotMonitorShell,
   PresenceBadge,
@@ -33,6 +36,10 @@ export default function OpsBotsPage() {
   const userBots = useSWR(
     tenantId && userId ? ['ops-fleet-user-bots', tenantId, userId] : null,
     () => getOpsFleetUserBots(tenantId!, userId!),
+  );
+  const userMetrics = useSWR(
+    tenantId && userId ? ['ops-fleet-user-metrics', tenantId, userId] : null,
+    () => getOpsBotMetrics(tenantId!, userId!),
   );
 
   if (!isSystemAdmin) {
@@ -155,6 +162,21 @@ export default function OpsBotsPage() {
               </tbody>
             </table>
           </div>
+          {!userMetrics.isLoading && (userMetrics.data ?? []).length > 0 && (
+            <div className="mt-8 space-y-8">
+              {userMetrics.data!.map((row) => (
+                <section
+                  key={row.botId}
+                  className="rounded-lg border p-4"
+                  style={{ backgroundColor: '#232427', borderColor: '#46224d' }}
+                >
+                  <h2 className="text-lg font-medium mb-2">{row.displayName}</h2>
+                  <BotMonitorMetricsTiles metrics={row.metrics} />
+                  <BotMonitorMetricsCharts metrics={row.metrics} />
+                </section>
+              ))}
+            </div>
+          )}
         </>
       )}
     </BotMonitorShell>

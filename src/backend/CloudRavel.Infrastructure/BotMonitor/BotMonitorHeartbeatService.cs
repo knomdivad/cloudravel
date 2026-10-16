@@ -38,6 +38,7 @@ public sealed class BotMonitorHeartbeatService
         Replay,
         PayloadTooLarge,
         RateLimited,
+        InvalidMetrics,
     }
 
     public sealed class HeartbeatResult
@@ -96,6 +97,15 @@ public sealed class BotMonitorHeartbeatService
         catch
         {
             payload = new BotMonitorHeartbeatPayload();
+        }
+
+        try
+        {
+            payload.Metrics = BotMonitorMetricsValidator.Sanitize(payload.Metrics);
+        }
+        catch
+        {
+            return Fail(HeartbeatRejectReason.InvalidMetrics);
         }
 
         await _repo.IngestHeartbeatAsync(bot.TenantId, bot.BotId, payload, now, ct);

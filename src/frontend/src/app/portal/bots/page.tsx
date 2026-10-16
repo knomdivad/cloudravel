@@ -14,6 +14,8 @@ import {
   StatusTiles,
   UptimeTrendChart,
 } from '../../../components/bot-monitor/BotMonitorCharts';
+import { BotMonitorMetricsTiles } from '../../../components/bot-monitor/BotMonitorMetricsTiles';
+import { BotMonitorMetricsCharts } from '../../../components/bot-monitor/BotMonitorMetricsCharts';
 
 export default function PortalBotsPage() {
   const { tenantId, currentOrg } = useTenantContext();
@@ -76,6 +78,8 @@ export default function PortalBotsPage() {
                   <UptimeTrendChart history={bot.weeklyHistory} />
                   <HealthTrendChart buckets={bot.weeklyHistory} />
                   <CheckinSparkline points={bot.recentCheckins ?? []} />
+                  <BotMonitorMetricsTiles metrics={bot.healthMetrics} />
+                  <BotMonitorMetricsCharts metrics={bot.healthMetrics} />
                 </section>
               ))}
             </div>

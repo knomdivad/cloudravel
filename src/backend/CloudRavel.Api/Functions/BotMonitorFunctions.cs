@@ -67,6 +67,8 @@ public sealed class BotMonitorFunctions
                 await WriteJsonAsync(req, HttpStatusCode.Conflict, Error("REPLAY", "This signed request was already accepted.")),
             BotMonitorHeartbeatService.HeartbeatRejectReason.RateLimited =>
                 await WriteJsonAsync(req, (HttpStatusCode)429, Error("RATE_LIMITED", "Too many heartbeats for this bot.")),
+            BotMonitorHeartbeatService.HeartbeatRejectReason.InvalidMetrics =>
+                await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("INVALID_METRICS", "Reported metrics failed validation or exceed size caps.")),
             BotMonitorHeartbeatService.HeartbeatRejectReason.TimestampSkew =>
                 await WriteJsonAsync(req, HttpStatusCode.Unauthorized, Error("TIMESTAMP_SKEW", "Timestamp outside the allowed window.")),
             BotMonitorHeartbeatService.HeartbeatRejectReason.BadSignature =>
@@ -160,6 +162,64 @@ public sealed class BotMonitorFunctions
         return await WriteJsonAsync(req, HttpStatusCode.OK, new { bots = dto });
     }
 
+    [Function("BotMonitorPortalMetrics")]
+    public async Task<HttpResponseData> PortalMetrics(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "bot-monitor/portal/metrics")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var auth = await context.RequireAuthenticatedUserAsync(req);
+        if (auth != null) return auth;
+        var forbid = await context.RequireOrgRoleAsync(req, OrgRole.ReadOnly);
+        if (forbid != null) return forbid;
+        var botGate = await context.RequireBotMonitoringEntitlementAsync(req);
+        if (botGate != null) return botGate;
+
+        var tenantId = context.GetTenantId();
+        if (tenantId == Guid.Empty)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("MISSING_WORKSPACE", "Select an organization first."));
+
+        var userId = context.GetUserId();
+        if (!userId.HasValue)
+            return await WriteJsonAsync(req, HttpStatusCode.Unauthorized, Error("UNAUTHENTICATED", "User identity is required."));
+
+        var now = _clock();
+        var rows = await _repo.ListMetricsForTenantUserAsync(tenantId, userId.Value, now);
+        var bots = rows.Select(r => new BotMonitorBotMetricsItemDto
+        {
+            BotId = r.BotId,
+            DisplayName = r.DisplayName,
+            Metrics = MapMetrics(r.Snapshot),
+        }).ToList();
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new { bots });
+    }
+
+    [Function("BotMonitorOpsMetrics")]
+    public async Task<HttpResponseData> OpsMetrics(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "bot-monitor/ops/metrics")] HttpRequestData req,
+        FunctionContext context)
+    {
+        var forbid = await context.RequireSystemAdminAsync(req);
+        if (forbid != null) return forbid;
+
+        if (!Guid.TryParse(QueryParam(req.Url, "tenantId"), out var tenantGuid) || tenantGuid == Guid.Empty)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("MISSING_TENANT", "tenantId query parameter is required."));
+        if (!Guid.TryParse(QueryParam(req.Url, "userId"), out var userGuid) || userGuid == Guid.Empty)
+            return await WriteJsonAsync(req, HttpStatusCode.BadRequest, Error("MISSING_USER", "userId query parameter is required."));
+
+        if (await _repo.GetTenantAsync(tenantGuid) is null)
+            return await WriteJsonAsync(req, HttpStatusCode.NotFound, Error("NOT_FOUND", "Tenant not found."));
+
+        var now = _clock();
+        var rows = await _repo.ListMetricsForTenantUserAsync(tenantGuid, userGuid, now);
+        var bots = rows.Select(r => new BotMonitorBotMetricsItemDto
+        {
+            BotId = r.BotId,
+            DisplayName = r.DisplayName,
+            Metrics = MapMetrics(r.Snapshot),
+        }).ToList();
+        return await WriteJsonAsync(req, HttpStatusCode.OK, new { tenantId = tenantGuid, userId = userGuid, bots });
+    }
+
     [Function("BotMonitorPortalBots")]
     public async Task<HttpResponseData> PortalListBots(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "bot-monitor/portal/bots")] HttpRequestData req,
@@ -195,6 +255,7 @@ public sealed class BotMonitorFunctions
         {
             var history = await _repo.GetWeeklyHistoryAsync(tenantId, row.Bot.BotId, 8, now);
             var checkins = await _repo.GetRecentCheckinsAsync(tenantId, row.Bot.BotId, 48, now);
+            var metricsSnap = await _repo.GetBotMetricsSnapshotAsync(tenantId, row.Bot.BotId, now);
             var presence = BotMonitorStaleEvaluator.Evaluate(row.State?.LastSeenAt, row.Bot.CheckinIntervalMinutes, now);
             if (presence == BotMonitorPresence.Online) online++;
             else if (presence == BotMonitorPresence.Stale) stale++;
@@ -223,6 +284,7 @@ public sealed class BotMonitorFunctions
                     ReceivedAt = c.ReceivedAt,
                     Status = c.Status,
                 }).ToList(),
+                HealthMetrics = metricsSnap is null ? null : MapMetrics(metricsSnap),
             });
         }
 
@@ -456,6 +518,55 @@ public sealed class BotMonitorFunctions
             DevRedeemPath = $"/portal/bots?magic={token}",
         });
     }
+
+    private static BotMonitorHealthMetricsDto MapMetrics(BotMonitorHealthMetricsSnapshot snap) => new()
+    {
+        AsOfUtc = snap.AsOfUtc,
+        Derived = new BotMonitorDerivedMetricsDto
+        {
+            ConsecutiveFailureStreak = snap.Derived.ConsecutiveFailureStreak,
+            RoutineMissed = snap.Derived.RoutineMissed,
+            CheckInLatenessMinutes = snap.Derived.CheckInLatenessMinutes,
+            RunsPerDay = snap.Derived.RunsPerDay,
+            ActionErrorsReported = snap.Derived.ActionErrorsReported,
+        },
+        Reported = snap.Reported is null ? null : new BotMonitorReportedMetricsDto
+        {
+            Routine = snap.Reported.Routine is null ? null : new BotMonitorRoutineReportDto
+            {
+                Id = snap.Reported.Routine.Id,
+                ExpectedAt = snap.Reported.Routine.ExpectedAt,
+                RanAt = snap.Reported.Routine.RanAt,
+                Result = snap.Reported.Routine.Result,
+            },
+            Connectors = snap.Reported.Connectors?.Select(c => new BotMonitorConnectorReportDto
+            {
+                Name = c.Name,
+                State = c.State,
+            }).ToList() ?? new List<BotMonitorConnectorReportDto>(),
+            Actions = snap.Reported.Actions is null ? null : new BotMonitorActionCountsDto
+            {
+                Attempted = snap.Reported.Actions.Attempted,
+                Failed = snap.Reported.Actions.Failed,
+            },
+            Inbox = snap.Reported.Inbox is null ? null : new BotMonitorInboxReportDto
+            {
+                Unanswered = snap.Reported.Inbox.Unanswered,
+                OldestMinutes = snap.Reported.Inbox.OldestMinutes,
+            },
+            Approvals = snap.Reported.Approvals is null ? null : new BotMonitorApprovalReportDto
+            {
+                Pending = snap.Reported.Approvals.Pending,
+                OldestMinutes = snap.Reported.Approvals.OldestMinutes,
+            },
+            Queue = snap.Reported.Queue is null ? null : new BotMonitorQueueReportDto
+            {
+                Open = snap.Reported.Queue.Open,
+                OldestMinutes = snap.Reported.Queue.OldestMinutes,
+            },
+            Escalations = snap.Reported.Escalations,
+        },
+    };
 
     private BotMonitorBotListItemDto ToListItem(
         BotMonitorBot bot, BotMonitorBotState? state, string? lastKeep, string tenantName, DateTime now) =>

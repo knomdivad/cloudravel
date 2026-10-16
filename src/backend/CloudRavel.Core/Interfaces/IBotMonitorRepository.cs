@@ -45,6 +45,12 @@ public interface IBotMonitorRepository
     Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantUserAsync(
         Guid tenantId, Guid userId, CancellationToken ct = default);
 
+    Task<BotMonitorHealthMetricsSnapshot?> GetBotMetricsSnapshotAsync(
+        Guid tenantId, Guid botId, DateTime nowUtc, CancellationToken ct = default);
+
+    Task<IReadOnlyList<(Guid BotId, string DisplayName, BotMonitorHealthMetricsSnapshot Snapshot)>> ListMetricsForTenantUserAsync(
+        Guid tenantId, Guid ownerUserId, DateTime nowUtc, CancellationToken ct = default);
+
     Task<string?> StoreMagicLinkAsync(Guid tenantId, string tokenHash, DateTime expiresAtUtc, CancellationToken ct = default);
     Task<Guid?> RedeemMagicLinkAsync(string tokenHash, DateTime nowUtc, CancellationToken ct = default);
 }

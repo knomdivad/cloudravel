@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import stat
 import tempfile
@@ -40,6 +41,17 @@ class SendHeartbeatTests(unittest.TestCase):
             self.assertEqual("token-value", hb.load_secret(path))
         finally:
             os.unlink(path)
+
+    def test_build_payload_includes_metrics_from_env(self) -> None:
+        os.environ["CR_BOT_METRICS"] = json.dumps(
+            {"inbox": {"unanswered": 2, "oldestMinutes": 15}, "escalations": 1}
+        )
+        try:
+            payload = hb.build_payload()
+            self.assertIn("metrics", payload)
+            self.assertEqual(2, payload["metrics"]["inbox"]["unanswered"])
+        finally:
+            os.environ.pop("CR_BOT_METRICS", None)
 
     def test_resolve_credentials_from_files(self) -> None:
         with tempfile.TemporaryDirectory() as d:

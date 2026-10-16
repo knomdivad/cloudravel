@@ -32,9 +32,16 @@ DECLARE @TokenHashA NVARCHAR(128) = LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_2
 DECLARE @TokenHashB NVARCHAR(128) = LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', 'demo-token-b-local-only'), 2));
 DECLARE @EncSecret NVARCHAR(512) = 'demo-not-for-production.enc';
 
+DECLARE @MetricsAlpha NVARCHAR(4000) = N'{"routine":{"id":"weekly-keep","expectedAt":"2026-10-16T08:00:00Z","ranAt":"2026-10-16T08:04:00Z","result":"ok"},"connectors":[{"name":"gmail","state":"ok"},{"name":"slack","state":"needsAuth"}],"actions":{"attempted":18,"failed":0},"inbox":{"unanswered":1,"oldestMinutes":22},"approvals":{"pending":0,"oldestMinutes":0},"queue":{"open":3,"oldestMinutes":12},"escalations":0}';
+DECLARE @MetricsBeta NVARCHAR(4000) = N'{"routine":{"id":"inbox-poll","expectedAt":"2026-10-16T06:00:00Z","result":"fail"},"connectors":[{"name":"graph","state":"error"}],"actions":{"attempted":6,"failed":2},"inbox":{"unanswered":7,"oldestMinutes":180},"approvals":{"pending":2,"oldestMinutes":90},"queue":{"open":9,"oldestMinutes":240},"escalations":1}';
+
 IF EXISTS (SELECT 1 FROM bot_monitor_tenants WHERE tenant_id = @TenantId)
 BEGIN
-    PRINT 'BotMonitor demo tenant already present.';
+    UPDATE h SET reported_metrics = CASE b.display_name WHEN N'Keep probe alpha' THEN @MetricsAlpha ELSE @MetricsBeta END
+    FROM bot_monitor_heartbeats h
+    INNER JOIN bot_monitor_bots b ON b.bot_id = h.bot_id AND b.tenant_id = h.tenant_id
+    WHERE h.tenant_id = @TenantId AND h.reported_metrics IS NULL;
+    PRINT 'BotMonitor demo tenant already present (metrics patched if needed).';
     RETURN;
 END
 
@@ -57,10 +64,10 @@ VALUES
     (@BotB, @TenantId, @AdminUserId, N'Mail collab beta', N'email', @TokenHashB, @EncSecret, 60);
 
 INSERT INTO bot_monitor_heartbeats
-    (bot_id, tenant_id, received_at, status, last_task, errors, keep_check, keep_check_detail)
+    (bot_id, tenant_id, received_at, status, last_task, errors, keep_check, keep_check_detail, reported_metrics)
 VALUES
-    (@BotA, @TenantId, DATEADD(MINUTE, -5, @Now), N'ok', N'Weekly Keep checks', NULL, N'pass', N'All probes succeeded'),
-    (@BotB, @TenantId, DATEADD(HOUR, -3, @Now), N'error', N'Inbox polling', N'["timeout"]', N'warn', N'Retry scheduled');
+    (@BotA, @TenantId, DATEADD(MINUTE, -5, @Now), N'ok', N'Weekly Keep checks', NULL, N'pass', N'All probes succeeded', @MetricsAlpha),
+    (@BotB, @TenantId, DATEADD(HOUR, -3, @Now), N'error', N'Inbox polling', N'["timeout"]', N'warn', N'Retry scheduled', @MetricsBeta);
 
 INSERT INTO bot_monitor_bot_state (bot_id, tenant_id, last_seen_at, last_status, last_error, last_error_at)
 VALUES

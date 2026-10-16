@@ -32,6 +32,7 @@ MIGRATIONS=(
   005-bot-monitor
   006-bot-monitor-org-fk
   007-feature-entitlements
+  008-bot-monitor-health-metrics
 )
 
 # -I: QUOTED_IDENTIFIER ON (required for filtered indexes / tables that have them;

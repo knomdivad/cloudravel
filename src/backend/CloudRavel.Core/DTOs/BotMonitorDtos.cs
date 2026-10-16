@@ -66,6 +66,7 @@ public sealed class BotMonitorPortalBotDto
     public DateTime? LastSeenAt { get; set; }
     public IReadOnlyList<BotMonitorWeeklyBucketDto> WeeklyHistory { get; set; } = Array.Empty<BotMonitorWeeklyBucketDto>();
     public IReadOnlyList<BotMonitorCheckinPointDto> RecentCheckins { get; set; } = Array.Empty<BotMonitorCheckinPointDto>();
+    public BotMonitorHealthMetricsDto? HealthMetrics { get; set; }
 }
 
 public sealed class BotMonitorPortalDashboardDto
@@ -82,6 +83,78 @@ public sealed class BotMonitorCheckinPointDto
 {
     public DateTime ReceivedAt { get; set; }
     public string Status { get; set; } = string.Empty;
+}
+
+public sealed class BotMonitorHealthMetricsDto
+{
+    public BotMonitorReportedMetricsDto? Reported { get; set; }
+    public BotMonitorDerivedMetricsDto Derived { get; set; } = new();
+    public DateTime? AsOfUtc { get; set; }
+}
+
+public sealed class BotMonitorReportedMetricsDto
+{
+    public BotMonitorRoutineReportDto? Routine { get; set; }
+    public IReadOnlyList<BotMonitorConnectorReportDto> Connectors { get; set; } = Array.Empty<BotMonitorConnectorReportDto>();
+    public BotMonitorActionCountsDto? Actions { get; set; }
+    public BotMonitorInboxReportDto? Inbox { get; set; }
+    public BotMonitorApprovalReportDto? Approvals { get; set; }
+    public BotMonitorQueueReportDto? Queue { get; set; }
+    public int? Escalations { get; set; }
+}
+
+public sealed class BotMonitorRoutineReportDto
+{
+    public string? Id { get; set; }
+    public DateTime? ExpectedAt { get; set; }
+    public DateTime? RanAt { get; set; }
+    public string? Result { get; set; }
+}
+
+public sealed class BotMonitorConnectorReportDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string State { get; set; } = string.Empty;
+}
+
+public sealed class BotMonitorActionCountsDto
+{
+    public int Attempted { get; set; }
+    public int Failed { get; set; }
+}
+
+public sealed class BotMonitorInboxReportDto
+{
+    public int Unanswered { get; set; }
+    public int OldestMinutes { get; set; }
+}
+
+public sealed class BotMonitorApprovalReportDto
+{
+    public int Pending { get; set; }
+    public int OldestMinutes { get; set; }
+}
+
+public sealed class BotMonitorQueueReportDto
+{
+    public int Open { get; set; }
+    public int OldestMinutes { get; set; }
+}
+
+public sealed class BotMonitorDerivedMetricsDto
+{
+    public int ConsecutiveFailureStreak { get; set; }
+    public bool RoutineMissed { get; set; }
+    public int CheckInLatenessMinutes { get; set; }
+    public int RunsPerDay { get; set; }
+    public int ActionErrorsReported { get; set; }
+}
+
+public sealed class BotMonitorBotMetricsItemDto
+{
+    public Guid BotId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public BotMonitorHealthMetricsDto Metrics { get; set; } = new();
 }
 
 public sealed class BotMonitorWeeklyBucketDto

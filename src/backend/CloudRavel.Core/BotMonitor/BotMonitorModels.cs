@@ -68,6 +68,7 @@ public sealed class BotMonitorHeartbeatPayload
     public List<string>? Errors { get; set; }
     public BotMonitorKeepCheck KeepCheck { get; set; } = BotMonitorKeepCheck.None;
     public string? KeepCheckDetail { get; set; }
+    public BotMonitorReportedMetrics? Metrics { get; set; }
 }
 
 public sealed class BotMonitorWeeklyBucket

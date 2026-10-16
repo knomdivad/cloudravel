@@ -453,6 +453,48 @@ export interface BotMonitorWeeklyBucket {
   errorCount: number;
 }
 
+export interface BotMonitorRoutineReport {
+  id?: string | null;
+  expectedAt?: string | null;
+  ranAt?: string | null;
+  result?: string | null;
+}
+
+export interface BotMonitorConnectorReport {
+  name: string;
+  state: string;
+}
+
+export interface BotMonitorReportedMetricsDto {
+  routine?: BotMonitorRoutineReport | null;
+  connectors?: BotMonitorConnectorReport[];
+  actions?: { attempted: number; failed: number } | null;
+  inbox?: { unanswered: number; oldestMinutes: number } | null;
+  approvals?: { pending: number; oldestMinutes: number } | null;
+  queue?: { open: number; oldestMinutes: number } | null;
+  escalations?: number | null;
+}
+
+export interface BotMonitorDerivedMetricsDto {
+  consecutiveFailureStreak: number;
+  routineMissed: boolean;
+  checkInLatenessMinutes: number;
+  runsPerDay: number;
+  actionErrorsReported: number;
+}
+
+export interface BotMonitorHealthMetricsDto {
+  reported?: BotMonitorReportedMetricsDto | null;
+  derived: BotMonitorDerivedMetricsDto;
+  asOfUtc?: string | null;
+}
+
+export interface BotMonitorBotMetricsItem {
+  botId: string;
+  displayName: string;
+  metrics: BotMonitorHealthMetricsDto;
+}
+
 export interface BotMonitorPortalBot {
   botId: string;
   displayName: string;
@@ -461,6 +503,7 @@ export interface BotMonitorPortalBot {
   lastSeenAt?: string | null;
   weeklyHistory: BotMonitorWeeklyBucket[];
   recentCheckins?: BotMonitorCheckinPoint[];
+  healthMetrics?: BotMonitorHealthMetricsDto | null;
 }
 
 export interface BotMonitorPortalDashboard {

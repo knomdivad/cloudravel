@@ -13,6 +13,27 @@ Alternative: `CR_BOT_TOKEN` and `CR_BOT_HMAC_SECRET` environment variables for l
 
 Optional: `CR_API_BASE` API root, default `http://localhost:7071/api`
 
+Optional health metrics (bounded JSON object, serialized cap about 3500 bytes on the server):
+
+- `CR_BOT_METRICS_FILE` path to a JSON file (mode `0600`) with a `metrics` object body fragment
+- `CR_BOT_METRICS` inline JSON for local runs only
+
+Example metrics object (all fields optional):
+
+```json
+{
+  "routine": { "id": "weekly-keep", "expectedAt": "2026-10-16T12:00:00Z", "ranAt": "2026-10-16T12:05:00Z", "result": "ok" },
+  "connectors": [{ "name": "gmail", "state": "ok" }],
+  "actions": { "attempted": 12, "failed": 1 },
+  "inbox": { "unanswered": 3, "oldestMinutes": 45 },
+  "approvals": { "pending": 1, "oldestMinutes": 120 },
+  "queue": { "open": 5, "oldestMinutes": 30 },
+  "escalations": 0
+}
+```
+
+The API stores the sanitized object on each heartbeat. CloudRavel derives consecutive failure streaks, routine miss flags, check in lateness, runs per day, and action error counts for dashboards.
+
 ## Keep check prompt
 
 Before posting, run your local Keep checklist (disk, queue depth, last job error). Summarize results into:
@@ -54,6 +75,10 @@ Body JSON example:
   "lastTask": "Keep weekly checks",
   "errors": [],
   "keepCheck": "pass",
-  "keepCheckDetail": "All probes succeeded"
+  "keepCheckDetail": "All probes succeeded",
+  "metrics": {
+    "inbox": { "unanswered": 0, "oldestMinutes": 0 },
+    "actions": { "attempted": 4, "failed": 0 }
+  }
 }
 ```

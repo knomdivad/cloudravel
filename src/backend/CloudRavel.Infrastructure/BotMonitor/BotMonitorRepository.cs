@@ -217,11 +217,14 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
             ? JsonSerializer.Serialize(payload.Errors.Take(20))
             : null;
         var lastError = payload.Errors?.FirstOrDefault();
+        string? metricsJson = payload.Metrics is null
+            ? null
+            : JsonSerializer.Serialize(payload.Metrics);
         await using var conn = await _db.CreateConnectionAsync(tenantId);
         await conn.ExecuteAsync("""
             INSERT INTO bot_monitor_heartbeats
-                (bot_id, tenant_id, received_at, status, last_task, errors, keep_check, keep_check_detail)
-            VALUES (@botId, @tenantId, @receivedAtUtc, @statusDb, @lastTask, @errorsJson, @keepDb, @keepDetail)
+                (bot_id, tenant_id, received_at, status, last_task, errors, keep_check, keep_check_detail, reported_metrics)
+            VALUES (@botId, @tenantId, @receivedAtUtc, @statusDb, @lastTask, @errorsJson, @keepDb, @keepDetail, @metricsJson)
             """, new
         {
             botId,
@@ -232,6 +235,7 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
             errorsJson,
             keepDb = KeepToDb(payload.KeepCheck),
             keepDetail = payload.KeepCheckDetail?.Length > 1000 ? payload.KeepCheckDetail[..1000] : payload.KeepCheckDetail,
+            metricsJson,
         });
 
         await conn.ExecuteAsync("""
@@ -373,6 +377,63 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
     public async Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck)>> ListBotsForTenantUserAsync(
         Guid tenantId, Guid userId, CancellationToken ct = default)
         => await ListBotsForTenantAsync(tenantId, userId, ct);
+
+    public async Task<BotMonitorHealthMetricsSnapshot?> GetBotMetricsSnapshotAsync(
+        Guid tenantId, Guid botId, DateTime nowUtc, CancellationToken ct = default)
+    {
+        await using var conn = await _db.CreateConnectionAsync(tenantId);
+        var interval = await conn.QuerySingleOrDefaultAsync<int?>(
+            "SELECT checkin_interval_minutes FROM bot_monitor_bots WHERE bot_id = @botId AND tenant_id = @tenantId",
+            new { botId, tenantId }) ?? 60;
+
+        var rows = await conn.QueryAsync<(DateTime ReceivedAt, string Status, string KeepCheck, string? MetricsJson)>(
+            "SELECT TOP 50 received_at AS ReceivedAt, status AS Status, keep_check AS KeepCheck, reported_metrics AS MetricsJson "
+            + "FROM bot_monitor_heartbeats WHERE bot_id = @botId AND tenant_id = @tenantId ORDER BY received_at DESC",
+            new { botId, tenantId });
+
+        var list = rows.ToList();
+        if (list.Count == 0) return null;
+
+        BotMonitorReportedMetrics? reported = null;
+        if (!string.IsNullOrWhiteSpace(list[0].MetricsJson))
+        {
+            try
+            {
+                reported = JsonSerializer.Deserialize<BotMonitorReportedMetrics>(list[0].MetricsJson!);
+            }
+            catch
+            {
+                reported = null;
+            }
+        }
+
+        var recent = list.Select(r => (
+            r.ReceivedAt,
+            ParseStatus(r.Status),
+            ParseKeep(r.KeepCheck))).ToList();
+
+        return new BotMonitorHealthMetricsSnapshot
+        {
+            Reported = reported,
+            Derived = BotMonitorMetricsDeriver.Derive(reported, recent, interval, nowUtc),
+            AsOfUtc = list[0].ReceivedAt,
+        };
+    }
+
+    public async Task<IReadOnlyList<(Guid BotId, string DisplayName, BotMonitorHealthMetricsSnapshot Snapshot)>> ListMetricsForTenantUserAsync(
+        Guid tenantId, Guid ownerUserId, DateTime nowUtc, CancellationToken ct = default)
+    {
+        var bots = await ListBotsForTenantAsync(tenantId, ownerUserId, ct);
+        var result = new List<(Guid, string, BotMonitorHealthMetricsSnapshot)>();
+        foreach (var row in bots)
+        {
+            var snap = await GetBotMetricsSnapshotAsync(tenantId, row.Bot.BotId, nowUtc, ct)
+                       ?? new BotMonitorHealthMetricsSnapshot { AsOfUtc = nowUtc };
+            result.Add((row.Bot.BotId, row.Bot.DisplayName, snap));
+        }
+
+        return result;
+    }
 
     private const string BotSelectSql = """
         SELECT bot_id AS BotId, tenant_id AS TenantId, display_name AS DisplayName,

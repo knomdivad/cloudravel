@@ -53,14 +53,35 @@ def sign_heartbeat_body(secret_b64: str, timestamp: int, body: bytes) -> str:
     return hmac.new(secret, msg, hashlib.sha256).hexdigest()
 
 
+def load_optional_metrics() -> dict | None:
+    path = os.environ.get("CR_BOT_METRICS_FILE")
+    raw = os.environ.get("CR_BOT_METRICS")
+    if path:
+        _require_mode_0600(path)
+        with open(path, encoding="utf-8") as f:
+            raw = f.read()
+    if not raw:
+        return None
+    parsed = json.loads(raw)
+    if parsed is None:
+        return None
+    if not isinstance(parsed, dict):
+        raise ValueError("Metrics JSON must be an object.")
+    return parsed
+
+
 def build_payload() -> dict:
-    return {
+    payload: dict = {
         "status": os.environ.get("CR_BOT_STATUS", "ok"),
         "lastTask": os.environ.get("CR_BOT_TASK", "Keep health routine"),
         "errors": [],
         "keepCheck": os.environ.get("CR_KEEP_CHECK", "pass"),
         "keepCheckDetail": os.environ.get("CR_KEEP_DETAIL", "Routine Keep checks completed"),
     }
+    metrics = load_optional_metrics()
+    if metrics:
+        payload["metrics"] = metrics
+    return payload
 
 
 def post_heartbeat(token: str, secret_b64: str, payload: dict | None = None) -> int:

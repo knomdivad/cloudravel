@@ -30,6 +30,7 @@ import type {
   OrgSso,
   BotMonitorListItem,
   BotMonitorPortalDashboard,
+  BotMonitorBotMetricsItem,
   BotMonitorFleetTenant,
   BotMonitorFleetUser,
 } from './types';
@@ -158,6 +159,19 @@ export async function getPortalBotDashboard(tenantId: string): Promise<BotMonito
       bots: [],
     }
   );
+}
+
+export async function getPortalBotMetrics(tenantId: string): Promise<BotMonitorBotMetricsItem[]> {
+  const data = await apiCall<{ bots: BotMonitorBotMetricsItem[] }>('/bot-monitor/portal/metrics', tenantId);
+  return data.bots ?? [];
+}
+
+export async function getOpsBotMetrics(tenantId: string, userId: string): Promise<BotMonitorBotMetricsItem[]> {
+  const data = await apiCall<{ bots: BotMonitorBotMetricsItem[] }>(
+    `/bot-monitor/ops/metrics?tenantId=${encodeURIComponent(tenantId)}&userId=${encodeURIComponent(userId)}`,
+    NO_WORKSPACE,
+  );
+  return data.bots ?? [];
 }
 
 // ============================================================================
