@@ -49,6 +49,14 @@ jobs:
       - name: Apply migrations against SQL Edge (fresh + 001-only ledger)
         run: ./database/test-apply-migrations.sh
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: BotMonitor SQL integration tests
+        run: ./database/test-bot-monitor-sql.sh
+
   # ============================================================================
   # Backend Build & Test
   # ============================================================================
@@ -80,6 +88,7 @@ jobs:
       - name: Test
         run: >-
           dotnet test CloudRavel.sln --configuration Release --no-build --verbosity normal
+          --filter "Category!=BotMonitorSqlIntegration"
           --collect:"XPlat Code Coverage" --results-directory ./.coverage
 
       - name: BotMonitor Python signer tests

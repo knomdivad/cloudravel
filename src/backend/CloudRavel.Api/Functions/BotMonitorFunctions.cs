@@ -430,8 +430,7 @@ public sealed class BotMonitorFunctions
         CreateBotMonitorTenantRequest? body;
         try
         {
-            body = await JsonSerializer.DeserializeAsync<CreateBotMonitorTenantRequest>(req.Body,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            body = await JsonSerializer.DeserializeAsync<CreateBotMonitorTenantRequest>(req.Body, BotMonitorRequestJson.Options);
         }
         catch
         {
@@ -471,8 +470,7 @@ public sealed class BotMonitorFunctions
         CreateBotMonitorBotRequest? body;
         try
         {
-            body = await JsonSerializer.DeserializeAsync<CreateBotMonitorBotRequest>(req.Body,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            body = await JsonSerializer.DeserializeAsync<CreateBotMonitorBotRequest>(req.Body, BotMonitorRequestJson.Options);
         }
         catch
         {
@@ -539,8 +537,7 @@ public sealed class BotMonitorFunctions
         CreateBotMonitorBotTypeRequest? body;
         try
         {
-            body = await JsonSerializer.DeserializeAsync<CreateBotMonitorBotTypeRequest>(req.Body,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            body = await JsonSerializer.DeserializeAsync<CreateBotMonitorBotTypeRequest>(req.Body, BotMonitorRequestJson.Options);
         }
         catch
         {
@@ -633,8 +630,7 @@ public sealed class BotMonitorFunctions
         BotMonitorMagicLinkRequest? body;
         try
         {
-            body = await JsonSerializer.DeserializeAsync<BotMonitorMagicLinkRequest>(req.Body,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            body = await JsonSerializer.DeserializeAsync<BotMonitorMagicLinkRequest>(req.Body, BotMonitorRequestJson.Options);
         }
         catch
         {

@@ -90,8 +90,9 @@ public sealed class BotMonitorHeartbeatService
         BotMonitorHeartbeatPayload payload;
         try
         {
-            payload = System.Text.Json.JsonSerializer.Deserialize<BotMonitorHeartbeatPayload>(body.Span,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            payload = System.Text.Json.JsonSerializer.Deserialize<BotMonitorHeartbeatPayload>(
+                body.Span,
+                BotMonitorRequestJson.Options)
                 ?? new BotMonitorHeartbeatPayload();
         }
         catch

@@ -39,6 +39,7 @@ var host = new HostBuilder()
         // UseAuthorization() pipeline or automatic [Authorize] enforcement —
         // AuthEnforcementMiddleware does it manually via HttpContext.AuthenticateAsync(),
         // then TenantContextMiddleware checks the authenticated user's tenant access.
+        builder.UseMiddleware<FunctionExceptionLoggingMiddleware>();
         builder.UseMiddleware<AuthEnforcementMiddleware>();
         builder.UseMiddleware<TenantContextMiddleware>();
         builder.UseMiddleware<FeatureRouteEntitlementMiddleware>();

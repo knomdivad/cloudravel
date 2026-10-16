@@ -92,8 +92,8 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
               AND (@botTypeKey IS NULL OR b.bot_type_key = @botTypeKey)
             ORDER BY b.display_name
             """;
-        var rows = await conn.QueryAsync<dynamic>(sql, new { tenantId, ownerUserId, botTypeKey });
-        return rows.Select(MapBotRow).ToList();
+        var rows = await conn.QueryAsync<BotMonitorBotListRow>(sql, new { tenantId, ownerUserId, botTypeKey });
+        return rows.Select(r => MapBotRow(r)).ToList();
     }
 
     public async Task<IReadOnlyList<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>> ListAllBotsAsync(
@@ -119,12 +119,12 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
               AND (@botTypeKey IS NULL OR b.bot_type_key = @botTypeKey)
             ORDER BY t.name, b.display_name
             """;
-        var rows = await conn.QueryAsync<dynamic>(sql, new { filterTenantId, botTypeKey });
+        var rows = await conn.QueryAsync<BotMonitorBotListRow>(sql, new { filterTenantId, botTypeKey });
         var list = new List<(BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck, string TenantName)>();
-        foreach (var r in rows)
+        foreach (var row in rows)
         {
-            var mapped = MapBotRow(r);
-            list.Add((mapped.Bot, mapped.State, mapped.LastKeepCheck, (string)r.TenantName));
+            var mapped = MapBotRow(row);
+            list.Add((mapped.Bot, mapped.State, mapped.LastKeepCheck, row.TenantName ?? string.Empty));
         }
 
         return list;
@@ -564,23 +564,23 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
         BotTypeKey = r.BotTypeKey is null ? "other_plugin" : (string)r.BotTypeKey,
     };
 
-    private static (BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck) MapBotRow(dynamic r)
+    private static (BotMonitorBot Bot, BotMonitorBotState? State, string? LastKeepCheck) MapBotRow(BotMonitorBotListRow r)
     {
         var bot = new BotMonitorBot
         {
             BotId = r.BotId,
             TenantId = r.TenantId,
             DisplayName = r.DisplayName,
-            Platform = ParsePlatform((string)r.Platform),
+            Platform = ParsePlatform(r.Platform),
             TokenHash = r.TokenHash,
             HmacSecretEnc = r.HmacSecretEnc,
             CheckinIntervalMinutes = r.CheckinIntervalMinutes,
             CreatedAt = r.CreatedAt,
             RevokedAt = r.RevokedAt,
             OwnerUserId = r.OwnerUserId,
-            OwnerDisplayName = r.OwnerDisplayName as string,
-            BotTypeKey = r.BotTypeKey is null ? "other_plugin" : (string)r.BotTypeKey,
-            BotTypeDisplayName = r.BotTypeDisplayName as string,
+            OwnerDisplayName = r.OwnerDisplayName,
+            BotTypeKey = string.IsNullOrWhiteSpace(r.BotTypeKey) ? "other_plugin" : r.BotTypeKey,
+            BotTypeDisplayName = r.BotTypeDisplayName,
         };
         BotMonitorBotState? state = r.LastSeenAt is null && r.LastStatus is null
             ? null
@@ -589,11 +589,34 @@ public sealed class BotMonitorRepository : IBotMonitorRepository
                 BotId = bot.BotId,
                 TenantId = bot.TenantId,
                 LastSeenAt = r.LastSeenAt,
-                LastStatus = r.LastStatus is null ? null : ParseStatus((string)r.LastStatus),
+                LastStatus = r.LastStatus is null ? null : ParseStatus(r.LastStatus),
                 LastError = r.LastError,
                 LastErrorAt = r.LastErrorAt,
             };
-        return (bot, state, r.LastKeepCheck as string);
+        return (bot, state, r.LastKeepCheck);
+    }
+
+    private sealed class BotMonitorBotListRow
+    {
+        public Guid BotId { get; set; }
+        public Guid TenantId { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public string Platform { get; set; } = string.Empty;
+        public string? BotTypeKey { get; set; }
+        public string? BotTypeDisplayName { get; set; }
+        public string TokenHash { get; set; } = string.Empty;
+        public string HmacSecretEnc { get; set; } = string.Empty;
+        public int CheckinIntervalMinutes { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? RevokedAt { get; set; }
+        public Guid? OwnerUserId { get; set; }
+        public string? OwnerDisplayName { get; set; }
+        public DateTime? LastSeenAt { get; set; }
+        public string? LastStatus { get; set; }
+        public string? LastError { get; set; }
+        public DateTime? LastErrorAt { get; set; }
+        public string? LastKeepCheck { get; set; }
+        public string? TenantName { get; set; }
     }
 
     private static string PlatformToDb(BotMonitorPlatform p) => p switch
