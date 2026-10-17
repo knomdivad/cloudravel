@@ -59,7 +59,7 @@ Link an organization before creating bots: `POST /api/bot-monitor/registry/tenan
 
 Bot types live in the `bot_monitor_bot_types` lookup table (separate from the `platform` transport field on each bot). Seeded keys include `grokbot`, `chatgpt`, `muse_meta`, `openclaw`, `hermes`, `dot`, and `other_plugin`. System administrators can list types with `GET /api/bot-monitor/registry/bot-types` and add new active types with `POST /api/bot-monitor/registry/bot-types` and JSON `{"typeKey":"my_agent","displayName":"My agent"}`.
 
-When registering a bot, set `botTypeKey` on `POST /api/bot-monitor/registry/bots` alongside `platform`. The `platform` field accepts case-insensitive enum names (for example `other`, `grokBot`, `email`) or the numeric enum value (`0` GrokBot, `1` Email, `2` Other):
+When registering a bot, set `botTypeKey` on `POST /api/bot-monitor/registry/bots` alongside `platform`. Use a case-insensitive enum name (for example `other`, `grokBot`, `email`) or an unquoted JSON number for a defined value (`0` GrokBot, `1` Email, `2` Other). Quoted digit strings such as `"2"` or `"-1"` are rejected.
 
 
 ```json

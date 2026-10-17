@@ -24,6 +24,7 @@ public sealed class BotMonitorRequestJsonTests
     [InlineData("""{"platform":99}""")]
     [InlineData("""{"platform":-1}""")]
     [InlineData("""{"platform":"99"}""")]
+    [InlineData("""{"platform":"-1"}""")]
     [InlineData("""{"platform":"2"}""")]
     [InlineData("""{"platform":"1,2"}""")]
     [InlineData("""{"platform":"Email,Other"}""")]
