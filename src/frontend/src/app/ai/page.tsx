@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { queryAi } from '../../lib/api';
+import { newId } from '../../lib/id';
 import type { AiQueryResponse, AiToolInvocation } from '../../lib/types';
 
 interface ChatMessage {
@@ -55,7 +56,7 @@ export default function AiPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [conversationId] = useState(() => crypto.randomUUID());
+  const [conversationId] = useState(() => newId());
   const [mode, setMode] = useState<string>('analyst');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -70,7 +71,7 @@ export default function AiPage() {
       if (!text || !tenantId || isLoading) return;
 
       const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: newId(),
         role: 'user',
         content: text,
         timestamp: new Date(),
@@ -88,7 +89,7 @@ export default function AiPage() {
         });
 
         const assistantMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: newId(),
           role: 'assistant',
           content: response.response,
           toolsUsed: response.toolsUsed,
@@ -99,7 +100,7 @@ export default function AiPage() {
         setMessages((prev) => [...prev, assistantMsg]);
       } catch (err: any) {
         const errorMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: newId(),
           role: 'system',
           content: `Error: ${err.message || 'Failed to get AI response. Please try again.'}`,
           timestamp: new Date(),

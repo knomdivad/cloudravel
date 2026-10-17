@@ -1,6 +1,6 @@
 import { InteractionRequiredAuthError } from '@azure/msal-browser';
 import { apiScopes } from './auth';
-import { msalInstance } from './msalInstance';
+import { getMsalInstance } from './msalInstance';
 import { getStoredLocalToken } from './localAuth';
 import type {
   TenantSummary,
@@ -48,6 +48,11 @@ async function getAccessToken(): Promise<string> {
   const local = getStoredLocalToken();
   if (local) {
     return local.token;
+  }
+
+  const msalInstance = getMsalInstance();
+  if (!msalInstance) {
+    throw new Error('No authenticated user. Please sign in.');
   }
 
   const accounts = msalInstance.getAllAccounts();
