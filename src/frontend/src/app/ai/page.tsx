@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { queryAi } from '../../lib/api';
+import { newId } from '../../lib/id';
 import type { AiQueryResponse, AiToolInvocation } from '../../lib/types';
 
 interface ChatMessage {
@@ -55,7 +56,7 @@ export default function AiPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [conversationId] = useState(() => crypto.randomUUID());
+  const [conversationId] = useState(() => newId());
   const [mode, setMode] = useState<string>('analyst');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -70,7 +71,7 @@ export default function AiPage() {
       if (!text || !tenantId || isLoading) return;
 
       const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: newId(),
         role: 'user',
         content: text,
         timestamp: new Date(),
@@ -88,7 +89,7 @@ export default function AiPage() {
         });
 
         const assistantMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: newId(),
           role: 'assistant',
           content: response.response,
           toolsUsed: response.toolsUsed,
@@ -99,7 +100,7 @@ export default function AiPage() {
         setMessages((prev) => [...prev, assistantMsg]);
       } catch (err: any) {
         const errorMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: newId(),
           role: 'system',
           content: `Error: ${err.message || 'Failed to get AI response. Please try again.'}`,
           timestamp: new Date(),
@@ -134,7 +135,7 @@ export default function AiPage() {
           <h1 className="text-xl font-bold">AI Insights</h1>
           <p className="text-sm text-gray-500 mt-1">
             Ask questions about {currentTenant?.displayName}&apos;s multi-cloud environment.
-            Answers are grounded in real inventory data — never fabricated.
+            Answers are grounded in real inventory data, never fabricated.
           </p>
         </div>
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
@@ -168,7 +169,7 @@ export default function AiPage() {
               </h3>
               <p className="text-sm text-gray-500 mb-6 max-w-md">
                 Ask me about your inventory, changes, security findings, or recommendations.
-                I use real-time data queries — never guessing.
+                I use real-time data queries, never guessing.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl w-full">
                 {(SUGGESTED_QUERIES[mode] ?? SUGGESTED_QUERIES.analyst).map((q, i) => (
@@ -276,13 +277,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {message.toolsUsed && message.toolsUsed.length > 0 && (
           <details className="text-xs text-gray-400">
             <summary className="cursor-pointer hover:text-gray-600">
-              Used {message.toolsUsed.length} tool{message.toolsUsed.length > 1 ? 's' : ''} —{' '}
+              Used {message.toolsUsed.length} tool{message.toolsUsed.length > 1 ? 's' : ''}:{' '}
               {message.usage && `${message.usage.totalTokens} tokens`}
             </summary>
             <div className="mt-1 space-y-0.5 pl-2 border-l-2 border-gray-200">
               {message.toolsUsed.map((t, i) => (
                 <div key={i} className="font-mono">
-                  {t.toolName}({t.arguments?.slice(0, 80)}) — {t.durationMs}ms
+                  {t.toolName}({t.arguments?.slice(0, 80)}): {t.durationMs}ms
                 </div>
               ))}
             </div>

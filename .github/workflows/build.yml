@@ -152,6 +152,10 @@ jobs:
         working-directory: ${{ env.FRONTEND_PATH }}
         run: npm run test:help
 
+      - name: Unit tests
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm run test:unit
+
       - name: Build
         working-directory: ${{ env.FRONTEND_PATH }}
         run: npm run build
@@ -160,6 +164,17 @@ jobs:
           NEXT_PUBLIC_AZURE_AD_CLIENT_ID: ${{ vars.AZURE_AD_CLIENT_ID }}
           NEXT_PUBLIC_AZURE_AD_TENANT_ID: ${{ vars.AZURE_AD_TENANT_ID }}
           NEXT_PUBLIC_API_SCOPE: api://cloudravel-api/access_as_user
+
+      - name: Install Playwright browsers
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npx playwright install chromium --with-deps
+
+      - name: Map non-localhost host for insecure-context e2e
+        run: echo "127.0.0.1 cloudravel-insecure.test" | sudo tee -a /etc/hosts
+
+      - name: E2E tests (non-secure HTTP)
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm run test:e2e
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -5,7 +5,7 @@ import { EventType } from '@azure/msal-browser';
 import { SWRConfig } from 'swr';
 import { loginRequest } from '../lib/auth';
 import { swrConfig } from '../lib/hooks';
-import { msalInstance } from '../lib/msalInstance';
+import { entraConfigured, entraBlockedByInsecureContext, getMsalInstance } from '../lib/msalInstance';
 import { TenantProvider } from '../contexts/TenantContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
@@ -13,10 +13,9 @@ import './globals.css';
 import React, { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 
-const entraConfigured = Boolean(process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID);
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const [msalReady, setMsalReady] = useState(false);
+  const [msalEnabled, setMsalEnabled] = useState(false);
 
   // Client component, so the server-only `metadata` export isn't available here.
   useEffect(() => {
@@ -24,14 +23,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   }, []);
 
   useEffect(() => {
+    const msalInstance = getMsalInstance();
+    if (!msalInstance) {
+      setMsalEnabled(false);
+      setMsalReady(true);
+      return;
+    }
+
+    setMsalEnabled(true);
     msalInstance.initialize().then(() => {
-      // Set the first account as active if available
       const accounts = msalInstance.getAllAccounts();
       if (accounts.length > 0 && !msalInstance.getActiveAccount()) {
         msalInstance.setActiveAccount(accounts[0]);
       }
 
-      // Listen for sign-in events
       msalInstance.addEventCallback((event) => {
         if (event.eventType === EventType.LOGIN_SUCCESS && event.payload) {
           const payload = event.payload as any;
@@ -57,31 +62,60 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     );
   }
 
+  const appTree = (
+    <SWRConfig value={swrConfig}>
+      <AuthProvider msalEnabled={msalEnabled}>
+        <AuthGate msalEnabled={msalEnabled}>{children}</AuthGate>
+      </AuthProvider>
+    </SWRConfig>
+  );
+
+  const msalInstance = getMsalInstance();
+
   return (
     <html lang="en">
       <body className="bg-gray-50 text-gray-900 antialiased">
-        <MsalProvider instance={msalInstance}>
-          <SWRConfig value={swrConfig}>
-            <AuthProvider>
-              <AuthGate>{children}</AuthGate>
-            </AuthProvider>
-          </SWRConfig>
-        </MsalProvider>
+        {msalEnabled && msalInstance ? (
+          <MsalProvider instance={msalInstance}>{appTree}</MsalProvider>
+        ) : (
+          appTree
+        )}
       </body>
     </html>
   );
 }
 
+function EntraSignInSection() {
+  const { instance } = useMsal();
+
+  return (
+    <>
+      <button
+        onClick={() => instance.loginRedirect(loginRequest)}
+        className="w-full bg-azure-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-azure-700 transition-colors"
+      >
+        Sign in with Microsoft
+      </button>
+      <p className="text-xs text-gray-400 mt-4 mb-6">Secured by Microsoft Entra ID</p>
+      <div className="flex items-center gap-3 mb-6">
+        <div className="flex-1 h-px bg-gray-200" />
+        <span className="text-xs text-gray-400 uppercase">or</span>
+        <div className="flex-1 h-px bg-gray-200" />
+      </div>
+    </>
+  );
+}
+
 // ============================================================================
-// Auth gate — Entra ID (MSAL) and local username/password are independent
+// Auth gate: Entra ID (MSAL) and local username/password are independent
 // login paths; either one being active is enough to show the app.
 // ============================================================================
 
-function AuthGate({ children }: { children: React.ReactNode }) {
+function AuthGate({ children, msalEnabled }: { children: React.ReactNode; msalEnabled: boolean }) {
   const { isAuthenticated } = useAuth();
 
   if (!isAuthenticated) {
-    return <LoginPage />;
+    return <LoginPage msalEnabled={msalEnabled} />;
   }
 
   return (
@@ -91,12 +125,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   );
 }
 
-function LoginPage() {
-  const { instance } = useMsal();
+function LoginPage({ msalEnabled }: { msalEnabled: boolean }) {
   const { loginLocal, loginError } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showEntraHttpsBanner, setShowEntraHttpsBanner] = useState(false);
+
+  useEffect(() => {
+    setShowEntraHttpsBanner(entraBlockedByInsecureContext());
+  }, []);
 
   const handleLocalLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,24 +159,16 @@ function LoginPage() {
           </p>
         </div>
 
-        {entraConfigured && (
-          <>
-            <button
-              onClick={() => instance.loginRedirect(loginRequest)}
-              className="w-full bg-azure-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-azure-700 transition-colors"
-            >
-              Sign in with Microsoft
-            </button>
-            <p className="text-xs text-gray-400 mt-4 mb-6">
-              Secured by Microsoft Entra ID
-            </p>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-xs text-gray-400 uppercase">or</span>
-              <div className="flex-1 h-px bg-gray-200" />
-            </div>
-          </>
+        {showEntraHttpsBanner && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-[#46224d] bg-[#131315] px-3 py-2 text-sm text-[#e3dbd3] text-left shadow-sm ring-1 ring-[#46224d]/40"
+          >
+            Entra sign-in needs HTTPS; use local login below.
+          </div>
         )}
+
+        {msalEnabled && entraConfigured && <EntraSignInSection />}
 
         <form onSubmit={handleLocalLogin} className="text-left space-y-3" noValidate>
           <div>
@@ -221,7 +251,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const { organizations, currentOrg, currentTenant, selectTenant, refreshOrganizations, isOrgAdmin } = useTenantContext();
   const pathname = usePathname();
   // /admin is system-wide (not scoped to the selected organization), so the
-  // top bar shouldn't show the currently-selected org's name/status there —
+  // top bar shouldn't show the currently-selected org's name/status there;
   // it would misleadingly imply the page is about that one org.
   const isSystemWidePage = pathname === '/admin';
 
@@ -309,7 +339,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
                 )}
               </>
             ) : (
-              <p className="text-xs text-gray-500">No organizations yet — create one to begin.</p>
+              <p className="text-xs text-gray-500">No organizations yet: create one to begin.</p>
             )}
           </div>
         )}
@@ -556,7 +586,7 @@ function CloudRavelLogo({ className }: { className?: string }) {
         </radialGradient>
       </defs>
 
-      {/* Cloud body — overlapping puffs, no strokes, so the seams stay invisible */}
+      {/* Cloud body: overlapping puffs, no strokes, so the seams stay invisible */}
       <rect x="18" y="68" width="164" height="58" rx="29" fill="url(#cr-base)" />
       <circle cx="56" cy="82" r="38" fill="url(#cr-blue)" />
       <circle cx="102" cy="52" r="46" fill="url(#cr-teal)" />
@@ -593,7 +623,7 @@ function LoadingSpinner({ text }: { text?: string }) {
 }
 
 // ============================================================================
-// Create Organization modal — a new workspace. Clouds are added to it afterwards
+// Create Organization modal: a new workspace. Clouds are added to it afterwards
 // (from the Clouds page); creating one never onboards a cloud.
 // ============================================================================
 

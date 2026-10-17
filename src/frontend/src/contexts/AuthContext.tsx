@@ -20,12 +20,92 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 /**
- * Unifies session state across the two independent login paths — Entra ID
- * SSO (via MSAL) and local username/password — so the rest of the app
+ * Unifies session state across the two independent login paths: Entra ID
+ * SSO (via MSAL) and local username/password, so the rest of the app
  * (layout.tsx's login gate, AppShell's user display) doesn't need to know
  * which one is active.
  */
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+  msalEnabled,
+}: {
+  children: React.ReactNode;
+  msalEnabled: boolean;
+}) {
+  if (msalEnabled) {
+    return <AuthProviderWithMsal>{children}</AuthProviderWithMsal>;
+  }
+  return <AuthProviderLocalOnly>{children}</AuthProviderLocalOnly>;
+}
+
+function AuthProviderLocalOnly({ children }: { children: React.ReactNode }) {
+  const [localSession, setLocalSession] = useState<LocalSession | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [systemRole, setSystemRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLocalSession(getStoredLocalToken());
+  }, []);
+
+  const authMode: 'entra' | 'local' | null = localSession ? 'local' : null;
+
+  useEffect(() => {
+    if (authMode === null) {
+      setSystemRole(null);
+      return;
+    }
+    let cancelled = false;
+    getMe()
+      .then((me) => {
+        if (!cancelled) setSystemRole(me.systemRole);
+      })
+      .catch(() => {
+        if (!cancelled) setSystemRole('member');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authMode]);
+
+  const userName = localSession?.user.displayName || 'User';
+
+  const loginLocal = useCallback(async (username: string, password: string) => {
+    setLoginError(null);
+    try {
+      const session = await apiLoginLocal(username, password);
+      setLocalSession(session);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Login failed.';
+      setLoginError(message);
+      throw err;
+    }
+  }, []);
+
+  const logout = useCallback(() => {
+    clearStoredLocalToken();
+    setLocalSession(null);
+    setSystemRole(null);
+  }, []);
+
+  return (
+    <AuthContext.Provider
+      value={{
+        isAuthenticated: authMode !== null,
+        authMode,
+        userName,
+        systemRole,
+        isSystemAdmin: systemRole === 'system_admin',
+        loginError,
+        loginLocal,
+        logout,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+function AuthProviderWithMsal({ children }: { children: React.ReactNode }) {
   const { instance, accounts } = useMsal();
   const [localSession, setLocalSession] = useState<LocalSession | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -38,15 +118,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const hasMsalAccount = accounts.length > 0;
   const authMode: 'entra' | 'local' | null = hasMsalAccount ? 'entra' : localSession ? 'local' : null;
 
-  // Resolve the system role once authenticated. /api/auth/me works uniformly for
-  // both local and Entra sessions (Entra tokens carry no role claim of their own).
   useEffect(() => {
-    if (authMode === null) { setSystemRole(null); return; }
+    if (authMode === null) {
+      setSystemRole(null);
+      return;
+    }
     let cancelled = false;
     getMe()
-      .then((me) => { if (!cancelled) setSystemRole(me.systemRole); })
-      .catch(() => { if (!cancelled) setSystemRole('member'); });
-    return () => { cancelled = true; };
+      .then((me) => {
+        if (!cancelled) setSystemRole(me.systemRole);
+      })
+      .catch(() => {
+        if (!cancelled) setSystemRole('member');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [authMode]);
 
   const userName = hasMsalAccount

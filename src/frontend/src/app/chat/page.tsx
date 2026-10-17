@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTenantContext } from '../../contexts/TenantContext';
 import { askCustomerChat } from '../../lib/api';
+import { newId } from '../../lib/id';
 import type { AiUsage } from '../../lib/types';
 
 interface ChatMessage {
@@ -28,7 +29,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [conversationId] = useState(() => crypto.randomUUID());
+  const [conversationId] = useState(() => newId());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -42,7 +43,7 @@ export default function ChatPage() {
       if (!message || !tenantId || isLoading) return;
 
       const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: newId(),
         role: 'user',
         content: message,
         timestamp: new Date(),
@@ -54,7 +55,7 @@ export default function ChatPage() {
       try {
         const response = await askCustomerChat(tenantId, { message, conversationId });
         const assistantMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: newId(),
           role: 'assistant',
           content: response.response,
           refused: response.refused,
@@ -64,7 +65,7 @@ export default function ChatPage() {
         setMessages((prev) => [...prev, assistantMsg]);
       } catch (err: any) {
         const errorMsg: ChatMessage = {
-          id: crypto.randomUUID(),
+          id: newId(),
           role: 'system',
           content: `Error: ${err.message || 'Failed to get a response. Please try again.'}`,
           timestamp: new Date(),
@@ -96,7 +97,7 @@ export default function ChatPage() {
         <h1 className="text-xl font-bold">Assistant</h1>
         <p className="text-sm text-gray-500 mt-1">
           Answers about {currentTenant?.displayName}&apos;s cloud workspace, grounded in your own data.
-          The Assistant is read-only — it cannot change anything.
+          The Assistant is read-only: it cannot change anything.
         </p>
       </div>
 
@@ -112,7 +113,7 @@ export default function ChatPage() {
               </div>
               <h3 className="text-lg font-semibold text-gray-700 mb-2">Ask about your workspace</h3>
               <p className="text-sm text-gray-500 mb-6 max-w-md">
-                I answer only from your workspace&apos;s live data. If I don&apos;t know, I&apos;ll say so —
+                I answer only from your workspace&apos;s live data. If I don&apos;t know, I&apos;ll say so,
                 I never guess.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl w-full">
@@ -176,7 +177,7 @@ export default function ChatPage() {
             </button>
           </div>
           <p className="text-xs text-gray-400 mt-2 text-center">
-            Read-only and grounded in your workspace data. The Assistant cannot take actions —
+            Read-only and grounded in your workspace data. The Assistant cannot take actions;
             changes go through the approvals workflow.
           </p>
         </div>
