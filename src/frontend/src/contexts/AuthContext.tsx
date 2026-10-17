@@ -20,8 +20,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 /**
- * Unifies session state across the two independent login paths — Entra ID
- * SSO (via MSAL) and local username/password — so the rest of the app
+ * Unifies session state across the two independent login paths: Entra ID
+ * SSO (via MSAL) and local username/password, so the rest of the app
  * (layout.tsx's login gate, AppShell's user display) doesn't need to know
  * which one is active.
  */

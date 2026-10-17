@@ -107,7 +107,7 @@ function EntraSignInSection() {
 }
 
 // ============================================================================
-// Auth gate — Entra ID (MSAL) and local username/password are independent
+// Auth gate: Entra ID (MSAL) and local username/password are independent
 // login paths; either one being active is enough to show the app.
 // ============================================================================
 
@@ -162,7 +162,7 @@ function LoginPage({ msalEnabled }: { msalEnabled: boolean }) {
         {showEntraHttpsBanner && (
           <div
             role="alert"
-            className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 text-left"
+            className="mb-4 rounded-lg border border-[#46224d] bg-[#131315] px-3 py-2 text-sm text-[#e3dbd3] text-left shadow-sm ring-1 ring-[#46224d]/40"
           >
             Entra sign-in needs HTTPS; use local login below.
           </div>
@@ -251,7 +251,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const { organizations, currentOrg, currentTenant, selectTenant, refreshOrganizations, isOrgAdmin } = useTenantContext();
   const pathname = usePathname();
   // /admin is system-wide (not scoped to the selected organization), so the
-  // top bar shouldn't show the currently-selected org's name/status there —
+  // top bar shouldn't show the currently-selected org's name/status there;
   // it would misleadingly imply the page is about that one org.
   const isSystemWidePage = pathname === '/admin';
 
@@ -339,7 +339,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
                 )}
               </>
             ) : (
-              <p className="text-xs text-gray-500">No organizations yet — create one to begin.</p>
+              <p className="text-xs text-gray-500">No organizations yet: create one to begin.</p>
             )}
           </div>
         )}
@@ -586,7 +586,7 @@ function CloudRavelLogo({ className }: { className?: string }) {
         </radialGradient>
       </defs>
 
-      {/* Cloud body — overlapping puffs, no strokes, so the seams stay invisible */}
+      {/* Cloud body: overlapping puffs, no strokes, so the seams stay invisible */}
       <rect x="18" y="68" width="164" height="58" rx="29" fill="url(#cr-base)" />
       <circle cx="56" cy="82" r="38" fill="url(#cr-blue)" />
       <circle cx="102" cy="52" r="46" fill="url(#cr-teal)" />
@@ -623,7 +623,7 @@ function LoadingSpinner({ text }: { text?: string }) {
 }
 
 // ============================================================================
-// Create Organization modal — a new workspace. Clouds are added to it afterwards
+// Create Organization modal: a new workspace. Clouds are added to it afterwards
 // (from the Clouds page); creating one never onboards a cloud.
 // ============================================================================
 

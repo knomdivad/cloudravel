@@ -109,7 +109,7 @@ async function apiCall<T>(
       message = error.message || error.Message || message;
       if (error.code || error.Code) message = `[${error.code || error.Code}] ${message}`;
     } catch {
-      if (raw?.trim()) message = `${message} — ${raw.trim().slice(0, 200)}`;
+      if (raw?.trim()) message = `${message}: ${raw.trim().slice(0, 200)}`;
     }
     throw new Error(message);
   }
@@ -255,7 +255,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
 // Auth / identity
 // ============================================================================
 
-/** The signed-in user's identity + system role — works for local and Entra sessions. */
+/** The signed-in user's identity + system role: works for local and Entra sessions. */
 export async function getMe(): Promise<Me> {
   return apiCall<Me>('/auth/me', NO_WORKSPACE);
 }
@@ -265,7 +265,7 @@ export async function getMe(): Promise<Me> {
 // ============================================================================
 
 export async function getSystemSettings(): Promise<SystemSettings> {
-  // /system/* — Azure Functions reserves /admin for host management (/api/admin/* 404s).
+  // /system/*: Azure Functions reserves /admin for host management (/api/admin/* 404s).
   return apiCall<SystemSettings>('/system/settings', NO_WORKSPACE);
 }
 
@@ -349,7 +349,7 @@ export async function updateUser(
 }
 
 // ============================================================================
-// Organization admin API (org_admin only) — users + SSO
+// Organization admin API (org_admin only): users + SSO
 // ============================================================================
 
 export async function getOrgUsers(orgId: string): Promise<AdminUser[]> {

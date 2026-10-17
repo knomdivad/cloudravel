@@ -12,7 +12,7 @@ export default defineConfig({
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? `http://${insecureHost}:${port}`,
   },
   webServer: {
-    command: `npx serve out -l ${port}`,
+    command: `node e2e/static-server.mjs`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI,
     cwd: __dirname,

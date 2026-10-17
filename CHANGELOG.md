@@ -13,6 +13,11 @@ behaviour someone may already depend on.
 
 ### Fixed
 
+- The web UI no longer shows a blank page when served over plain HTTP on a
+  non-localhost origin (for example a LAN or tailnet IP). Microsoft Entra
+  sign-in is skipped until the page is a secure context (HTTPS or localhost);
+  local username/password login still works, with a banner when Entra is
+  configured but HTTPS is required.
 - AI Insights no longer reports every HTTP 429 as a traffic rate limit.
   OpenAI returns 429 for exhausted billing quota, inactive billing, and a 0 TPM
   project cap; those now map to `AI_QUOTA_EXCEEDED` and the provider's message
