@@ -36,9 +36,10 @@ var host = new HostBuilder()
     .ConfigureFunctionsWebApplication(builder =>
     {
         // Isolated-worker functions don't get ASP.NET Core's UseAuthentication()/
-        // UseAuthorization() pipeline or automatic [Authorize] enforcement —
+        // UseAuthorization() pipeline or automatic [Authorize] enforcement:
         // AuthEnforcementMiddleware does it manually via HttpContext.AuthenticateAsync(),
         // then TenantContextMiddleware checks the authenticated user's tenant access.
+        builder.UseMiddleware<FunctionExceptionLoggingMiddleware>();
         builder.UseMiddleware<AuthEnforcementMiddleware>();
         builder.UseMiddleware<TenantContextMiddleware>();
         builder.UseMiddleware<FeatureRouteEntitlementMiddleware>();
@@ -112,7 +113,7 @@ var host = new HostBuilder()
 
         // Customer chat: tenant-scoped grounding gateway + shared-store abuse
         // caps (per-user/per-tenant windows, daily token cap with output
-        // headroom) — counters live in the SQL DB so limits hold on scaled
+        // headroom); counters live in the SQL DB so limits hold on scaled
         // deployments, not just single-instance.
         services.AddScoped<ChatContextGateway>();
         services.AddSingleton<IChatUsageStore, SqlChatUsageStore>();
@@ -127,12 +128,12 @@ var host = new HostBuilder()
                 minOutputTokenHeadroom: int.TryParse(cfg["Chat:MaxOutputTokens"], out var o) ? o : 4_000);
         });
 
-        // Local username/password auth — the non-Entra login path
+        // Local username/password auth: the non-Entra login path
         services.AddScoped<ILocalAuthService, LocalAuthService>();
         services.AddSingleton<AssessmentPrincipalRateLimiter>();
 
         // Job queue: Service Bus when configured (default on Azure), otherwise
-        // the SQL-table-backed queue — needs no infra beyond the database, so
+        // the SQL-table-backed queue, which needs no infra beyond the database, so
         // the host never hard-depends on Service Bus just to start.
         var serviceBusConnection = config["ServiceBusConnection"]
             ?? config.GetConnectionString("ServiceBusConnection");
@@ -198,7 +199,7 @@ var host = new HostBuilder()
             services.AddSingleton<ISecretStore, OpenBaoSecretStore>();
         }
 
-        // Authentication — two independent login paths, both accepted on every
+        // Authentication: two independent login paths, both accepted on every
         // protected endpoint. LocalAuth:JwtSigningKey is required (fail closed).
         var signingKey = config["LocalAuth:JwtSigningKey"];
         if (string.IsNullOrWhiteSpace(signingKey))
@@ -235,7 +236,7 @@ var host = new HostBuilder()
             .AddPolicyScheme("EntraOrLocal", "EntraOrLocal", options =>
             {
                 // Route each request to whichever scheme actually issued its
-                // token, by peeking at the (unvalidated) `iss` claim — the
+                // token, by peeking at the (unvalidated) `iss` claim; the
                 // real signature/expiry validation happens in the scheme it's
                 // forwarded to, not here.
                 options.ForwardDefaultSelector = httpContext =>
