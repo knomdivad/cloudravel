@@ -28,7 +28,7 @@ behaviour someone may already depend on.
   asset upload is disabled (SBOM stays as a workflow artifact and a cosign
   attestation on the image digest).
 
-## [1.0.0] — 2026-08-26
+## [1.0.0], 2026-08-26
 
 First versioned release. Marks the security, CI, test, governance, and Helm
 hardening stack as the baseline for anyone deploying or forking from here.
@@ -38,7 +38,7 @@ hardening stack as the baseline for anyone deploying or forking from here.
 - Proposing a remediation through the AI assistant now requires the
   `cloud_admin` role, matching `POST /api/remediations`. Previously
   `POST /api/ai/query` performed no authorization check, so any workspace
-  member — including `read_only` — could propose remediations through the
+  member, including `read_only`, could propose remediations through the
   assistant's `propose_remediation` tool. Where a tenant had
   `AutoRemediationMode = Auto` and the playbook was low risk, that reached live
   cloud infrastructure. **Behaviour change:** read-only users who relied on this
